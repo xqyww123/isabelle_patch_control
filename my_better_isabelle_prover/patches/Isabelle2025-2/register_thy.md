@@ -9,7 +9,12 @@ Makarius's theory-loader refactoring (the same change renamed `use_thy` to
 official direction is to process individual theories via the Scala-side
 `isabelle process_theories` / headless PIDE, not the low-level ML loader.
 
-`Isa-REPL` depends on `register_thy` to inject an **already-built, in-memory**
+**Update (2026-09-23): as of Isa-REPL `609a65e` (theory-table layering), Isa-REPL
+no longer depends on `register_thy` at all — it layers its own per-connection
+theory table over `Thy_Info` instead.  The rationale below records why the patch
+was originally needed; whether to keep the patch is a separate decision (the author's).**
+
+`Isa-REPL` used to depend on `register_thy` to inject an **already-built, in-memory**
 `theory` value into the global loader database (`Thy_Info`'s private
 `global_thys`), so that the theory becomes visible to **Isabelle-internal**
 name resolution — e.g. a later `theory Foo imports T` resolved through
