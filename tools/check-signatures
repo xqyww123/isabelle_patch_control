@@ -1,0 +1,118 @@
+#!/usr/bin/env python3
+"""check-signatures [-C <dir>] <base rev> <rev> <additions file>
+
+Release gate (d) of the migration plan (§5.1), light locale's make_patches.sh check generalised:
+for every .ML file that differs between <base rev> and <rev>, every entry of the signature
+sections of the base version is still present unchanged in <rev>, and the entries added have
+exactly the heads listed in <additions file>.
+
+A signature section is Isabelle style: `signature NAME =` ... `end` at column 0.  An entry starts
+at a specification keyword (val, type, eqtype, datatype, exception, structure, include, sharing);
+its continuation lines are joined, comments dropped, white space squeezed.  A head is
+`<path> <NAME> <keyword> <name>` (the type is not part of it).  The additions file lists one
+head per line; `#` lines and blank lines are ignored.
+"""
+import argparse
+import os
+import re
+from collections import Counter
+from pathlib import Path
+
+from common import Repo, main, run
+
+KEYWORDS = {"val", "type", "eqtype", "datatype", "exception", "structure", "include", "sharing"}
+COMMENT = re.compile(r"\(\*([^*]|\*+[^*)])*\*+\)")
+SECTION = re.compile(r"^signature ([A-Z_0-9]+) *=")
+END = re.compile(r"^end;?\s*$")
+
+
+def entries(text: str) -> Counter:
+    """`NAME: entry` for every entry of every signature section of an ML file."""
+    found = Counter()
+    name = None
+    entry = None
+    inside = False
+
+    def flush():
+        nonlocal entry
+        if entry:
+            e = re.sub(r"[ \t]+", " ", COMMENT.sub(" ", entry)).strip()
+            found[f"{name}: {e}"] += 1
+        entry = None
+
+    for line in text.splitlines():
+        m = SECTION.match(line)
+        if m:
+            name, inside = m.group(1), True
+            continue
+        if inside and END.match(line):
+            flush()
+            inside = False
+            continue
+        if not inside:
+            continue
+        words = COMMENT.sub(" ", line).split()
+        if words and words[0] in KEYWORDS:
+            flush()
+            entry = line
+        elif entry is not None:
+            entry += " " + line
+    return found
+
+
+def head(path: str, entry: str) -> str:
+    name, _, body = entry.partition(": ")
+    return f"{path} {name} " + re.sub(r" *(:|=| of ).*", "", body)
+
+
+def show(repo: Repo, rev: str, path: str) -> str:
+    """The file's content at rev; empty when it does not exist there (a new or deleted file)."""
+    if run(["git", "cat-file", "-e", f"{rev}:{path}"], cwd=repo.common_dir, check=False).returncode:
+        return ""
+    return run(["git", "show", f"{rev}:{path}"], cwd=repo.common_dir).stdout
+
+
+def check(repo: Repo, base: str, rev: str, additions_file: Path, files: list[str] | None = None) -> list[str]:
+    """The problems found (empty = the gate passes)."""
+    if files is None:
+        files = repo.git("diff-tree", "-r", "--name-only", "--no-renames", base, rev).split("\n")
+    problems = []
+    added = []
+    for path in files:
+        if not path.endswith(".ML"):
+            continue
+        before = entries(show(repo, base, path))
+        after = entries(show(repo, rev, path))
+        removed = before - after
+        if removed:
+            problems.append(f"signature entries of {path} changed or disappeared:\n  " + "\n  ".join(sorted(removed.elements())))
+        added += [head(path, e) for e in (after - before).elements()]
+    listed = [line.strip() for line in additions_file.read_text().splitlines()
+              if line.strip() and not line.lstrip().startswith("#")]
+    if sorted(added) != sorted(listed):
+        extra = sorted(Counter(added) - Counter(listed))
+        missing = sorted(Counter(listed) - Counter(added))
+        problems.append(f"the signature additions differ from {additions_file}:"
+                        + "".join(f"\n  not listed: {h}" for h in extra)
+                        + "".join(f"\n  listed but not added: {h}" for h in missing))
+    return problems
+
+
+def cli():
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("-C", metavar="dir", default=os.getcwd(), help="a directory inside the repository")
+    p.add_argument("base")
+    p.add_argument("rev")
+    p.add_argument("additions", type=Path)
+    a = p.parse_args()
+    repo = Repo(Path(a.C))
+    problems = check(repo, a.base, a.rev, a.additions)
+    for problem in problems:
+        print(f"ERROR: {problem}")
+    if problems:
+        return 1
+    n = sum(1 for line in a.additions.read_text().splitlines() if line.strip() and not line.lstrip().startswith("#"))
+    print(f"signature sections: every entry of {a.base} unchanged in {a.rev}, {n} additions as listed")
+
+
+main(cli)

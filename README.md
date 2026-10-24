@@ -144,3 +144,87 @@ Patch targets are keyed by the exact output of `isabelle version`
   [`register_thy.md`](my_better_isabelle_prover/patches/Isabelle2025-2/register_thy.md),
   [`show_types_nv.md`](my_better_isabelle_prover/patches/show_types_nv.md),
   [`expose_map_syn.md`](my_better_isabelle_prover/patches/expose_map_syn.md).
+
+## Working in the Isabelle source repository
+
+The Isabelle source repository is `contrib/Isabelle2025-2` plus its worktrees
+`contrib/Isabelle2025-2-*`. A *feature* is one patch package. Its branches form one
+chain, each based on the one before it (its *base branch*):
+pristine → expose_foreign → future_assign_interrupt → light_locale → local_type_abbrev
+→ localized_record → local_datatype → dev_patches. Branch names carry the Isabelle
+release, as in `Isabelle2025-2/light_locale`; the branches of one release form a
+*release line*.
+
+- *Shared tree*: `contrib/Isabelle2025-2`, on branch `daily`, which only fast-forwards.
+- *Private tree*: `contrib/Isabelle2025-2-<feature>`, the one worktree of that feature's
+  branch. Its `contrib` is a link into the shared tree: never write through it.
+- *Stock tree*: `contrib/Isabelle2025-2-<feature>-stock`, detached at
+  `git merge-base <base branch> <feature branch>`: the tree without your feature, for
+  comparison runs and golden files.
+
+Inside the Isabelle source repository these rules replace CLAUDE.md's section
+"Commit on `main` — never branch", including its sentence that sweeping another
+agent's uncommitted changes into a commit is acceptable. CLAUDE.md's bans apply here
+word for word: "Never use git stash, git checkout, git reset --hard, or any command
+that discards or hides uncommitted changes" and "NEVER run `git clean` (in any form:
+`-f`, `-d`, `-x`, `-X`, etc.)".
+
+**Trees and branches**
+- Edit and commit only in your feature's private tree. Never edit the shared tree or a
+  stock tree. Plans and scratch files go to your project repository's `ai-artifacts/`,
+  never into a tree.
+- Never create, switch, rename or delete a branch, and never add, move or remove a
+  worktree. The repository's hook refuses a new branch unless `ISABELLE_GIT_OWNER=1`
+  is set; only the owner sets it.
+- Only these move a tree's HEAD: your commits and merges in your private tree,
+  `new-tree --stock` for your stock tree, `advance-daily` for the shared tree. Never
+  `git switch`, `git checkout <rev>`, `git reset <rev>` or `git bisect`. To read another
+  revision use `git show <rev>:<path>` or your stock tree.
+- If a hook or script refuses, stop and ask the owner. Never work around it.
+
+**Commits and merges**
+- Stage only changes you made yourself, by explicit path: no `git add -A`, `git add .`,
+  `git commit -a`. Commit only when the owner says so. Never amend, squash or rewrite
+  a commit; never rebase, force-push, cherry-pick, or `git revert -m` a merge.
+- Take in other work only by `git merge` of your base branch, starting from an empty
+  `git status`. Resolve conflicts by editing, commit the merge, then build and test
+  through `run-tree`, then move your stock tree with `new-tree --stock <feature>`.
+- You may merge base commits that no release tag contains yet. You can release only
+  when the last base commit you merged is a base release; merge again once the base
+  has released.
+- Push only on the owner's order.
+
+**Running Isabelle**
+- Run any tree other than the shared tree, stock trees included, only through
+  `run-tree`: it starts Isabelle in a clean environment and asserts the tree's own user
+  directory. Never call that tree's `bin/isabelle`, and never use a tool that finds
+  `isabelle` by itself (Isa-REPL, isabelle-mcp, test drivers).
+- Every `isabelle build` in any tree, including a heap build another command triggers,
+  needs the owner's command or a standing authorization that names that exact tree.
+- After a successful build in a private tree with an empty `git status`, `run-tree`
+  marks the commit tested with a git note. Never write that note yourself. While such a
+  build runs, do not commit, edit or create files in any repository given with `-d`:
+  the note is not written if one of them changed, and `run-tree` names that directory.
+- Probes that need the REPL or isabelle-mcp run on the shared tree only, and only
+  before any commit of your feature reaches `daily`. Every other comparison run uses
+  your stock tree.
+
+**Daily and releases**
+- `daily` advances only through `advance-daily`, run on the owner's order. It lists the
+  sessions that depend on the shared tree; notify them before confirming, and rebuild
+  the heaps with the command it prints afterwards.
+- Release only through `make-patches <feature> <version>`, run on the owner's order. It
+  runs the release gates on a tested commit, creates the release tag last, and
+  generates the package's exact pin on its base package. Never create, move or delete
+  a release tag by hand.
+- On a user's machine the patch tool applies packages in chain order, skipping patches
+  already present, and unpatches in reverse order. Once a higher feature has changed a
+  file, a lower feature's patch for that file reads CONFLICT; that is inherent in
+  stacking.
+- The one exception to merging only your base branch: when the owner opens a new
+  release line, each of its branches merges the same feature's branch of the previous
+  line, in chain order, through `new-tree`; later fixes of the older line are carried
+  forward the same way. A newer line is never merged into an older one.
+
+The scripts (`new-tree`, `run-tree`, `make-patches`, `check-signatures`, `advance-daily`)
+and the repository hook live in [`tools/`](tools/); their toy runs are `tools/tests/run-all.sh`.

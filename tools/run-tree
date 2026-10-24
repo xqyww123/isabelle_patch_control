@@ -1,0 +1,124 @@
+#!/usr/bin/env python3
+"""run-tree <tree> <isabelle arguments...>
+
+Runs <tree>/bin/isabelle (migration plan decision 5; light locale's tools/isabelle-env generalised).
+<tree> is any worktree of the Isabelle source repository except the shared tree: a private tree on
+its own branch, or a stock tree detached at the current merge-base of its feature.  Refused: a
+tree without build products (run new-tree first), a stock tree that is not at the merge base (run
+new-tree --stock), the shared tree, the pristine tree.
+
+Isabelle starts with `env -i` plus a short whitelist, because a process derived from another
+tree's Isabelle inherits that tree's settings (getsettings:13, :71) and would write heaps into the
+wrong user directory.  Before running, ISABELLE_HOME_USER must be $HOME/.isabelle/<tree name> and
+ISABELLE_HEAPS that directory's heaps/ (the values follow from the directory name; nothing is read
+from the tree).
+
+A `build` in a private tree that exits 0 with an empty `git status` before and after and HEAD
+unchanged gets a tested record: `git notes --ref=tested append` on HEAD with the command line and
+the session set `isabelle sessions` resolves from the same selection options.  No record when the
+selection is empty or the command line sets quick_and_dirty or skip_proofs with -o.
+"""
+import datetime
+import getopt
+import os
+import shlex
+import subprocess
+import sys
+from pathlib import Path
+
+from common import Refused, Repo, git, has_products, main, run
+
+PASS_THROUGH = ("HOME", "USER", "LOGNAME", "PATH", "LANG", "LC_ALL", "TERM", "TMPDIR", "DISPLAY")
+BUILD_OPTIONS = "A:B:D:H:NP:RSX:abcd:efg:j:lno:vx:"   # isabelle build (src/Pure/Build/build.scala)
+SELECTION_OPTIONS = {"-B", "-D", "-R", "-X", "-a", "-d", "-g", "-x"}   # the ones `isabelle sessions` takes too
+
+
+def classify(repo: Repo, tree: Path) -> str:
+    """'private' or 'stock', or a refusal."""
+    branch = Repo.head_branch(tree)
+    if branch:
+        name = branch.split("/", 1)[-1]
+        if name == "daily":
+            raise Refused("the shared tree is not run through run-tree")
+        if name == "pristine":
+            raise Refused("the pristine tree has no build products and cannot run")
+        wt = repo.worktree_of(branch)
+        if wt is None or wt["path"] != tree.resolve():
+            raise Refused(f"{tree} is on {branch} but is not that branch's registered worktree")
+        return "private"
+    features = [b for b in repo.branches() if tree.name == b.replace("/", "-", 1) + "-stock"]
+    if len(features) != 1:
+        raise Refused(f"{tree} is detached but is not the stock tree of exactly one feature branch")
+    feature = features[0]
+    merge_base = repo.merge_base(repo.base_of(feature), feature)
+    head = git("rev-parse", "HEAD", cwd=tree)
+    if head != merge_base:
+        raise Refused(f"stock tree {tree} is at {head[:12]} but merge-base({repo.base_of(feature)}, {feature}) "
+                      f"is {merge_base[:12]}: run new-tree --stock {feature}")
+    return "stock"
+
+
+def session_set(isabelle: Path, env: dict, build_args: list[str]) -> list[str] | str:
+    """The sessions `isabelle sessions` resolves from the build's selection options, or the reason
+    there is no tested record."""
+    try:
+        opts, sessions = getopt.gnu_getopt(build_args, BUILD_OPTIONS)
+    except getopt.GetoptError as e:
+        return f"cannot parse the build options ({e})"
+    if any(o == "-o" and v.split("=")[0] in ("quick_and_dirty", "skip_proofs") for o, v in opts):
+        return "the command line sets quick_and_dirty or skip_proofs"
+    selection = [x for o, v in opts if o in SELECTION_OPTIONS for x in ([o, v] if v else [o])]
+    r = run([isabelle, "sessions", *selection, *sessions], env=env, check=False)
+    if r.returncode:
+        return f"isabelle sessions failed: {(r.stderr or r.stdout).strip()}"
+    names = r.stdout.split()
+    return names or "the session selection is empty"
+
+
+def cli():
+    if len(sys.argv) < 3:
+        print(__doc__, file=sys.stderr)
+        return 2
+    tree = Path(sys.argv[1]).resolve()
+    args = sys.argv[2:]
+    top = run(["git", "rev-parse", "--show-toplevel"], cwd=tree, check=False).stdout.strip() if tree.is_dir() else ""
+    if not top or Path(top).resolve() != tree:
+        raise Refused(f"{tree} is not the root directory of a worktree")
+    repo = Repo(tree)
+    kind = classify(repo, tree)
+    if not has_products(tree):
+        raise Refused(f"{tree} has no build products (contrib link, lib/classes): run new-tree first")
+    isabelle = tree / "bin" / "isabelle"
+    env = {k: os.environ[k] for k in PASS_THROUGH if k in os.environ}
+    expected = Path.home() / ".isabelle" / tree.name
+    got = run([isabelle, "getenv", "-b", "ISABELLE_HOME_USER", "ISABELLE_HEAPS"], env=env).stdout.splitlines()
+    if got != [str(expected), str(expected / "heaps")]:
+        raise Refused(f"ISABELLE_HOME_USER and ISABELLE_HEAPS are {got}, expected {expected} and {expected / 'heaps'}")
+
+    record = kind == "private" and args[:1] == ["build"]
+    if record:
+        status_before = Repo.status(tree)
+        head_before = git("rev-parse", "HEAD", cwd=tree)
+    rc = subprocess.run([str(isabelle), *args], env=env).returncode
+    if record:
+        if rc:
+            reason = f"isabelle build exited {rc}"
+        elif status_before or Repo.status(tree):
+            reason = "git status was not empty before or after the build"
+        elif git("rev-parse", "HEAD", cwd=tree) != head_before:
+            reason = "HEAD moved during the build"
+        else:
+            sessions = session_set(isabelle, env, args[1:])
+            reason = sessions if isinstance(sessions, str) else None
+        if reason:
+            print(f"run-tree: no tested record: {reason}")
+        else:
+            when = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
+            note = (f"tested {when} in {tree.name}\ncommand: {shlex.join(['isabelle', *args])}\n"
+                    f"sessions: {' '.join(sessions)}")
+            git("notes", "--ref=tested", "append", "-m", note, head_before, cwd=tree)
+            print(f"run-tree: tested record written for {head_before[:12]}: {' '.join(sessions)}")
+    return rc
+
+
+main(cli)

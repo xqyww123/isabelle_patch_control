@@ -1,0 +1,178 @@
+#!/usr/bin/env python3
+"""new-tree [-C <dir>] <R>/<name> [--base <R>/<base>]
+new-tree [-C <dir>] --stock <R>/<feature>
+
+The worktrees of the Isabelle source repository (migration plan decision 5).  Idempotent: every
+step already done is skipped, a tree in the wrong shape is refused.  <dir> is any directory inside
+the repository (default: the current directory).
+
+  <R>/<feature>   the private tree <trees root>/<R>-<feature>, the one worktree of that branch,
+                  with the build products of the line's shared tree installed.  If the branch does
+                  not exist it is created (the hook demands ISABELLE_GIT_OWNER=1 in the
+                  environment): from the previous release line's same feature (forward-merge
+                  mode, decision 7: start at <R>/<base>, then merge <P>/<feature>), or, in a line
+                  with no previous line, at --base.  An existing branch is forward-merged whenever
+                  <P>/<feature> has commits it lacks.
+  <R>/pristine    its commit-only tree (no build products).
+  <R>/daily       the shared tree <trees root>/<R>; created on <R>/pristine, no upstream.
+  --stock         the stock tree <trees root>/<R>-<feature>-stock, detached at
+                  merge-base(<base>, <feature>); moved there when it already exists.
+"""
+import argparse
+import os
+from pathlib import Path
+
+from common import Refused, Repo, install_products, main, run, split_branch, write_identifier
+
+
+def reason(branch: str) -> str:
+    return f"new-tree: the one worktree of {branch}"
+
+
+def previous_line(repo: Repo, release: str) -> str | None:
+    """<P>: the line whose pristine is the parent of <R>/pristine (decision 7 step 1); None when
+    <R>/pristine is a root commit."""
+    parent = run(["git", "rev-parse", "-q", "--verify", f"{release}/pristine^"],
+                 cwd=repo.common_dir, check=False).stdout.strip()
+    if not parent:
+        return None
+    lines = [b.removesuffix("/pristine") for b in repo.git(
+        "for-each-ref", "--points-at", parent, "--format=%(refname:short)", "refs/heads/*/pristine").split()]
+    if len(lines) != 1:
+        raise Refused(f"the parent of {release}/pristine is the pristine of {len(lines)} lines, not one: {lines}")
+    return lines[0]
+
+
+def ensure_worktree(repo: Repo, branch: str, tree: Path, start: str | None = None, track: bool = False) -> bool:
+    """tree is the locked worktree of branch; the branch is created at start when missing.
+    Returns True when the branch was created here."""
+    wt = repo.worktree_of(branch)
+    if wt is not None:
+        if wt["path"] != tree.resolve():
+            raise Refused(f"{branch} is checked out at {wt['path']}, not at {tree}")
+        if not wt["locked"] and not repo.is_main_worktree(tree):
+            repo.git("worktree", "lock", "--reason", reason(branch), tree)
+            print(f"locked {tree}")
+        return False
+    if tree.exists():
+        raise Refused(f"{tree} exists but is not the worktree of {branch}")
+    if repo.exists(branch):
+        repo.git("worktree", "add", "--lock", "--reason", reason(branch), tree, branch)
+        print(f"worktree {tree} on existing branch {branch}")
+        return False
+    if start is None:
+        raise Refused(f"branch {branch} does not exist and nothing says where it would start")
+    repo.git("worktree", "add", "--lock", "--reason", reason(branch), *(["--track"] if track else []),
+             "-b", branch, tree, start)
+    print(f"worktree {tree} on new branch {branch} at {start}" + (f" (upstream {start})" if track else ""))
+    return True
+
+
+def feature_tree(repo: Repo, branch: str, base_option: str | None):
+    release, name = split_branch(branch)
+    tree = repo.tree_dir(branch)
+    previous = previous_line(repo, release)
+    carried = f"{previous}/{name}" if previous and repo.exists(f"{previous}/{name}") else None
+    if not repo.exists(branch):
+        if carried:
+            previous_base = repo.base_of(carried)
+            base = f"{release}/{split_branch(previous_base)[1]}"
+            if not repo.exists(base):
+                raise Refused(f"{base} does not exist yet: forward-merge the chain in order")
+            if not repo.is_ancestor(previous_base, base):
+                raise Refused(f"{previous_base} is not an ancestor of {base}: forward-merge {base} first")
+        elif base_option:
+            base = base_option
+            if split_branch(base)[0] != release or not repo.exists(base):
+                raise Refused(f"--base must be an existing branch of line {release}, not {base}")
+        else:
+            raise Refused(f"{branch} does not exist, no previous line carries it, and no --base was given")
+        ensure_worktree(repo, branch, tree, start=base, track=True)
+    else:
+        ensure_worktree(repo, branch, tree)
+    write_identifier(tree)
+    install_products(tree, repo.shared_tree(release))
+    if carried and repo.git("rev-list", "-n1", f"{branch}..{carried}"):
+        if Repo.status(tree):
+            raise Refused(f"{tree} has uncommitted changes; forward merge of {carried} needs an empty git status")
+        if Repo.head_branch(tree) != branch:
+            raise Refused(f"{tree} is not on {branch}")
+        if not repo.is_ancestor(repo.base_of(carried), branch):
+            raise Refused(f"{repo.base_of(carried)} is not an ancestor of {branch}: forward-merge the base first")
+        r = run(["git", "merge", "--no-edit", carried], cwd=tree, check=False)
+        print(r.stdout, end="")
+        if r.returncode:
+            print(r.stderr, end="")
+            raise Refused(f"merging {carried} into {branch} stopped: resolve the conflicts by editing in {tree}, "
+                          "commit the merge, then build and test through run-tree")
+        print(f"merged {carried} into {branch}")
+    print(f"ready: {tree} on {branch} (base {repo.upstream(branch)})")
+
+
+def daily_tree(repo: Repo, branch: str):
+    release, _ = split_branch(branch)
+    tree = repo.tree_dir(branch)
+    ensure_worktree(repo, branch, tree, start=f"{release}/pristine")
+    repo.git("config", f"branch.{branch}.mergeOptions", "--ff-only")
+    write_identifier(tree)
+    print(f"ready: shared tree {tree} on {branch} (build products are not installed by new-tree)")
+
+
+def pristine_tree(repo: Repo, branch: str):
+    tree = repo.tree_dir(branch)
+    ensure_worktree(repo, branch, tree)
+    write_identifier(tree)
+    print(f"ready: {tree} on {branch} (commit-only tree, no build products)")
+
+
+def stock_tree(repo: Repo, feature: str):
+    release, _ = split_branch(feature)
+    if not repo.exists(feature):
+        raise Refused(f"{feature} does not exist")
+    base = repo.base_of(feature)
+    merge_base = repo.merge_base(base, feature)
+    tree = repo.stock_dir(feature)
+    wt = repo.worktree_at(tree)
+    if wt is None:
+        if tree.exists():
+            raise Refused(f"{tree} exists but is not a worktree of this repository")
+        repo.git("worktree", "add", "--detach", "--lock", "--reason",
+                 f"new-tree --stock: the stock tree of {feature}", tree, merge_base)
+        print(f"worktree {tree} detached at {merge_base[:12]}")
+    elif not wt["detached"]:
+        raise Refused(f"{tree} is on branch {wt['branch']}, not a detached stock tree")
+    elif wt["head"] != merge_base:
+        if Repo.status(tree):
+            raise Refused(f"{tree} has uncommitted changes; a stock tree is read-only")
+        run(["git", "switch", "--detach", merge_base], cwd=tree)
+        print(f"moved {tree} from {wt['head'][:12]} to {merge_base[:12]}")
+    write_identifier(tree)
+    install_products(tree, repo.shared_tree(release))
+    tags = repo.tags_at(merge_base, f"{base}/*")
+    print(f"ready: stock tree {tree} at {merge_base[:12]} = merge-base({base}, {feature})"
+          + (f", base release tag {' '.join(tags)}" if tags else ", not a release tag of the base"))
+
+
+def cli():
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("-C", metavar="dir", default=os.getcwd(), help="a directory inside the repository")
+    p.add_argument("--stock", action="store_true", help="the stock tree of the feature instead of its private tree")
+    p.add_argument("--base", metavar="<R>/<base>", help="base branch of a new feature in a line without a previous line")
+    p.add_argument("branch", metavar="<R>/<name>")
+    a = p.parse_args()
+    repo = Repo(Path(a.C))
+    repo.check_hook()
+    release, name = split_branch(a.branch)
+    if a.stock:
+        if a.base:
+            raise Refused("--base makes no sense with --stock")
+        stock_tree(repo, a.branch)
+    elif name == "daily":
+        daily_tree(repo, a.branch)
+    elif name == "pristine":
+        pristine_tree(repo, a.branch)
+    else:
+        feature_tree(repo, a.branch, a.base)
+
+
+main(cli)

@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Stand-in for bin/isabelle in the toy repositories of the tests.  Like getsettings it takes the
+# identifier from the environment when set, else from etc/ISABELLE_IDENTIFIER.  `sessions`
+# prints Pure and the selected names.  `build` succeeds unless $HOME/.stub-build-rc holds another
+# exit code, and writes the file named in $HOME/.stub-build-touch into the tree (run-tree passes
+# HOME through, nothing else).
+here=$(cd "$(dirname "$0")/.." && pwd)
+id=${ISABELLE_IDENTIFIER:-$(cat "$here/etc/ISABELLE_IDENTIFIER" 2>/dev/null)}
+case ${1:-} in
+  getenv) shift; [[ ${1:-} == -b ]] && shift
+    for v in "$@"; do case $v in
+      ISABELLE_HOME_USER) echo "$HOME/.isabelle/$id" ;;
+      ISABELLE_HEAPS) echo "$HOME/.isabelle/$id/heaps" ;;
+      *) echo "" ;;
+    esac; done ;;
+  sessions) shift; while getopts 'B:D:RX:abd:g:x:' o; do :; done; shift $((OPTIND - 1))
+    printf '%s\n' Pure "$@" ;;
+  build) echo "stub build: $*"
+    [[ -f $HOME/.stub-build-touch ]] && echo touched > "$here/$(cat "$HOME/.stub-build-touch")"
+    exit "$(cat "$HOME/.stub-build-rc" 2>/dev/null || echo 0)" ;;
+  *) echo "stub isabelle: $*" ;;
+esac

@@ -1,0 +1,287 @@
+#!/usr/bin/env python3
+"""make-patches [-C <dir>] --package <dir> [<R>/]<feature> <version>
+make-patches [-C <dir>] --hg <repo> --tarball <file> [<R>/]pristine <hg id>
+
+Release of a feature (migration plan §5.1), run on the owner's order.  <R> defaults to the
+release line of the branch checked out where the command runs.  The feature's package directory
+<dir> holds tools/patched_files.txt, tools/signature_additions.txt and tools/required_sessions.txt
+(light locale's layout) and receives patches/<R>/*.patch and patches/<R>/provenance.txt.
+
+Gates, in order, all before anything is written or tagged:
+  0. base tag: `git merge-base --all <base> <tip>` is one commit, and exactly one release tag
+     <R>/<base>/* points at it.  Every gate below is relative to that tag.
+  1. own commits: every commit in <base tag>..<tip> is on the first-parent chain of this feature's
+     branch (in some release line) beyond that line's base branch.
+  (f) `git diff-tree --name-only` between the two equals tools/patched_files.txt.
+  (d) check-signatures with tools/signature_additions.txt.
+  (e) the tested records of <tip> (printed) together cover tools/required_sessions.txt.
+Then the patch files are generated (one `git diff-tree -p` block per file, flat names as light
+locale uses them), gate (c) replays them on `git archive <base tag>` forward and backward and
+compares tree hashes, the provenance file is written, and last the annotated tag
+<R>/<feature>/<version> is created.
+
+`pristine <hg id>` runs check (a) only (§5.2): the tip of <R>/pristine equals the hg tag <R>
+minus Admin/, README_REPOSITORY and .hg*, plus the five release text files of the official
+tarball and the commit's own .gitignore; then tags <R>/pristine/<hg id>.
+"""
+import argparse
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tarfile
+import tempfile
+from pathlib import Path
+
+from common import TOOLS_DIR, Refused, Repo, main, run, split_branch
+
+# paths git tracks that an hg checkout of the release does not have, or has differently; the CI
+# build assertion hashes its hg checkout minus Admin/, README_REPOSITORY and .hg* and compares
+TREE_HASH_EXCLUDES = [".gitignore", "Isabelle.options", "etc/ISABELLE_ID", "etc/ISABELLE_TAGS",
+                      "etc/components", "lib/scripts/Isabelle_app"]
+RELEASE_FILES = ["etc/ISABELLE_ID", "etc/ISABELLE_TAGS", "etc/components", "lib/scripts/Isabelle_app", "Isabelle.options"]
+HG_ONLY = ["Admin", "README_REPOSITORY", ".hg_archival.txt", ".hgignore", ".hgtags"]
+
+
+def listed(path: Path) -> list[str]:
+    if not path.is_file():
+        raise Refused(f"{path} is missing")
+    return [line.strip() for line in path.read_text().splitlines() if line.strip() and not line.lstrip().startswith("#")]
+
+
+def resolve_branch(repo: Repo, cwd: Path, name: str) -> str:
+    if "/" in name:
+        split_branch(name)
+        return name
+    head = Repo.head_branch(cwd)
+    if not head or "/" not in head:
+        raise Refused(f"{cwd} is not on a <R>/... branch; give the release line as {name}'s prefix")
+    return f"{split_branch(head)[0]}/{name}"
+
+
+def apply_patches(directory: Path, patches: list[Path], reverse: bool = False):
+    """Stand-in for the patch tool's directory interface (§5.3): plain `patch -p1 -F0`."""
+    for p in patches:
+        r = run(["patch", "-p1", "-F0", "--no-backup-if-mismatch", *(["-R"] if reverse else []), "-i", p],
+                cwd=directory, check=False)
+        if r.returncode:
+            raise Refused(f"gate (c): {p.name} does not apply{' in reverse' if reverse else ''}:\n{r.stdout}{r.stderr}")
+
+
+def archive(repo: Repo, rev: str, into: Path):
+    """`git archive rev` extracted into the directory (modes preserved)."""
+    with subprocess.Popen(["git", "archive", "--format=tar", rev], cwd=repo.common_dir, stdout=subprocess.PIPE) as g:
+        subprocess.run(["tar", "-x", "-C", str(into)], stdin=g.stdout, check=True)
+        if g.wait():
+            raise Refused(f"git archive {rev} failed")
+
+
+def feature_release(repo: Repo, cwd: Path, branch: str, version: str, package: Path):
+    release, feature = split_branch(branch)
+    if not re.fullmatch(r"[1-9][0-9]*", version):
+        raise Refused(f"the version is a positive integer, not {version!r}")
+    if not repo.exists(branch):
+        raise Refused(f"{branch} does not exist")
+    tag = f"{branch}/{version}"
+    if repo.exists(tag):
+        raise Refused(f"release tag {tag} already exists")
+    tip = repo.rev(branch)
+    wt = repo.worktree_of(branch)
+    if wt and Repo.status(wt["path"]):
+        raise Refused(f"{wt['path']} has uncommitted changes")
+    base = repo.base_of(branch)
+    base_name = split_branch(base)[1]
+
+    # 0. the base tag
+    merge_base = repo.merge_base(base, tip)
+    base_tags = repo.tags_at(merge_base, f"{base}/*")
+    if len(base_tags) != 1:
+        raise Refused(f"gate 0: merge-base({base}, {branch}) = {merge_base[:12]} carries {len(base_tags)} release "
+                      f"tags of {base} ({' '.join(base_tags) or 'none'}), not exactly one: merge a release of {base}")
+    base_tag = base_tags[0]
+    print(f"base tag {base_tag} at {merge_base[:12]}")
+
+    # 1. own commits only
+    commits = set(repo.git("rev-list", f"{base_tag}..{tip}").split())
+    allowed = set()
+    for line in {split_branch(b)[0] for b in repo.branches()}:
+        f, b = f"{line}/{feature}", f"{line}/{base_name}"
+        if repo.exists(f) and repo.exists(b):
+            allowed |= set(repo.git("rev-list", "--first-parent", f, "--not", b).split())
+    leaked = commits - allowed
+    if leaked:
+        names = repo.git("log", "--no-walk", "--format=  %h %s", *sorted(leaked))
+        raise Refused(f"gate 1: commits in {base_tag}..{branch} that are not this feature's own:\n{names}")
+    print(f"gate 1: {len(commits)} commits since {base_tag}, all on {branch}'s first-parent chain")
+
+    # (f) the changed files
+    changed = sorted(repo.git("diff-tree", "-r", "--name-only", "--no-renames", base_tag, tip).split("\n"))
+    changed = [c for c in changed if c]
+    expected = sorted(listed(package / "tools" / "patched_files.txt"))
+    if changed != expected:
+        extra = sorted(set(changed) - set(expected))
+        missing = sorted(set(expected) - set(changed))
+        raise Refused("gate (f): the files changed since the base tag are not tools/patched_files.txt:"
+                      + "".join(f"\n  changed but not listed: {p}" for p in extra)
+                      + "".join(f"\n  listed but unchanged: {p}" for p in missing))
+    print(f"gate (f): {len(changed)} changed files, exactly tools/patched_files.txt")
+
+    # (d) signatures
+    r = run([sys.executable, TOOLS_DIR / "check-signatures", "-C", repo.common_dir, base_tag, tip,
+             package / "tools" / "signature_additions.txt"], check=False)
+    if r.returncode:
+        raise Refused(f"gate (d):\n{r.stdout}{r.stderr}")
+    print(f"gate (d): {r.stdout.strip()}")
+
+    # (e) tested
+    required = set(listed(package / "tools" / "required_sessions.txt"))
+    if not required:
+        raise Refused("tools/required_sessions.txt names no session")
+    records = repo.tested_records(tip)
+    if not records:
+        raise Refused(f"gate (e): {tip[:12]} has no tested record (run-tree writes one after a clean build)")
+    covered = set()
+    for rec in records:
+        print(f"tested {rec['when']} in {rec['tree']}: {rec['command']} -> {' '.join(sorted(rec['sessions']))}")
+        covered |= rec["sessions"]
+    missing = sorted(required - covered)
+    if missing:
+        raise Refused(f"gate (e): the tested records do not cover {' '.join(missing)}")
+    print(f"gate (e): records cover {' '.join(sorted(required))}")
+
+    # generation
+    diff = run(["git", "diff-tree", "-r", "-p", "--no-renames", base_tag, tip], cwd=repo.common_dir).stdout
+    blocks = re.split(r"(?m)^(?=diff --git )", diff)
+    blocks = [b for b in blocks if b]
+    out = package / "patches" / release
+    out.mkdir(parents=True, exist_ok=True)
+    for old in out.glob("*.patch"):
+        old.unlink()
+    written = []
+    for block in blocks:
+        head = block.splitlines()[0]
+        m = re.fullmatch(r"diff --git a/(.*) b/(.*)", head)
+        if not m or m.group(1) != m.group(2):
+            raise Refused(f"unexpected diff header: {head}")
+        if re.search(r"(?m)^(old mode|new mode|GIT binary patch|similarity index)", block):
+            raise Refused(f"{m.group(1)}: mode changes, renames and binary diffs are not released")
+        path = out / (m.group(1).replace("/", "-") + ".patch")
+        path.write_text(block)
+        written.append(path)
+    print(f"{len(written)} patch files written to {out}")
+
+    # (c) round trip on the base tag's archive, compared by tree hash
+    with tempfile.TemporaryDirectory(prefix="make-patches-") as tmp:
+        work = Path(tmp) / "tree"
+        work.mkdir()
+        archive(repo, base_tag, work)
+        apply_patches(work, written)
+        got, want = repo.tree_hash_of_dir(work), repo.git("rev-parse", f"{tip}^{{tree}}")
+        if got != want:
+            raise Refused(f"gate (c): forward application gives tree {got}, the commit's tree is {want}")
+        apply_patches(work, written, reverse=True)
+        got, want = repo.tree_hash_of_dir(work), repo.git("rev-parse", f"{base_tag}^{{tree}}")
+        if got != want:
+            raise Refused(f"gate (c): backward application gives tree {got}, the base tag's tree is {want}")
+    print("gate (c): round trip on the base tag's archive reproduces both trees")
+
+    # provenance
+    tree_hash = repo.tree_hash_excluding(tip, TREE_HASH_EXCLUDES)
+    build_prefix = release.replace("-", "_")
+    base_version = base_tag.rsplit("/", 1)[1]
+    base_is_pristine = base_name == "pristine"
+    provenance = [
+        f"feature: {branch}",
+        f"release_tag: {tag}",
+        f"commit: {tip}",
+        f"base_tag: {base_tag}",
+        f"base_commit: {merge_base}",
+        f"base_package_version: {'none (the base is pristine)' if base_is_pristine else base_version}",
+        f"base_pin: {'none' if base_is_pristine else f'=={base_version}={build_prefix}_*'}",
+        f"build_string_prefix: {build_prefix}",
+        f"tree_hash: {tree_hash}",
+        f"tree_hash_excludes: {' '.join(TREE_HASH_EXCLUDES)}",
+    ]
+    (out / "provenance.txt").write_text("\n".join(provenance) + "\n")
+    print("\n".join(provenance))
+
+    # the tag, last
+    repo.git("tag", "-a", "-m", f"{branch} release {version}\n\n" + "\n".join(provenance), tag, tip)
+    print(f"release tag {tag} created at {tip[:12]}")
+
+
+def pristine_release(repo: Repo, branch: str, hg_id: str, hg_repo: Path, tarball: Path):
+    release, name = split_branch(branch)
+    if name != "pristine":
+        raise Refused("the second form is for <R>/pristine")
+    if not repo.exists(branch):
+        raise Refused(f"{branch} does not exist")
+    tip = repo.rev(branch)
+    tag = f"{branch}/{hg_id}"
+    node = run(["hg", "-R", hg_repo, "log", "-r", f"tag('{release}')", "--template", "{node|short}"]).stdout.strip()
+    tags = run(["hg", "-R", hg_repo, "log", "-r", f"tag('{release}')", "--template", "{tags}"]).stdout.strip()
+    if node != hg_id:
+        raise Refused(f"hg tag {release} is changeset {node}, not {hg_id}")
+    with tempfile.TemporaryDirectory(prefix="make-patches-") as tmp:
+        expected = Path(tmp) / "expected"
+        run(["hg", "-R", hg_repo, "archive", "-r", f"tag('{release}')", "-t", "files", expected])
+        for p in HG_ONLY:
+            path = expected / p
+            if path.is_dir():
+                shutil.rmtree(path)
+            elif path.exists():
+                path.unlink()
+        with tarfile.open(tarball) as tf:
+            for f in RELEASE_FILES:
+                try:
+                    member = tf.getmember(f"{release}/{f}")
+                except KeyError:
+                    raise Refused(f"{tarball} has no {release}/{f}")
+                (expected / f).parent.mkdir(parents=True, exist_ok=True)
+                (expected / f).write_bytes(tf.extractfile(member).read())
+                os.chmod(expected / f, member.mode & 0o777)   # the executable bit is part of the tree hash
+        (expected / ".gitignore").write_text(run(["git", "show", f"{tip}:.gitignore"], cwd=repo.common_dir).stdout)
+        for f, want in (("etc/ISABELLE_ID", node), ("etc/ISABELLE_TAGS", tags)):
+            got = (expected / f).read_text().strip()
+            if got != want:
+                raise Refused(f"check (a): the tarball's {f} is {got!r}, hg says {want!r}")
+        got, want = repo.tree_hash_of_dir(expected), repo.git("rev-parse", f"{tip}^{{tree}}")
+    if got != want:
+        raise Refused(f"check (a): {branch} ({tip[:12]}) has tree {want}; hg tag {release} plus the release files "
+                      f"of {tarball.name} has tree {got}")
+    print(f"check (a): {branch} at {tip[:12]} equals hg {release} ({node}) plus the five release text files "
+          f"of {tarball.name} and .gitignore")
+    if repo.exists(tag):
+        if repo.rev(tag) != tip:
+            raise Refused(f"{tag} exists but points at {repo.rev(tag)[:12]}, not {tip[:12]}")
+        print(f"release tag {tag} already exists at {tip[:12]}")
+    else:
+        repo.git("tag", "-a", "-m", f"{release} pristine, hg changeset {hg_id}", tag, tip)
+        print(f"release tag {tag} created at {tip[:12]}")
+
+
+def cli():
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("-C", metavar="dir", default=os.getcwd(), help="a directory inside the repository")
+    p.add_argument("--package", metavar="dir", type=Path, help="the feature's package directory")
+    p.add_argument("--hg", metavar="repo", type=Path, help="pristine: the Isabelle hg repository")
+    p.add_argument("--tarball", metavar="file", type=Path, help="pristine: the official release tarball")
+    p.add_argument("feature", metavar="[<R>/]<feature>")
+    p.add_argument("version", metavar="<version>|<hg id>")
+    a = p.parse_args()
+    cwd = Path(a.C)
+    repo = Repo(cwd)
+    repo.check_hook()
+    branch = resolve_branch(repo, cwd, a.feature)
+    if split_branch(branch)[1] == "pristine":
+        if not (a.hg and a.tarball):
+            raise Refused("pristine needs --hg <repo> and --tarball <file>")
+        pristine_release(repo, branch, a.version, a.hg, a.tarball)
+    else:
+        if not a.package:
+            raise Refused("a feature release needs --package <dir>")
+        feature_release(repo, cwd, branch, a.version, a.package.resolve())
+
+
+main(cli)
