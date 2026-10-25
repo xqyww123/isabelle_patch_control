@@ -20,10 +20,46 @@
   "我没看 rev 6 也没法批准，但评审通过后我们就可以开工了"；"建议先 compact 之后开工，请准备"。** 所以 rev 6 没有逐字批准，但评审通过即开工，
   rev 6 就是施工依据。
 
+## §5 第 1 步的进展（2026-10-25 凌晨；用户 2026-10-24 "开工"）
+- **新包已写好、未提交、未删任何旧东西**：工具仓库 `isabelle_patch_control/`（`names.py` 决定 10 的包名映射与反函数；`errors.py` 四类异常与
+  退出码；`engine.py` 决定 4 的唯一 `git` 原语 `Git.run`（白名单环境、固定 `-c`、`GIT_CEILING_DIRECTORIES`、umask 022）、决定 5 的锁
+  `locked()`（`flock` 共享/排他，Windows `msvcrt.locking` 偏移 `0x40000000`，上限 60 s）、暂存目录/临时目录、决定 6 的 `Replayer.levels()`
+  （每个候选层级两条顺序重放，副本上真打，`tables[L]` 记下每个层级的内容字节，装入的就是这份快照）、`Replayer.install()`（逐文件
+  `os.replace`/`os.unlink`，权限位沿用原文件或取 create/delete 行）；`features.py` 决定 2、3（树、来历文件、按精确 tag 链接、三种链接不上的报文）；
+  `model.py` 决定 6、7 的纯逻辑（四种显示状态、hole、`plan()` 的封顶与 T_p）；`api.py` 决定 8 的公开函数 `status/apply/unapply/apply_to/unapply_from`
+  （从不 `sys.exit`）；`texts.py` §4 与决定 9 的全部文案逐字；`cli.py` §4 的命令行与退出码；`conda_hook.py` 决定 9 的 post-link/pre-unlink
+  （只经 `.messages.txt` 说话、链顶才写完整诊断、残留块四种原因、锁超时后不持锁算层级、链接不上时按该 feature 单独重放算残留、
+  决定 9 判"经硬链接原地改写"的唯一一处 `conda-meta` 读取）；`hooks/post-link.sh|.bat`、`hooks/pre-unlink.sh|.bat` 决定 9 的钩子文本逐字
+  （pre-unlink 里 `<feature>`、`<package>`、`<version>` 是渲染器要填的占位符；`.bat` 已是 CRLF 字节）；`AGENTS.md -> ../AGENTS.md` 符号链接
+  （`help` 打印它，内容等决定 14 的重写）。`pyproject.toml` 只加：第二个入口 `isabelle-patch-control`、新包进 `packages.find` 与 `package-data`、
+  `[tool.pytest.ini_options]`（`pythonpath = ["."]`）；**名字与版本没改**（随决定 14 的重写一起，第 32 条）。
+- **测试** `tests/`（pytest，87 例，约 2 分 10 秒，其中 14 例是杀进程子进程）：`conftest.py` 的 `Toy` 用一个玩具 git 仓库按 make-patches 的方式
+  （`git diff-tree -r -p --no-renames` 按文件切块、扁平名、provenance.txt）造 feature 目录，`git -c tar.umask=022 archive` 造树（否则 git archive
+  给 0664/0775，与补丁头部的 0644/0755 不符——第一轮 30 例失败的主因）；夹具自己的 git 不吃敌对环境（去掉 `GIT_*`、`core.attributesFile=/dev/null`）。
+  覆盖决定 15 工具层的全部条目：链接规则与各种 exit 3、`--isabelle-home`/`--features-dir` 推导、四种状态、第一轮 C3 五个场景、两例多层级 CONFLICT、
+  堆叠上下文在三种树上的 status/apply/unapply/两个 dry-run、两个新建文件加模拟重链接、杀进程后非旧即新并收敛（apply/unapply 各 k=1..7）、
+  工具目录写失败树不变、`os.replace` 失败后打印 status、共享 inode 不变、umask 002/077 的权限位、五种敌对环境、锁（只读树、忙、共享、串行、
+  不持锁不碰暂存目录）、目录接口、钩子层不用 conda 的部分（假 `$PREFIX`：post-link 幂等只说一次、CONFLICT 链顶整段/其他一行、锁忙、旧构建、
+  pre-unlink 成功两种文案、残留块三种原因、硬链接原地改写选包缓存文案）。**真 conda 的钩子层测试、`plan_builds`、`check_bytes` 是第 2、5 步的。**
+- **真实链核对**（scratchpad `realchain/`，只读地用源码仓库 `git diff-tree`，分支 expose_foreign f8d760a → future_assign_interrupt 6d8be01 →
+  light_locale 577e67d 生成三个 feature 目录；树是官方 tarball 里被碰到的 31 个文件加 `etc/` 两文件，3 个新建文件不在 tarball 里）：fresh 树
+  `status` 三条 not-applied 0.18 s；`apply` 后 34 个路径全部等于 light tip 的 blob（`git hash-object` 对 `rev-parse tip:path`）0.19 s；
+  `unapply` 后全部回到 pristine blob、新建文件消失、无 `.staging` 残留。
+- **作者在方案之外自己定的（都可改）**：(1) `-v`/`-q` 在子命令之后也接受（§4 文案写的是 `isabelle-patch-control status -v`）；(2) `apply-to`/
+  `unapply-from` 不查目录里的 `.git`（目录是调用方的）；(3) `apply --feature F` 的 exit 1 只看"挡在 F 以下的 CONFLICT 文件"，`unapply` 只看
+  "T 以上的"；(4) 报文里 "applied: X"/"reversed: X" 列的是"自己的文件在本次运行中跨过了 X 的编号"的 feature；(5) 方案没给逐字文案的地方作者按
+  "文案的写法"写了：链接不上时"installed: none"、两目录同一 base_tag、发行版不配、patch 文件读不出/目标数不是一、符号链接目标、git 写失败、
+  只读树上 `apply`、`--dry-run` 与 `-v` 的逐文件行 `  <path>  level a -> b`、`CONFLICT  <path>  no level|levels 0, 2`、§4 "conda install 被 Ctrl-C
+  中断后"那段 `status` 在 `conda-meta` 存在而 `history` 不存在时打印的话（`texts.interrupted`）——这些没经 reader 校读。
+- **下一步**：§5 第 2 步（决定 16：门禁 (c) 改 `import` `apply_to/unapply_from`、第 7–8 点写入顺序、第 9 点玩具测试、第 10 点 checklist 进
+  `RELEASE.md`；`tools/common.py` 从 `isabelle_patch_control.names` 导入 `package_name`、加 `plan_builds`；`run-tree` 的 `-d` 行；决定 17 `check-roundtrip`）。
+  旧包、`patches/`、五份 `.md` 的删除与 README/reference/develop/AGENTS/RELEASE 重写、pyproject 改名仍等之后（第 0 步 commit 已存在，可以开始）。
+  提交只在用户说"提交"时做：新增 `isabelle_patch_control/`（15 个文件）与 `tests/`（9 个文件），改动 `pyproject.toml` 与本交接。
+
 ## compact 之后怎么开工（2026-10-24 深夜写）
-1. **§5 第 0 步要用户说"提交"才能做**（两个 commit：工具仓库 `contrib/my_better_isabelle_prover` 里已写好、未跟踪的 `tools/` 与 README 一节
-   （计划 §2.5）；`contrib/isabelle-packaging-ci/RELEASE.md` 记发布冻结，理由只给第 11 条）。开工第一件事：`git status` 两个仓库、列出将提交的文件、
-   向用户请"提交"。commit 在各自仓库的 `main`，trailer `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`。
+1. **§5 第 0 步已完成**（用户 2026-10-24 "批准提交"）：工具仓库 `main` 上 7336934（`tools/` 与 README 一节，README 的 tested 一条补了第 35 条
+   的一句）、113a28f（`ai-artifacts/`：计划、副本、五轮评审、交接）；CI 仓库 `main` 上 2c5901d（`RELEASE.md` 发布冻结）。**未 push**（push 只按
+   用户命令）；主仓库里两个 submodule 指针变了、**未 bump**（用户没说）。
 2. **§5 第 1 步（工具改造）可以立刻动手**，不等第 0 步，但**先只加不删**：在工具仓库里新建 Python 包 `isabelle_patch_control/`（决定 1：`names.py`
    放包名映射；决定 4：`_git` 唯一原语与白名单环境；决定 2、3：定位树、读来历文件、按精确 tag 链接、`git apply --numstat --summary` 读目标；
    决定 5：暂存目录/临时目录按锁模式、`flock` 锁 `etc/ISABELLE_ID`、逐文件 `os.replace`；决定 6、7：层级与 `apply`/`unapply`/`--dry-run`；
@@ -36,6 +72,13 @@
    §5 第 3 步建三个 GitHub 仓库；`make-patches`（light 的请求仍按 `expose_foreign 1 → future_assign_interrupt 1 → light_locale <v>` 等用户命令）。
 4. 之后：§5 第 2 步（决定 16 第 1、7–10 点、`run-tree` 的 `-d` 行、决定 17、`test_trees.sh` 两例、迁移方案五处已改）、第 3 步起每步等用户下令。
 5. 代码写法：复用已有代码（`tools/common.py`、`make-patches`、`run-tree`）、不复制粘贴；注释短；优雅与正确同权重；每个改动跑 pytest 看结果再说做完了。
+6. 开工时的现场（2026-10-24 深夜核实）：工具仓库 `main` 在 113a28f，工作树只有 `ai-artifacts/…HANDOFF.md` 一处未提交改动。旧代码：
+   `my_better_isabelle_prover/{cli.py 181 行, patcher.py 169 行, isabelle.py 68 行, patches/}`，`pyproject.toml` `[project] name = "my-better-isabelle-prover"`
+   `version = "0.3.0"`，`[project.scripts]` 在 :33。新代码放新包 `isabelle_patch_control/`，旧包先不动。可直接复用的已有东西：`tools/common.py`（244 行：
+   仓库/tag/来历相关的辅助函数，`make-patches`、`run-tree` 都用它——决定 10 的 `plan_builds`、`package_name` 要放进去或从 `isabelle_patch_control.names`
+   导入）。`_git` 原语的隔离要点与实测都在计划决定 4 与 §2.4（`GIT_CEILING_DIRECTORIES`、`GIT_CONFIG_NOSYSTEM`、`GIT_CONFIG_GLOBAL=/dev/null`、
+   `GIT_ATTR_NOSYSTEM`、`-c core.autocrlf=false -c core.attributesFile=/dev/null`、`LC_ALL=C`、umask 022），复现脚本在 scratchpad `verify2/`、`gittest/`。
+   用户可见文案逐字取计划 §4 与决定 9（已经 reader 校读，不再自己改措辞）。先读计划 §3 决定 1–9 与决定 15 再动手；§4 是 CLI 与退出码的权威。
   注意：`…PLAN.rev4.md` 是在加了 §0 第 33–35 条之后才复制的，不是第四轮评审看到的原文（judge C4 第 9 项要在 rev 6 头部注明：REVIEW4 引用的
   plan:N 在 N≥140 时对应副本的 N+15 行）。
 - light 会话 2026-10-24 请求跑 `make-patches light_locale`：作者核对三道前提——基 tag 不存在（先要 `isabelle-base-features` 仓库与

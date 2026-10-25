@@ -32,9 +32,15 @@ Issues = "https://github.com/xqyww123/my_better_isabelle_prover/issues"
 
 [project.scripts]
 my-better-isabelle = "my_better_isabelle_prover.cli:main"
+isabelle-patch-control = "isabelle_patch_control.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["my_better_isabelle_prover", "my_better_isabelle_prover.*"]
+include = ["my_better_isabelle_prover", "my_better_isabelle_prover.*", "isabelle_patch_control", "isabelle_patch_control.*"]
 
 [tool.setuptools.package-data]
 my_better_isabelle_prover = ["patches/**/*.patch", "patches/categories.toml", "AGENTS.md"]
+isabelle_patch_control = ["hooks/*", "AGENTS.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
