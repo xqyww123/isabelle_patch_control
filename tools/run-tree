@@ -17,9 +17,10 @@ A `build` in a private tree that exits 0 with an empty `git status` before and a
 unchanged gets a tested record: `git notes --ref=tested append` on HEAD with the command line and
 the session set `isabelle sessions` resolves from the same selection options.  No record when the
 selection is empty or the command line sets quick_and_dirty or skip_proofs with -o.  For every
-`-d` directory that lies in a git worktree the record carries a line `dir: <top> <HEAD> <uncommitted
-files>` (migration plan §0 item 32); if that repository changed during the build, even if it was
-changed back, there is no record and the reason names the directory.
+`-d` directory that a git worktree covers (does not ignore) the record carries a line `dir: <top>
+<HEAD> <tracked files with uncommitted changes>` (migration plan §0 item 32); if a tracked file of
+that repository changed during the build, even if it was changed back, there is no record and the
+reason names the directory.
 """
 import datetime
 import getopt
@@ -79,8 +80,9 @@ def session_set(isabelle: Path, env: dict, build_args: list[str]) -> list[str] |
 
 
 def dir_states(build_args: list[str]) -> dict[str, tuple]:
-    """For each `-d` directory inside a git worktree: (top, HEAD, uncommitted files) as the record's
-    `dir:` line says it, plus the tracked files' mtimes, which catch a change made and undone."""
+    """For each `-d` directory a git worktree covers: (top, HEAD, tracked files with uncommitted
+    changes) as the record's `dir:` line says it, plus the tracked files' mtimes, which catch a
+    change made and undone."""
     try:
         opts, _ = getopt.gnu_getopt(build_args, BUILD_OPTIONS)
     except getopt.GetoptError:
@@ -139,7 +141,7 @@ def cli():
                     f"sessions: {' '.join(sessions)}")
             for (top, head, files), _ in dirs_before.values():
                 note += f"\ndir: {top} {head}" + "".join(f" {f}" for f in files)
-            git("notes", "--ref=tested", "append", "-m", note, head_before, cwd=tree)
+            git("notes", "--ref=tested", "append", "-F", "-", head_before, cwd=tree, input=note)   # stdin: no argument length limit
             print(f"run-tree: tested record written for {head_before[:12]}: {' '.join(sessions)}")
     return rc
 

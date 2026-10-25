@@ -1,8 +1,10 @@
 # AGENTS.md
 
 Orientation for an AI agent that meets `isabelle-patch-control` in a conda environment, or works
-in this repository. `isabelle-patch-control help` prints this file. Human-facing detail:
-[README.md](README.md), [reference.md](reference.md), [develop.md](develop.md).
+in this repository. `isabelle-patch-control help` prints this file. Human-facing detail, in the
+tool's repository <https://github.com/xqyww123/isabelle_patch_control>: README.md (the user's
+guide, also shipped as `share/doc/<feature package>/README.md`), reference.md, develop.md,
+RELEASE.md (for whoever releases a feature package).
 
 ## What this is
 
@@ -39,27 +41,39 @@ chain order: state, feature name, release tag, file count.
 | `not-applied` | none does |
 | `half-applied` | some do, some do not (`N files, k below`): an interrupted run; `apply` finishes it |
 | `CONFLICT` | a file has content the tool recognises as no level (a hand edit, usually); the install's message or `status -v` names the file |
-| `(hole below)` | this feature is applied while one below it is not |
+| `(hole below)` | this feature is applied while one below it is not fully applied (`not-applied`, `half-applied` or `CONFLICT`) |
 
-`no feature packages installed` with exit 0 means exactly that; the tree is fine.
+`no feature packages installed` with exit 0 means exactly that: nothing for the tool to apply,
+whatever build the tree is. The tool then does not look at the tree, so changes that a removal
+could not undo (its message said `could not be fully undone`), or that mamba, micromamba or pixi
+left behind, are not reported; follow that message, or README's section *Removing, re-installing,
+and what conda does on its own*.
 
-**Exit codes** (check these, do not parse the lines): `0` every selected feature applied, or no
-feature packages; `1` something is `not-applied`, `half-applied`, `CONFLICT`, or a hole, or a file
-could not be moved, or the lock is busy; `2` no Isabelle tree where expected, or `git` missing or
-older than 2.43; `3` refused: the installed packages do not link into one chain, the tree is not
-the build the packages were made for, the tree has a `.git`, a patch target is a symbolic link, a
-patch file cannot be read, or a name is unknown. `conda-hook` always exits 0 and reports through
-conda's output.
+**Exit codes** (check these, do not parse the lines): `0` the selected feature and every feature
+below it applied (all of them by default), or no feature packages; `1` something is `not-applied`,
+`half-applied`, `CONFLICT`, or a hole, or a file could not be moved, or the lock is busy; `2` no
+Isabelle tree where expected, or `git` missing or older than 2.43; `3` refused: the installed
+packages do not link into one chain, the tree is not the build the packages were made for, the tree
+has a `.git`, a patch target is a symbolic link, a patch file cannot be read, or a name is unknown.
+`conda-hook` exits 0 whenever it wrote its own message into conda's output; when it cannot finish
+(a crash, or it cannot tell which files still carry a feature's changes) it exits non-zero and the
+hook's own fallback line speaks instead.
 
 ## What to do in each situation
 
-- **`CONFLICT`.** Do not edit anything under `$PREFIX/isa` to fix it, and do not run `unapply`
-  (a CONFLICT file cannot be moved either way). Follow the message: save the user's own edits, then
-  `conda install -c https://conda.qiyuan.me -c conda-forge --force-reinstall isabelle`, which replaces
-  every file of the `isabelle` package and re-applies the installed features. If the message says
-  the edit went into conda's package cache (an in-place edit through a hard link), delete the
-  directory it names first. If the unrecognised file is one the feature itself creates (marked
-  `(created by the feature)` in `status -v`), move it aside and run `isabelle-patch-control apply`.
+- **`CONFLICT`.** Do not edit anything under `$PREFIX/isa` to fix it, and do not run `unapply`:
+  the tool cannot move a file it does not recognise. If the unrecognised file is one the feature
+  itself creates (marked `(created by the feature)` in `status -v`), move it aside and run
+  `isabelle-patch-control apply`. Otherwise reinstall `isabelle`. Before that, save anything of the
+  user's own under `$PREFIX/isa` and in the environment's Isabelle user directory (`isabelle getenv
+  -b ISABELLE_HOME_USER`): the reinstall deletes that directory, with the heaps built in it, its
+  `etc/settings` and preferences, and every component registered by hand with `isabelle components
+  -u`; installed packages register their components again, the user's own settings do not come
+  back. Then `conda install -c https://conda.qiyuan.me -c conda-forge --force-reinstall isabelle`,
+  which replaces every file of the `isabelle` package and re-applies the installed features, and
+  `isabelle-patch-control status`. If the install's message said the edit went into conda's package
+  cache (an in-place edit through a hard link), delete the directory it names first. The install's
+  message, when you have it, gives these same steps.
 - **`half-applied` or `not-applied` without any CONFLICT.** `isabelle-patch-control apply --dry-run`
   lists what would move; `isabelle-patch-control apply` does it. Both are idempotent.
 - **The chain does not link (exit 3).** The message names the package and the version it needs;
@@ -69,6 +83,11 @@ conda's output.
   environment sharing the same package cache) is working; wait and retry.
 - **A conda command was interrupted (Ctrl-C).** `status` prints the repair while
   `conda-meta/history` is missing; README.md has the same steps.
+- **`no feature packages installed` after a removal that said `could not be fully undone`.** Do
+  what that message said: its steps restore the tree exactly and keep the user directory. After a
+  removal with mamba, micromamba or pixi (no message), reinstall `isabelle` as in the CONFLICT case
+  and delete the files the removed feature created (it listed none; `isabelle-patch-control status -v`
+  cannot help once the package is gone, so look for the feature's new files in its documentation).
 
 ## Rules to keep
 
@@ -79,17 +98,20 @@ conda's output.
 - Only conda applies and reverses features correctly; mamba 2.x, micromamba and pixi skip the
   removal step.
 - The tool never builds anything. Heaps rebuild on first use; `isabelle build -b HOL` does it now,
-  and only when asked for (this repository's rule: no `isabelle build` without the owner's word).
-- In this repository: every user-visible text lives in `isabelle_patch_control/texts.py` and was
-  proofread; do not reword it in passing. The plan `ai-artifacts/ISABELLE_PATCH_CONTROL_PLAN.md`
-  is the design; change the plan before changing the design.
+  and only when asked for.
+- In this repository: no `isabelle build` without the owner's word. `isabelle_patch_control/texts.py`
+  holds the plan's texts and every frame a conda hook writes (a frame quotes the refusal's own
+  sentence, written next to its check); readers proofread the five texts named in plan §8 and read
+  the rest once after code review 1; do not reword any of them in passing. The plan
+  `ai-artifacts/ISABELLE_PATCH_CONTROL_PLAN.md` is the design; change the plan before changing the
+  design.
 
 ## Commands
 
 ```
 isabelle-patch-control [--isabelle-home DIR] [--features-dir DIR] [-v|-q] <command>
 
-  status   [--feature F]               the state of every feature; exit code for F or for all
+  status   [--feature F]               the state of every feature; exit 0 when F and everything below it (or all) is applied
   apply    [--feature F] [--dry-run]   move every file up to the chain top (or to F)
   unapply  [--feature F] [--dry-run]   move every file down to the bottom (or to just below F)
   apply-to      <dir> <feature dir>    directory interface: <dir> is the tree, one feature only
@@ -101,8 +123,8 @@ isabelle-patch-control [--isabelle-home DIR] [--features-dir DIR] [-v|-q] <comma
 
 The tree is `--isabelle-home` or `<prefix>/isa`; the features come from `--features-dir` or the
 environment's `share/isabelle_patch_control/features.d` (the prefix is `--isabelle-home`'s parent,
-else the Python prefix the tool runs from). A tree outside any conda environment needs
-`--features-dir`. Details: [reference.md](reference.md).
+else the Python prefix the tool runs from). `--feature F` takes a feature name or its package name.
+A tree outside any conda environment needs `--features-dir`. Details: reference.md.
 
 ## Coming from my-better-isabelle 0.x
 
@@ -121,11 +143,15 @@ Before installing any feature package into an environment where 0.x was used:
 2. `pip uninstall my-better-isabelle-prover`. This touches only 0.x; the new tool has a different
    distribution name.
 3. Install the feature packages. The dev patches of 0.x (`register_thy`, `show_types_nv`,
-   `expose_map_syn`, `skip_nitpick_examples`) are now the feature package `qiyuan-dev-patches`;
-   `expose_foreign` and `future_assign_interrupt` are `isabelle-expose-foreign` and
-   `isabelle-future-assign-interrupt`.
+   `expose_map_syn`) are now part of the feature package `qiyuan-dev-patches`, which also carries
+   `skip_nitpick_examples`; `expose_foreign` and `future_assign_interrupt` are
+   `isabelle-expose-foreign` and `isabelle-future-assign-interrupt`.
 
-A tree that 0.x left in a state the new tool does not recognise is repaired by
+A tree that 0.x left in a state the new tool does not recognise is repaired by reinstalling
+`isabelle`. Before that, save anything of the user's own under `$PREFIX/isa` and in the
+environment's Isabelle user directory (`isabelle getenv -b ISABELLE_HOME_USER`): the reinstall
+deletes that directory, with the heaps built in it, its `etc/settings` and preferences, and every
+component registered by hand; the user's own settings do not come back. Then
 `conda install -c https://conda.qiyuan.me -c conda-forge --force-reinstall isabelle`: the pristine
 build re-applies the installed features by itself. pip users keep using 0.3.0; nothing of the new
 tool is on PyPI.

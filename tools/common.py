@@ -10,6 +10,7 @@ A tree's `etc/ISABELLE_IDENTIFIER` equals its directory name (new-tree is the on
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -19,6 +20,7 @@ from typing import Callable
 
 TOOLS_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(TOOLS_DIR.parent))            # the checkout's isabelle_patch_control, not an installed one
+from isabelle_patch_control.errors import Error as ToolError  # noqa: E402
 from isabelle_patch_control.names import package_name  # noqa: E402,F401  (re-exported for the scripts)
 
 HOOK_SOURCE = TOOLS_DIR / "hooks" / "reference-transaction"
@@ -32,26 +34,47 @@ class Refused(Exception):
     """A precondition of the plan does not hold; the message says which one."""
 
 
-def run(args, cwd=None, env=None, check=True, input=None) -> subprocess.CompletedProcess:
+def run(args, cwd=None, env=None, check=True, input=None, text=True) -> subprocess.CompletedProcess:
+    """`text=False` keeps the output's bytes (a diff may hold CRs and non-UTF-8 bytes)."""
     args = [str(a) for a in args]
-    r = subprocess.run(args, cwd=cwd, env=env, text=True, capture_output=True, input=input)
+    r = subprocess.run(args, cwd=cwd, env=env, text=text, capture_output=True, input=input)
     if check and r.returncode:
         where = f" in {cwd}" if cwd else ""
-        raise Refused(f"`{' '.join(args)}` failed{where}:\n{(r.stderr or r.stdout).strip()}")
+        out = r.stderr or r.stdout
+        if isinstance(out, bytes):
+            out = out.decode(errors="replace")
+        raise Refused(f"`{' '.join(args)}` failed{where}:\n{out.strip()}")
     return r
 
 
-def git(*args, cwd=None, check=True) -> str:
-    return run(["git", *args], cwd=cwd, check=check).stdout.rstrip("\n")
+def git(*args, cwd=None, check=True, input=None) -> str:
+    return run(["git", *args], cwd=cwd, check=check, input=input).stdout.rstrip("\n")
 
 
 def main(fn):
-    """Run a script's main function; a Refused exception is the script's refusal (exit 1)."""
+    """Run a script's main function; a Refused exception, or a refusal of the patch tool's API, is
+    the script's refusal (exit 1)."""
     try:
         sys.exit(fn() or 0)
-    except Refused as e:
+    except (Refused, ToolError) as e:
         print(f"{Path(sys.argv[0]).name}: refused: {e}", file=sys.stderr)
         sys.exit(1)
+
+
+def patch_blocks(diff: bytes) -> dict[str, bytes]:
+    """The patch files of one `git diff-tree -r -p --no-renames` output: flat file name (the path
+    with '/' as '-', plus .patch) -> the file's block, byte for byte.  Mode changes, renames and
+    binary diffs are not released (patch tool plan decision 16)."""
+    out = {}
+    for block in (b for b in re.split(rb"(?m)^(?=diff --git )", diff) if b):
+        head = block.split(b"\n", 1)[0].decode(errors="replace")      # git quotes unusual paths, so ASCII
+        m = re.fullmatch(r"diff --git a/(.*) b/(.*)", head)
+        if not m or m.group(1) != m.group(2):
+            raise Refused(f"unexpected diff header: {head}")
+        if re.search(rb"(?m)^(old mode|new mode|Binary files |GIT binary patch|similarity index)", block):
+            raise Refused(f"{m.group(1)}: mode changes, renames and binary diffs are not released")
+        out[m.group(1).replace("/", "-") + ".patch"] = block
+    return out
 
 
 def split_branch(branch: str) -> tuple[str, str]:
@@ -148,8 +171,8 @@ class Repo:
 
     # --- per-tree state
     @staticmethod
-    def status(tree: Path) -> str:
-        return git("status", "--porcelain", "--untracked-files=all", cwd=tree)
+    def status(tree: Path, untracked: bool = True) -> str:
+        return git("status", "--porcelain", f"--untracked-files={'all' if untracked else 'no'}", cwd=tree)
 
     @staticmethod
     def head_branch(tree: Path) -> str | None:
@@ -178,8 +201,8 @@ class Repo:
     # --- tested records (written by run-tree only)
     def tested_records(self, commit: str) -> list[dict]:
         """The records of `git notes --ref=tested` on commit: {when, tree, command, sessions, dirs},
-        `dirs` mapping each `-d` repository's top-level directory to (HEAD, uncommitted files)
-        (migration plan §0 item 32)."""
+        `dirs` mapping each `-d` repository's top-level directory to (HEAD, tracked files with
+        uncommitted changes) (migration plan §0 item 32)."""
         r = run(["git", "notes", "--ref=tested", "show", commit], cwd=self.common_dir, check=False)
         records = []
         for line in (r.stdout if r.returncode == 0 else "").splitlines():
@@ -257,16 +280,18 @@ def has_products(tree: Path) -> bool:
 # --- the state of a `-d` repository (migration plan §0 item 32; written into tested records by run-tree)
 
 def repo_state(directory: Path) -> tuple[str, str, list[str]] | None:
-    """(top-level directory, HEAD, uncommitted files) of the git worktree `directory` lies in, or
-    None when it lies in none.  The `dir:` line of a tested record is exactly these three."""
+    """(top-level directory, HEAD, tracked files with uncommitted changes, staged new files
+    included) of the git worktree that covers `directory`, or None when none does: outside every
+    worktree, or ignored by it with no tracked file inside (`git check-ignore .` also consults the
+    index).  The `dir:` line of a tested record is exactly these three."""
     if not directory.is_dir():
         return None
     r = run(["git", "rev-parse", "--show-toplevel"], cwd=directory, check=False)
-    if r.returncode:
+    if r.returncode or run(["git", "check-ignore", "-q", "."], cwd=directory, check=False).returncode == 0:
         return None
     top = str(Path(r.stdout.strip()).resolve())
     head = run(["git", "rev-parse", "HEAD"], cwd=top, check=False).stdout.strip() or "none"
-    files = sorted(line[3:] for line in Repo.status(Path(top)).splitlines())
+    files = sorted(line[3:] for line in Repo.status(Path(top), untracked=False).splitlines())
     return top, head, files
 
 
@@ -288,13 +313,28 @@ def tracked_mtimes(top: str) -> dict[str, tuple[int, int]]:
 
 @dataclass(frozen=True)
 class Wanted:
-    """One package the batch wants: its name and version, the file name a build with build number
-    n would have, and whether a candidate on the channel is exactly what the batch wants (the tool:
-    any build of the version; a feature package: one that pins this batch's isabelle build)."""
+    """One package the batch wants: name and version; build n is the file
+    `<name>-<version>-<build_string_prefix>_<n>.conda` (the prefix as provenance.txt spells it,
+    `Isabelle2025_2`; the tool's is `pyh<hash>`); `pin` is the `isabelle` dependency a candidate on
+    the channel must carry to be exactly what the batch wants (a feature package pins this batch's
+    isabelle build; the tool, pin None, is any build of the version)."""
     name: str
     version: str
-    filename: Callable[[int], str]
-    accepts: Callable[[dict], bool]
+    build_string_prefix: str
+    pin: str | None
+
+    def filename(self, n: int) -> str:
+        return f"{self.name}-{self.version}-{self.build_string_prefix}_{n}.conda"
+
+    def accepts(self, record: dict) -> bool:
+        return self.pin is None or self.pin in record["depends"]
+
+
+def isabelle_pin(build_string_prefix: str, isabelle_build: str) -> str:
+    """The `isabelle` dependency of a feature package, e.g. `isabelle 2025.2 1`.  The renderer of the
+    feature recipes (§5 step 5) must import this: the pin a recipe writes and the pin plan_builds
+    looks for are then one and the same."""
+    return f"isabelle {build_string_prefix.removeprefix('Isabelle').replace('_', '.')} {isabelle_build}"
 
 
 def plan_builds(repodata: dict, wanted: list[Wanted], fetch: Callable[[str], dict | None]) -> dict[str, tuple[str, str | int]]:

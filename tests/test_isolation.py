@@ -1,6 +1,7 @@
 """Decision 4: git runs with a whitelisted environment and fixed configuration, ceiling at the work
 directory's parent.  Every hostile setup must give the bytes and the conclusions of a clean run."""
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -65,7 +66,7 @@ def hostile(request, chain3, tmp_path, monkeypatch):
     elif setup == "git-env-vars":
         repo = git_repo(tmp_path / "elsewhere", ("f", "x\n"))
         monkeypatch.setenv("GIT_DIR", str(repo / ".git"))
-        monkeypatch.setenv("GIT_WORK_TREE", str(repo))
+        monkeypatch.setenv("GIT_WORK_TREE", str(tmp_path))         # like a dotfile manager's GIT_WORK_TREE=$HOME: it contains the tree
         monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
         monkeypatch.setenv("GIT_CONFIG_KEY_0", "core.autocrlf")
         monkeypatch.setenv("GIT_CONFIG_VALUE_0", "true")
@@ -87,7 +88,7 @@ def test_git_sees_no_repository_above_the_work_directory(chain3, tmp_path, monke
     """The failure mode of plan §2.4: inside a worktree, git apply skips every patch with rc 0 and
     `--numstat` prints nothing.  With the ceiling it must not."""
     repo = git_repo(tmp_path / "work", ("f", "x\n"))
-    monkeypatch.setenv("TMPDIR", str(repo))                 # temporary directories land inside the worktree
+    monkeypatch.setattr(tempfile, "tempdir", str(repo))     # temporary directories land inside the worktree (TMPDIR is already cached)
     t = chain3.tree()
     st = api.status(t, chain3.features_d)
     assert {s.state for s in st.features} == {"not-applied"}

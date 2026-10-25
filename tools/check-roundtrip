@@ -12,15 +12,15 @@ diff from the pristine tag to the top feature's release tag; and the tool takes 
   A == B, by `diff -r` and by a sorted `find -printf '%M %P'` listing (modes included); A differs
   from the pristine tree; then `unapply` on A, and A == the pristine tree.
 
-The bottom tag is <R>/pristine/<etc/ISABELLE_ID> of the tree, the top tag the `release_tag` of
-FD/<top feature>/provenance.txt.  The repository must hold both tags (-C defaults to the current
-directory).  --tool defaults to this checkout's `python -m isabelle_patch_control`; in the release
+The bottom tag is the tree's own pristine tag, the top tag the `release_tag` of
+FD/<top feature>/provenance.txt, both read by the tool's own readers.  The repository must hold
+both tags (-C defaults to the current directory); the created files are its
+`git diff-tree --diff-filter=A`.  --tool defaults to this checkout's `python -m isabelle_patch_control`; in the release
 workflow it is the installed `isabelle-patch-control`.  Runs under umask 022; the copies live in a
 temporary directory next to the tree and are removed unless --keep.
 """
 import argparse
 import os
-import re
 import shlex
 import shutil
 import sys
@@ -28,6 +28,7 @@ import tempfile
 from pathlib import Path
 
 from common import TOOLS_DIR, Refused, main, run
+from isabelle_patch_control.features import FeatureDir, Tree
 
 
 def listing(d: Path) -> list[str]:
@@ -44,15 +45,6 @@ def same(a: Path, b: Path, what: str):
         raise Refused(f"{what}: the listings (modes and paths) differ:\n" + "\n".join(diff[:40]))
 
 
-def created_files(fd: Path) -> list[str]:
-    """Paths that some patch file in FD creates (its block starts with `--- /dev/null`)."""
-    out = []
-    for p in sorted(fd.glob("*/*.patch")):
-        for m in re.finditer(r"(?m)^--- /dev/null\n\+\+\+ b/(.+)$", p.read_text(errors="replace")):
-            out.append(m[1])
-    return out
-
-
 def cli():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("tree", type=Path, help="the pristine tree (not modified)")
@@ -64,17 +56,13 @@ def cli():
     a = p.parse_args()
     os.umask(0o022)
     pristine, fd = a.tree.resolve(), a.features_dir.resolve()
-    if not (pristine / "etc" / "ISABELLE_ID").is_file():
-        raise Refused(f"{pristine} is not an Isabelle tree (no etc/ISABELLE_ID)")
-    release = (pristine / "etc" / "ISABELLE_IDENTIFIER").read_text().strip()
-    bottom = f"{release}/pristine/{(pristine / 'etc' / 'ISABELLE_ID').read_text().strip()}"
-    provenance = fd / a.top / "provenance.txt"
-    if not provenance.is_file():
-        raise Refused(f"{provenance} is missing")
-    top_tag = next((line.split(":", 1)[1].strip() for line in provenance.read_text().splitlines()
-                    if line.startswith("release_tag:")), None)
-    if not top_tag:
-        raise Refused(f"{provenance} has no release_tag")
+    bottom = Tree.read(pristine).pristine_tag            # refuses a tree without the two etc/ files, or with a .git
+    top = FeatureDir.read(fd / a.top)
+    if top is None:
+        raise Refused(f"{fd / a.top / 'provenance.txt'} is missing")
+    top_tag = top.release_tag
+    created = run(["git", "diff-tree", "-r", "--no-renames", "--name-only", "--diff-filter=A", bottom, top_tag],
+                  cwd=a.C).stdout.split()
     tool = shlex.split(a.tool) if a.tool else [sys.executable, "-m", "isabelle_patch_control"]
     env = {**os.environ, "PYTHONPATH": str(TOOLS_DIR.parent)} if a.tool is None else None
 
@@ -91,15 +79,15 @@ def cli():
         r = run([*tool, "--isabelle-home", A, "--features-dir", fd, "status", "-v"], env=env, check=False)
         if r.returncode:
             raise Refused(f"status after apply exited {r.returncode}:\n{r.stdout}{r.stderr}")
-        missing = [f for f in created_files(fd) if f"    {f}  level" not in r.stdout]
+        missing = [f for f in created if f"    {f}  level" not in r.stdout]
         if missing:
             raise Refused("status -v does not show these created files under their real path:\n  " + "\n  ".join(missing))
-        print(f"A: applied; status -v shows the {len(created_files(fd))} created files")
+        print(f"A: applied; status -v shows the {len(created)} created files")
 
-        diff = run(["git", "diff-tree", "-r", "-p", "--no-renames", bottom, top_tag], cwd=a.C).stdout
-        r = run(["patch", "-p1", "-F0", "--no-backup-if-mismatch", "-d", B], input=diff, check=False)
+        diff = run(["git", "diff-tree", "-r", "-p", "--no-renames", bottom, top_tag], cwd=a.C, text=False).stdout
+        r = run(["patch", "-p1", "-F0", "--no-backup-if-mismatch", "-d", B], input=diff, check=False, text=False)
         if r.returncode:
-            raise Refused(f"GNU patch on B exited {r.returncode}:\n{r.stdout}{r.stderr}")
+            raise Refused(f"GNU patch on B exited {r.returncode}:\n{(r.stdout + r.stderr).decode(errors='replace')}")
         print(f"B: GNU patch applied {bottom} -> {top_tag}")
         same(A, B, "A (the tool) against B (GNU patch)")
         if listing(A) == listing(pristine) and run(["diff", "-r", "--no-dereference", "-q", A, pristine], check=False).returncode == 0:

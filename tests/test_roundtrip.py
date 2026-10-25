@@ -3,6 +3,8 @@ import os
 import subprocess
 import sys
 
+import pytest
+
 from conftest import ROOT, snapshot
 
 SCRIPT = ROOT / "tools" / "check-roundtrip"
@@ -34,6 +36,70 @@ def test_roundtrip_fails_when_a_patch_does_not_apply(chain3):
     p.write_text(p.read_text().replace(" b4\n", " b4 edited\n"))
     r = roundtrip(chain3, chain3.tree(), "f3")
     assert r.returncode == 1 and "apply on A exited 1" in r.stderr
+
+
+FAULTS = {
+    "a created file's mode is changed after apply": ("chmod", "the listings (modes and paths) differ"),
+    "unapply does nothing": ("noop-unapply", "A after unapply against the pristine tree: the trees differ"),
+    "status -v does not list a created file": ("drop-created", "status -v does not show these created files"),
+}
+WRAPPER = """\
+import os, subprocess, sys
+fault, args = sys.argv[1], sys.argv[2:]
+if fault == "noop-unapply" and "unapply" in args:
+    sys.exit(0)
+r = subprocess.run([sys.executable, "-m", "isabelle_patch_control", *args], capture_output=True, text=True,
+                   env={**os.environ, "PYTHONPATH": %r})
+out = r.stdout
+if fault == "drop-created" and "status" in args:
+    out = "".join(l for l in out.splitlines(True) if "new1.ML" not in l)
+if fault == "chmod" and "apply" in args and r.returncode == 0:
+    os.chmod(os.path.join(args[args.index("--isabelle-home") + 1], "src", "Pure", "new1.ML"), 0o755)
+sys.stdout.write(out); sys.stderr.write(r.stderr); sys.exit(r.returncode)
+"""
+
+
+@pytest.mark.parametrize("fault", FAULTS, ids=lambda f: FAULTS[f][0])
+def test_roundtrip_catches_a_tool_that_misbehaves(chain3, tmp_path, fault):
+    """Each check of decision 17 against a wrapped tool with one fault."""
+    kind, message = FAULTS[fault]
+    wrapper = tmp_path / "tool.py"
+    wrapper.write_text(WRAPPER % str(ROOT))
+    r = roundtrip(chain3, chain3.tree(), "f3", "--tool", f"{sys.executable} {wrapper} {kind}")
+    assert r.returncode == 1 and message in r.stderr, r.stdout + r.stderr
+
+
+def test_roundtrip_refuses_a_bad_pristine_tree_before_copying(chain3):
+    """The tags come from the tool's own readers: a `git archive` of the pristine tag has no
+    etc/ISABELLE_IDENTIFIER, and a tree with a .git is refused before the two copies are made."""
+    tree = chain3.tree()
+    (tree / "etc" / "ISABELLE_IDENTIFIER").unlink()
+    r = roundtrip(chain3, tree, "f3")
+    assert r.returncode == 1 and "no Isabelle tree" in r.stderr and "copies under" not in r.stdout
+    tree = chain3.tree()
+    (tree / ".git").mkdir()
+    r = roundtrip(chain3, tree, "f3")
+    assert r.returncode == 1 and "has a .git" in r.stderr and "copies under" not in r.stdout
+    r = roundtrip(chain3, chain3.tree(), "nope")
+    assert r.returncode == 1 and "provenance.txt is missing" in r.stderr and "copies under" not in r.stdout
+
+
+def test_roundtrip_keeps_crlf_bytes(toy):
+    """The diff goes to GNU patch as bytes: a CRLF file and a non-UTF-8 byte survive both sides."""
+    toy.write("etc/crlf.txt", b"crlf 1\r\ncrlf 2\r\n")
+    toy.write("etc/latin1.txt", b"caf\xe9\n")
+    toy.git("add", "-A")
+    toy.git("commit", "-qm", "pristine with a CRLF and a Latin-1 file")
+    toy.git("tag", "-f", toy.tags[0])
+
+    def f1():
+        toy.write("etc/crlf.txt", b"crlf 1\r\ncrlf 2\r\ncrlf 3\r\n")
+        toy.write("etc/latin1.txt", b"caf\xe9 au lait\n")
+        toy.write("etc/new_crlf.txt", b"new\r\n")
+
+    toy.feature("f1", f1)
+    r = roundtrip(toy, toy.tree(), "f1")
+    assert r.returncode == 0, r.stdout + r.stderr
 
 
 def test_roundtrip_keep(chain3):

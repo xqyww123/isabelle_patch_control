@@ -1,7 +1,7 @@
 """Decision 5: the lock on etc/ISABELLE_ID; shared for status and --dry-run, exclusive for writes;
 busy within the limit; the staging directory belongs to the lock holder alone."""
+import errno
 import fcntl
-import os
 import stat
 import threading
 import time
@@ -12,6 +12,11 @@ import pytest
 
 from conftest import make_writable, same_tree, tool
 from isabelle_patch_control import api, engine, texts
+
+
+@pytest.fixture
+def quick_lock(monkeypatch):
+    monkeypatch.setattr(engine, "LOCK_TIMEOUT", 0.3)
 
 
 @contextmanager
@@ -25,38 +30,73 @@ def held(tree: Path, exclusive: bool):
 
 
 def test_status_and_dry_run_on_a_read_only_tree(fresh):
+    """A system-wide install: neither the tree nor its parent is writable; status and --dry-run
+    write nothing there (decision 5), apply fails with the status printed."""
     toy, t = fresh
-    for p in t.rglob("*"):
+    for p in [t.parent, t, *t.rglob("*")]:
         p.chmod(stat.S_IMODE(p.stat().st_mode) & ~0o222)
     try:
         assert tool(t, toy.features_d, "status").code == 1
         r = tool(t, toy.features_d, "apply", "--dry-run")
         assert r.code == 0 and "src/Pure/a.ML  level 0 -> 3" in r.out
         r = tool(t, toy.features_d, "apply")
-        assert r.code == 1 and "Permission denied" in r.err
+        assert r.code == 1 and "Permission denied" in r.err and r.out.startswith(f"tree {t}")
     finally:
+        t.parent.chmod(t.parent.stat().st_mode | stat.S_IWUSR)
         make_writable(t)
 
 
-def test_busy_is_reported_within_the_limit(fresh):
+def test_any_os_error_is_reported_with_status(fresh, monkeypatch):
+    """EROFS on the lock file, ENOSPC while writing a copy (no file name in the error): exit 1,
+    one message, the status printed, never a traceback."""
+    toy, t = fresh
+    real_open = open
+
+    def read_only_open(path, mode="r", *args, **kw):
+        if "+" in mode:
+            raise OSError(errno.EROFS, "Read-only file system", str(path))
+        return real_open(path, mode, *args, **kw)
+
+    monkeypatch.setattr(engine, "open", read_only_open, raising=False)
+    r = tool(t, toy.features_d, "apply")
+    assert r.code == 1 and r.out.startswith(f"tree {t}")
+    assert r.err == texts.PREFIX + texts.os_error(OSError(errno.EROFS, "Read-only file system", str(t / "etc" / "ISABELLE_ID"))) + "\n"
+    assert r.err.startswith(texts.PREFIX + f"Read-only file system ({t / 'etc' / 'ISABELLE_ID'}); nothing in the tree was changed.")
+    monkeypatch.undo()
+    real_copy = engine.Replayer._copy
+
+    def full_disk_copy(self, target, content):
+        if self.workdir.name.endswith(".staging"):
+            raise OSError(errno.ENOSPC, "No space left on device")
+        return real_copy(self, target, content)
+
+    monkeypatch.setattr(engine.Replayer, "_copy", full_disk_copy)
+    r = tool(t, toy.features_d, "unapply")
+    assert r.code == 1 and r.out.startswith(f"tree {t}")
+    assert r.err == texts.PREFIX + texts.os_error(OSError(errno.ENOSPC, "No space left on device")) + "\n"
+    assert r.err.startswith(texts.PREFIX + "No space left on device; nothing in the tree was changed.")
+    same_tree(t, toy.expected(None))
+
+
+def test_busy_is_reported_within_the_limit(fresh, quick_lock):
     toy, t = fresh
     with held(t, exclusive=True):
         start = time.monotonic()
         with pytest.raises(api.Busy) as e:
-            api.status(t, toy.features_d, timeout=0.3)
+            api.status(t, toy.features_d)
         assert 0.3 <= time.monotonic() - start < 3
         assert str(e.value) == texts.lock_busy(t / engine.LOCK_FILE, 0.3)
-        assert "Retry later" in str(e.value) and str(t / "etc" / "ISABELLE_ID") in str(e.value)
-    assert api.status(t, toy.features_d, timeout=0.3).exit_code() == 1
+        assert "then retry" in str(e.value) and str(t / "etc" / "ISABELLE_ID") in str(e.value)
+    assert api.status(t, toy.features_d).exit_code == 1
 
 
-def test_shared_lock_lets_status_through_but_not_apply(fresh):
+def test_shared_lock_lets_status_through_but_not_apply(fresh, quick_lock):
     toy, t = fresh
     with held(t, exclusive=False):
-        assert api.status(t, toy.features_d, timeout=0.3).exit_code() == 1
-        assert api.apply(t, toy.features_d, dry_run=True, timeout=0.3).exit_code == 0
+        assert api.status(t, toy.features_d).exit_code == 1
+        assert api.apply(t, toy.features_d, dry_run=True).exit_code == 0
         with pytest.raises(api.Busy):
-            api.apply(t, toy.features_d, timeout=0.3)
+            api.apply(t, toy.features_d)
 
 
 def test_two_exclusive_runs_serialize(fresh):
@@ -65,7 +105,7 @@ def test_two_exclusive_runs_serialize(fresh):
 
     def run():
         try:
-            results.append(api.apply(t, toy.features_d, timeout=30))
+            results.append(api.apply(t, toy.features_d))
         except Exception as e:                                           # noqa: BLE001
             errors.append(e)
 
@@ -79,19 +119,23 @@ def test_two_exclusive_runs_serialize(fresh):
     same_tree(t, toy.expected("f3"))
 
 
-def test_unlocked_status_uses_a_temporary_directory_not_the_staging_one(fresh):
-    """A pre-unlink that gave up on the lock computes levels without it and must not touch the
-    staging directory the lock holder is using."""
+def test_runs_without_the_exclusive_lock_leave_the_staging_directory_alone(fresh, quick_lock):
+    """Decision 5: the staging directory belongs to the holder of the exclusive lock.  A pre-unlink
+    that gave up on the lock computes levels without it; status and --dry-run hold the shared lock;
+    none of them may touch what the holder is using."""
     toy, t = fresh
     staging = Path(str(t) + ".staging")
+    staging.mkdir()
+    (staging / "sentinel").write_text("holder's file")
     with held(t, exclusive=True):
-        staging.mkdir()
-        (staging / "sentinel").write_text("holder's file")
         st = api.status(t, toy.features_d, lock=False)
         assert {s.state for s in st.features} == {"not-applied"}
         assert (staging / "sentinel").read_text() == "holder's file"
         with pytest.raises(api.Busy):
-            api.status(t, toy.features_d, timeout=0.2)
+            api.status(t, toy.features_d)
+    api.status(t, toy.features_d)
+    api.apply(t, toy.features_d, dry_run=True)
+    assert (staging / "sentinel").read_text() == "holder's file"
     staging.joinpath("sentinel").unlink()
     staging.rmdir()
 
@@ -111,4 +155,3 @@ def test_lock_is_on_the_existing_id_file_and_creates_nothing(fresh):
     api.status(t, toy.features_d)
     assert sorted(p.relative_to(t) for p in t.rglob("*")) == before
     assert (t / "etc" / "ISABELLE_ID").read_text() == "89701cf1768e\n"
-    assert os.listdir(t.parent).count(t.name + ".staging") == 0

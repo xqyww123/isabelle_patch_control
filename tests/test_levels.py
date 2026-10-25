@@ -25,6 +25,8 @@ def test_fresh_tree(fresh):
     assert dry.code == 0 and sorted(dry.out.splitlines()) == sorted([
         "  src/Pure/a.ML  level 0 -> 3", "  src/Pure/new1.ML  level 0 -> 3", "  src/Pure/c.ML  level 0 -> 1",
         "  etc/options  level 0 -> 1", "  src/Pure/b.ML  level 0 -> 2", "  bin/new2  level 0 -> 2", "  README  level 0 -> 2"])
+    assert tool(t, toy.features_d, "apply", "--dry-run", "-q").out == ""
+    assert tool(t, toy.features_d, "apply", "-v", "--dry-run").out.splitlines()[0] == f"tree {t}   features.d {toy.features_d}"
     same_tree(t, toy.expected(None))                       # a dry run changes nothing
     down = tool(t, toy.features_d, "unapply", "--dry-run")
     assert (down.code, down.out) == (0, "")
@@ -157,6 +159,63 @@ def test_hole_below_marker(fresh):
     r = tool(t, toy.features_d, "status")
     assert r.code == 1 and "(hole below)" in [l for l in r.out.splitlines() if " f2 " in l][0]
     assert tool(t, toy.features_d, "status", "--feature", "f2").code == 1
+
+
+@pytest.mark.parametrize("below", ["half-applied", "CONFLICT"])
+def test_hole_below_counts_any_feature_that_is_not_applied(applied, below):
+    """Decision 6: `status --feature F` is 0 only when F and everything below it are applied; an
+    interrupted run leaves exactly this shape (files move in path order, not chain order)."""
+    toy, t = applied
+    options = t / "etc" / "options"
+    options.write_bytes(toy.expected(None)["etc/options"][0] if below == "half-applied" else b"other\n")
+    assert states(toy, t) == {"f1": below, "f2": "applied", "f3": "applied"}
+    r = tool(t, toy.features_d, "status")
+    assert r.code == 1
+    assert all(l.endswith("(hole below)") for l in r.out.splitlines() if " f2 " in l or " f3 " in l)
+    assert tool(t, toy.features_d, "status", "--feature", "f3").code == 1
+    assert tool(t, toy.features_d, "status", "--feature", "f1").code == 1
+
+
+# --- a CONFLICT file that two features touch (a.ML: f1 and f3)
+
+def test_conflict_in_a_shared_file_caps_apply_below_its_lowest_feature(fresh):
+    toy, t = fresh
+    a = t / "src" / "Pure" / "a.ML"
+    a.write_text(a.read_text().replace("a3\n", "edited\n"))
+    r = tool(t, toy.features_d, "apply")
+    assert r.code == 1
+    assert states(toy, t) == {"f1": "CONFLICT", "f2": "not-applied", "f3": "CONFLICT"}
+    assert tool(t, toy.features_d, "apply", "--feature", "f1").code == 1
+    assert tool(t, toy.features_d, "apply", "--feature", "f2").code == 1
+
+
+def test_unapply_of_a_shared_conflict_file_is_in_the_way_by_its_highest_feature(applied):
+    toy, t = applied
+    a = t / "src" / "Pure" / "a.ML"
+    a.write_text(a.read_text().replace("a5\n", "edited\n"))
+    r = tool(t, toy.features_d, "unapply", "--feature", "f3")
+    assert r.code == 1 and "CONFLICT  src/Pure/a.ML" in r.out
+
+
+def test_unapply_passes_a_conflict_file_below_its_target(applied):
+    """b.ML (f2 only) is CONFLICT; reversing f3 does not need it, so exit 0, and a.ML (f1 and f3)
+    comes down to level 1."""
+    toy, t = applied
+    b = t / "src" / "Pure" / "b.ML"
+    b.write_text(b.read_text().replace("B5\n", "edited\n"))
+    r = tool(t, toy.features_d, "unapply", "--feature", "f3")
+    assert r.code == 0 and levels(toy, t)["src/Pure/a.ML"] == 1
+
+
+def test_features_above_a_conflict_stay_applied(applied):
+    """apply only moves files up: after a hand edit in f2's file, a new top package g4 is not
+    applied, and f3 stays applied."""
+    toy, t = applied
+    toy.feature("g4", lambda: toy.write("src/Pure/g4.ML", "g4\n"))
+    b = t / "src" / "Pure" / "b.ML"
+    b.write_text(b.read_text().replace("B5\n", "edited\n"))
+    assert tool(t, toy.features_d, "apply").code == 1
+    assert states(toy, t) == {"f1": "applied", "f2": "CONFLICT", "f3": "applied", "g4": "not-applied"}
 
 
 def test_unapply_feature(applied):

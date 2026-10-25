@@ -9,15 +9,16 @@ levels one os.replace at a time.
 """
 from __future__ import annotations
 
+import functools
 import os
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import model
-from .engine import LOCK_TIMEOUT, Git, Levels, Replayer, locked, staging_dir, temp_dir, tree_path
+from . import model, texts
+from .engine import Git, Levels, Replayer, locked, staging_dir, temp_dir, tree_path
 from .errors import Busy, ChainBroken, Error, NotFound, Refused, WriteFailed  # noqa: F401  (re-exported)
-from .features import FeatureDir, Tree, link_chain, read_feature_dirs
+from .features import FeatureDir, Tree, feature_number, link_chain, read_feature_dirs
 
 __all__ = ["status", "apply", "unapply", "apply_to", "unapply_from", "Status", "Moves",
            "Error", "NotFound", "Refused", "ChainBroken", "Busy", "WriteFailed"]
@@ -29,18 +30,12 @@ class Status:
     chain: list[FeatureDir]
     levels: dict[str, Levels] = field(default_factory=dict)        # target -> levels
     features: list[model.FeatureState] = field(default_factory=list)
+    selected: int | None = None                                      # --feature F's number in the chain
 
-    def number(self, feature: str) -> int:
-        for k, fd in enumerate(self.chain, 1):
-            if fd.name == feature:
-                return k
-        raise Refused(f"no feature package named {feature!r} is installed "
-                      f"(installed: {', '.join(fd.name for fd in self.chain) or 'none'})")
-
-    def exit_code(self, feature: str | None = None) -> int:
-        """0 when the selected features (all by default) are applied without a hole below."""
-        selected = self.features if feature is None else [self.features[self.number(feature) - 1]]
-        return 0 if all(s.state == model.APPLIED and not s.hole for s in selected) else 1
+    @property
+    def exit_code(self) -> int:
+        """0 when features 1..F (all by default) are applied."""
+        return 0 if all(s.state == model.APPLIED for s in self.features[:self.selected]) else 1
 
 
 @dataclass
@@ -89,35 +84,49 @@ class Moves:
 
 # --- the shared path
 
-def _chain(tree: Path, features_dir: Path | None) -> tuple[Tree, list[FeatureDir]]:
-    t = Tree.read(tree)
-    return t, link_chain(t, read_feature_dirs(features_dir) if features_dir else [])
+def _public(fn):
+    """Every public function raises only errors.Error: any OSError on the way (a read-only file
+    system, a full disk, an unreadable provenance file) becomes WriteFailed here."""
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except OSError as e:
+            raise WriteFailed(texts.os_error(e)) from e
+    return wrapper
+
+
+def _chain(tree: Path, features_dir: Path, feature: str | None) -> tuple[list[FeatureDir], int | None]:
+    """Every refusal of the start of a command (decision 2), before the lock: the tree, the chain,
+    and the selected feature's number."""
+    chain = link_chain(Tree.read(tree), read_feature_dirs(features_dir))
+    return chain, None if feature is None else feature_number(chain, feature)
 
 
 @contextmanager
-def _session(tree: Path, chain: list[FeatureDir], *, exclusive: bool, lock: bool, timeout: float = LOCK_TIMEOUT,
+def _session(tree: Path, chain: list[FeatureDir], *, exclusive: bool, lock: bool, selected: int | None = None,
              near: Path | None = None):
     """Lock, work directory, patch targets, levels.  Only the run that holds the exclusive lock
     replays in the staging directory next to the tree (decision 5)."""
-    with locked(tree, exclusive, timeout) if lock else nullcontext():
+    with locked(tree, exclusive) if lock else nullcontext():
         with staging_dir(tree) if lock and exclusive else temp_dir(near) as workdir:
             replayer = Replayer(Git(), workdir)
             patches = [replayer.read_target(p, k) for k, fd in enumerate(chain, 1) for p in fd.patch_files]
             real_tree = os.path.realpath(tree)
             for p in patches:
                 if os.path.realpath(tree_path(tree, p.target)) != os.path.join(real_tree, *p.target.split("/")):
-                    raise Refused(f"{tree_path(tree, p.target)} is or lies under a symbolic link; isabelle-patch-control "
-                                  "replaces files in place and does not follow links (conda's always_softlink / "
-                                  "allow_softlinks settings create such trees)")
+                    raise Refused(texts.symlink(tree_path(tree, p.target), tree))
             by_target: dict[str, list] = {}
             for p in patches:
                 by_target.setdefault(p.target, []).append(p)
             levels = {}
             for target, ps in sorted(by_target.items()):
-                path = tree_path(tree, target)
-                levels[target] = replayer.levels(target, path.read_bytes() if path.exists() else None, ps)
-            st = Status(tree, chain, levels, model.feature_states(levels, len(chain)))
-            yield st, replayer
+                try:
+                    content = tree_path(tree, target).read_bytes()
+                except FileNotFoundError:                   # deleted by the lock holder meanwhile (a read without the lock)
+                    content = None
+                levels[target] = replayer.levels(target, content, ps)
+            yield Status(tree, chain, levels, model.feature_states(levels, len(chain)), selected), replayer
 
 
 def _move(st: Status, replayer: Replayer, *, target: int, up: bool, dry_run: bool) -> Moves:
@@ -133,45 +142,44 @@ def _move(st: Status, replayer: Replayer, *, target: int, up: bool, dry_run: boo
 
 # --- the public functions
 
-def status(tree: Path, features_dir: Path | None, *, lock: bool = True, timeout: float = LOCK_TIMEOUT) -> Status:
+@_public
+def status(tree: Path, features_dir: Path, *, feature: str | None = None, lock: bool = True) -> Status:
     """`lock=False` is for the pre-unlink hook after a lock timeout: levels are then computed in a
     temporary directory without the lock (every write into the tree is a single os.replace, so
     reading without the lock is safe)."""
-    t, chain = _chain(tree, features_dir)
+    chain, k = _chain(tree, features_dir, feature)
     if not chain:
         return Status(tree, [])
-    with _session(tree, chain, exclusive=False, lock=lock, timeout=timeout) as (st, _):
+    with _session(tree, chain, exclusive=False, lock=lock, selected=k) as (st, _):
         return st
 
 
-def apply(tree: Path, features_dir: Path | None, *, feature: str | None = None, dry_run: bool = False,
-          timeout: float = LOCK_TIMEOUT) -> Moves:
-    return _apply_or_unapply(tree, features_dir, feature, dry_run, timeout, up=True)
+@_public
+def apply(tree: Path, features_dir: Path, *, feature: str | None = None, dry_run: bool = False) -> Moves:
+    return _apply_or_unapply(tree, features_dir, feature, dry_run, up=True)
 
 
-def unapply(tree: Path, features_dir: Path | None, *, feature: str | None = None, dry_run: bool = False,
-            timeout: float = LOCK_TIMEOUT) -> Moves:
-    return _apply_or_unapply(tree, features_dir, feature, dry_run, timeout, up=False)
+@_public
+def unapply(tree: Path, features_dir: Path, *, feature: str | None = None, dry_run: bool = False) -> Moves:
+    return _apply_or_unapply(tree, features_dir, feature, dry_run, up=False)
 
 
-def _apply_or_unapply(tree, features_dir, feature, dry_run, timeout, *, up: bool) -> Moves:
-    t, chain = _chain(tree, features_dir)
-    empty = Status(tree, chain)
-    if feature is not None:
-        empty.number(feature)
+def _apply_or_unapply(tree, features_dir, feature, dry_run, *, up: bool) -> Moves:
+    chain, k = _chain(tree, features_dir, feature)
     if not chain:
-        return Moves(empty, [], [], dry_run)
-    with _session(tree, chain, exclusive=not dry_run, lock=True, timeout=timeout) as (st, replayer):
-        k = st.number(feature) if feature else None
-        target = (k if k else len(chain)) if up else (k - 1 if k else 0)
+        return Moves(Status(tree, []), [], [], dry_run)
+    with _session(tree, chain, exclusive=not dry_run, lock=True, selected=k) as (st, replayer):
+        target = (k or len(chain)) if up else (k - 1 if k else 0)
         return _move(st, replayer, target=target, up=up, dry_run=dry_run)
 
 
+@_public
 def apply_to(directory: Path, feature_dir: Path) -> Moves:
     """Directory interface: `directory` is the tree, `feature_dir` the only feature (decision 8)."""
     return _directory(directory, feature_dir, up=True)
 
 
+@_public
 def unapply_from(directory: Path, feature_dir: Path) -> Moves:
     return _directory(directory, feature_dir, up=False)
 
@@ -179,15 +187,7 @@ def unapply_from(directory: Path, feature_dir: Path) -> Moves:
 def _directory(directory: Path, feature_dir: Path, *, up: bool) -> Moves:
     if not directory.is_dir():
         raise NotFound(f"{directory} is not a directory")
-    fd = FeatureDir(feature_dir, feature_dir.name, "", "", "")
+    fd = FeatureDir(feature_dir, feature_dir.name, "", "")     # decision 8: no provenance is read; only .dir and .patch_files mean anything
     near = Path(os.path.realpath(directory)).parent
     with _session(directory, [fd], exclusive=False, lock=False, near=near) as (st, replayer):
         return _move(st, replayer, target=1 if up else 0, up=up, dry_run=False)
-
-
-def single_feature_levels(tree: Path, feature_dir: Path) -> dict[str, Levels]:
-    """The levels of a tree's files relative to one feature alone (used by the pre-unlink hook when
-    the chain does not link): 0 = the feature's change is absent, 1 = present."""
-    fd = FeatureDir(feature_dir, feature_dir.name, "", "", "")
-    with _session(tree, [fd], exclusive=False, lock=False) as (st, _):
-        return st.levels

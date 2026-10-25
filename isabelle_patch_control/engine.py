@@ -62,18 +62,15 @@ class Git:
 # --- the lock on the tree
 
 @contextmanager
-def locked(tree: Path, exclusive: bool, timeout: float = LOCK_TIMEOUT):
-    """Hold the lock on tree/etc/ISABELLE_ID: shared for reading, exclusive for writing."""
+def locked(tree: Path, exclusive: bool):
+    """Hold the lock on tree/etc/ISABELLE_ID: shared for reading, exclusive for writing; Busy
+    after LOCK_TIMEOUT seconds (read when called, so tests can shorten it)."""
     path = tree / LOCK_FILE
-    try:
-        f = open(path, "r+b" if exclusive else "rb")
-    except PermissionError as e:
-        raise WriteFailed(f"cannot open {path} for writing: {e.strerror}") from e
-    with f:
-        deadline = time.monotonic() + timeout
+    with open(path, "r+b" if exclusive else "rb") as f:
+        deadline = time.monotonic() + LOCK_TIMEOUT
         while not _try_lock(f, exclusive):
             if time.monotonic() >= deadline:
-                raise Busy(texts.lock_busy(path, timeout))
+                raise Busy(texts.lock_busy(path, LOCK_TIMEOUT))
             time.sleep(0.05)
         try:
             yield
@@ -206,6 +203,7 @@ class Replayer:
     def read_target(self, patch: Path, feature: int) -> PatchFile:
         """`git apply --numstat --summary`: the one path the patch changes, and whether it creates
         or deletes the file (decision 3)."""
+        patch = Path(os.path.abspath(patch))                 # git runs in the work directory
         r = self.git.run(self.workdir, "apply", "--numstat", "--summary", str(patch))
         out = (r.stdout + r.stderr).decode(errors="replace")
         if r.returncode:

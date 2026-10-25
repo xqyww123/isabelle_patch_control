@@ -97,18 +97,32 @@ check "no second record for quick_and_dirty" '[[ $(git -C "$t" notes --ref=teste
 expect ok      "second clean build appends a record"                  -- "$tools/run-tree" "$t" build -d x -g main FOL ZF
 check "two records, the second lists FOL ZF" '[[ $(git -C "$t" notes --ref=tested show HEAD | /usr/bin/grep -c "^tested ") == 2 ]] && git -C "$t" notes --ref=tested show HEAD | /usr/bin/grep -q "^sessions: Pure FOL ZF$"'
 echo "--- run-tree: the state of -d repositories (migration plan §0 item 32)"
-git init -q "$work/light"; ( cd "$work/light" && echo root > ROOT && echo thy > Light.thy && git add -A && git commit -q -m light && echo wip > notes.txt )
+git init -q "$work/light"; ( cd "$work/light" && echo root > ROOT && echo thy > Light.thy && git add -A && git commit -q -m light && echo wip > notes.txt && echo edit >> ROOT )
 expect ok      "build with -d of a git worktree and -d of a plain directory" -- "$tools/run-tree" "$t" build -d "$work/light" -d "$work/home" -g main HOL
-check "one dir: line: top, HEAD, uncommitted files" '[[ $(git -C "$t" notes --ref=tested show HEAD | /usr/bin/grep -c "^dir: ") == 1 ]] && git -C "$t" notes --ref=tested show HEAD | /usr/bin/grep -q "^dir: $work/light $(git -C "$work/light" rev-parse HEAD) notes.txt$"'
+check "one dir: line: top, HEAD, tracked files with uncommitted changes (not the untracked notes.txt)" '[[ $(git -C "$t" notes --ref=tested show HEAD | /usr/bin/grep -c "^dir: ") == 1 ]] && git -C "$t" notes --ref=tested show HEAD | /usr/bin/grep -q "^dir: $work/light $(git -C "$work/light" rev-parse HEAD) ROOT$"'
 echo "$work/light/Light.thy" > "$HOME/.stub-build-edit"
 expect ok      "build during which a -d file is changed and changed back" -- "$tools/run-tree" "$t" build -d "$work/light" HOL
 check "no record, the reason names the -d directory" '/usr/bin/grep -q "no tested record: the repository of -d $work/light changed during the build" "$work/out" && [[ $(git -C "$t" notes --ref=tested show HEAD | /usr/bin/grep -c "^tested ") == 3 ]]'
 rm "$HOME/.stub-build-edit"
+echo "$work/light/scratch.txt" > "$HOME/.stub-build-create"
+expect ok      "build during which an untracked file appears in the -d repository" -- "$tools/run-tree" "$t" build -d "$work/light" HOL
+check "a record all the same: untracked files do not count" '[[ -f $work/light/scratch.txt && $(git -C "$t" notes --ref=tested show HEAD | /usr/bin/grep -c "^tested ") == 4 ]]'
+rm "$HOME/.stub-build-create"
+# an outer repository that ignores the directory given with -d (MLML ignores /contrib, where the AFP checkout lives)
+git init -q "$work/outer"; ( cd "$work/outer" && echo /contrib > .gitignore && echo x > tracked.txt && git add -A && git commit -q -m outer && mkdir -p contrib/afp/thys && echo thy > contrib/afp/thys/A.thy )
+echo "$work/outer/tracked.txt" > "$HOME/.stub-build-edit"
+expect ok      "build with -d on an ignored directory while the outer repository's tracked file changes" -- "$tools/run-tree" "$t" build -d "$work/outer/contrib/afp/thys" -d "$work/light" HOL
+check "a record with light's dir: line only: the ignored directory is tied to no repository" '[[ $(git -C "$t" notes --ref=tested show HEAD | /usr/bin/grep -c "^tested ") == 5 && $(git -C "$t" notes --ref=tested show HEAD | /usr/bin/grep -c "^dir: $work/light ") == 3 && $(git -C "$t" notes --ref=tested show HEAD | /usr/bin/grep -c "^dir: $work/outer") == 0 ]]'
+rm "$HOME/.stub-build-edit"
+# a dir: line longer than one command-line argument may be (128 KiB on Linux): 4000 tracked files with uncommitted changes
+git init -q "$work/big"; ( cd "$work/big" && for i in $(seq 4000); do echo $i > "theory-file-with-a-rather-long-name-$i.thy"; done && git add -A && git commit -q -m big && for i in $(seq 4000); do echo edit >> "theory-file-with-a-rather-long-name-$i.thy"; done )
+expect ok      "build with -d of a repository with 4000 changed tracked files" -- "$tools/run-tree" "$t" build -d "$work/big" HOL
+check "the record was written (the note goes in on stdin, not as an argument)" '[[ $(git -C "$t" notes --ref=tested show HEAD | /usr/bin/grep -c "^tested ") == 6 && $(git -C "$t" notes --ref=tested show HEAD | /usr/bin/grep "^dir: $work/big " | wc -c) -gt 131072 ]]'
 echo 3 > "$HOME/.stub-build-rc"
 expect refused "failed build exits non-zero"                          -- "$tools/run-tree" "$t" build HOL
 rm "$HOME/.stub-build-rc"; echo src/dirty.ML > "$HOME/.stub-build-touch"
 expect ok      "build that leaves the tree dirty"                     -- "$tools/run-tree" "$t" build HOL
-check "no record when status is not empty afterwards" '[[ -f $t/src/dirty.ML && $(git -C "$t" notes --ref=tested show HEAD | /usr/bin/grep -c "^tested ") == 3 ]]'
+check "no record when status is not empty afterwards" '[[ -f $t/src/dirty.ML && $(git -C "$t" notes --ref=tested show HEAD | /usr/bin/grep -c "^tested ") == 6 ]]'
 rm "$t/src/dirty.ML" "$HOME/.stub-build-touch"
 expect ok      "stock tree runs (no record)"                          -- "$tools/run-tree" "$s" build HOL
 check "stock tree got no note" '! git notes --ref=tested show "$(git -C "$s" rev-parse HEAD)" >/dev/null 2>&1 || ! git notes --ref=tested show "$(git -C "$s" rev-parse HEAD)" | /usr/bin/grep -q "^tested "'

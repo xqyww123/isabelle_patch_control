@@ -33,7 +33,8 @@
   （pre-unlink 里 `<feature>`、`<package>`、`<version>` 是渲染器要填的占位符；`.bat` 已是 CRLF 字节）；`AGENTS.md -> ../AGENTS.md` 符号链接
   （`help` 打印它，内容等决定 14 的重写）。`pyproject.toml` 只加：第二个入口 `isabelle-patch-control`、新包进 `packages.find` 与 `package-data`、
   `[tool.pytest.ini_options]`（`pythonpath = ["."]`）；**名字与版本没改**（随决定 14 的重写一起，第 32 条）。
-- **测试** `tests/`（pytest，87 例，约 2 分 10 秒，其中 14 例是杀进程子进程）：`conftest.py` 的 `Toy` 用一个玩具 git 仓库按 make-patches 的方式
+- **测试** `tests/`（pytest，当时 87 例，约 2 分 10 秒——其中 120 秒是两个钩子锁用例对冻结进默认参数的 `LOCK_TIMEOUT` 改写无效、各等足 60 秒，
+  代码评审一轮 C7 查出并修掉；杀进程子进程的 14 例合计只要 4 秒；修后 123 例约 25 秒）：`conftest.py` 的 `Toy` 用一个玩具 git 仓库按 make-patches 的方式
   （`git diff-tree -r -p --no-renames` 按文件切块、扁平名、provenance.txt）造 feature 目录，`git -c tar.umask=022 archive` 造树（否则 git archive
   给 0664/0775，与补丁头部的 0644/0755 不符——第一轮 30 例失败的主因）；夹具自己的 git 不吃敌对环境（去掉 `GIT_*`、`core.attributesFile=/dev/null`）。
   覆盖决定 15 工具层的全部条目：链接规则与各种 exit 3、`--isabelle-home`/`--features-dir` 推导、四种状态、第一轮 C3 五个场景、两例多层级 CONFLICT、
@@ -97,7 +98,154 @@
   - 文档：README 的脚本清单加 `check-roundtrip`；develop.md 加一段。pytest 100 例、`tools/tests/run-all.sh` 全部通过。
   - 作者自定的：`plan_builds` 的接口形状（`Wanted` 的两个回调、`fetch` 返回记录）；mtime 指纹；`MAKE_PATCHES_FAIL_AFTER`；`check-roundtrip` 的 `--keep`
     与 `-C` 默认当前目录。
-- **下一步**：等用户说"提交"后提交第 2 步这批（改 8 个、新增 3 个），push、bump 主仓库指针。然后 §5 第 3 步，每件都要用户下令：GitHub 建
+- 第 2 步这批已提交：工具仓库 321646d（用户 2026-10-25 "你可以自决"→作者决定评审前提交），已 push；主仓库 7c212ced bump 指针（未 push）。
+- **代码评审第一轮正在跑（2026-10-25）**：用户要求两轮对抗（critics → merge editor → 每个 challenge 一个全新 defender → judge），Opus、xhigh、全英文，
+  重点删低质量意见、看优雅性、驳斥钻牛角尖、提议放宽规约；judge 裁定是否达到验收（可进 §5 第 3 步）、哪些要用户定、哪些作者自决后再评；**用户同意前不改代码**；
+  reader 校读文案一并做（三位 reader，medium）。Workflow 任务 `wdtyl8idy`，run `wf_0a0a00a6-aa3`，脚本
+  `~/.claude/projects/-home-qiyuan-Current-MLML/f1ebd39a-eda3-4c68-b769-d435321fa8d4/workflows/scripts/patch-tool-code-review-1-wf_0a0a00a6-aa3.js`，
+  结果在 `/tmp/claude-1002/-home-qiyuan-Current-MLML/f1ebd39a-eda3-4c68-b769-d435321fa8d4/tasks/wdtyl8idy.output`（JSON 包装，`result` 里有
+  `findings`、`overalls`、`readings`、`merged`、`defenses`、`judgement`——`judgement` 多了 `accepted` 与 `reader_points_to_act_on`）。处理方式同前五轮：
+  存 `ISABELLE_PATCH_CONTROL_CODE_REVIEW1_detail.json`、渲染 `ISABELLE_PATCH_CONTROL_CODE_REVIEW1.md`（渲染脚本仿 scratchpad `render5.py`，加 readers
+  一节），用中文向用户汇报全部 concern、每条打算怎么改、哪些要用户定、reader 的意见；用户同意后才改代码。中途暂停则
+  `Workflow({scriptPath: <脚本>, resumeFromRunId: 'wf_0a0a00a6-aa3'})`。评审员的实验在 scratchpad `review-code1/`。
+- **代码评审第一轮已完成（2026-10-25，50 个 agent，约 2.5 小时）**：报告 `ISABELLE_PATCH_CONTROL_CODE_REVIEW1.md`、明细 `…CODE_REVIEW1_detail.json`
+  （渲染脚本 scratchpad `render_code1.py`，浓缩视图 `condensed_code1.py`）。78 条发现 → 38 条 challenge（5 条被 merge editor 删）；defender 一条也没整体驳倒
+  （20 confirmed、18 partially）；**judge 判未达验收**（不能进 §5 第 3 步）。阻塞第 3 步的：C3（make-patches 第一次发布形状下失败后重跑永远被拒，一行修）、
+  C11（决定 16 第 9 点要求的用例缺失、门禁 (c) 从未在测试里拒绝过）、C22+C25（make-patches 与 check-roundtrip 以文本模式读 diff 丢 CR；check-roundtrip
+  对真 pristine tag 的 archive 崩溃——没有 etc/ISABELLE_IDENTIFIER）、以及 checklist 放在 make-patches 之后（失败即烧版本号）。要用户定的（owner_decides）：
+  C2（.messages.txt 编码：建议全平台 ASCII+backslashreplace）、C4（忽略目录不算 `-d` 仓库）、C36（`dir:` 行只算已跟踪文件）、C13（CONFLICT 文案改说
+  "直到修好之前工具不打 F 及其上"）、C15（hole 规则改"下面有不是 applied 的"）、C19（`--feature` 也接受包名）、C29（README/附录 A 的"stacking 必 CONFLICT"
+  句改写）、C34（链接不上时 pre-unlink 改写链接不上文案+两支，删 single_feature_levels）、C35（只读 release_tag/base_tag）、C37（删 checklist "空文件"条）、
+  C38（放宽决定 15 锁用例）、checklist 放到 make-patches 之前、`conda update --all` 要不要警告删用户目录、CONFLICT 文案末行 0.x 指针要不要留。
+  作者自决后再评（author_decides_then_rereview）：C1、C6、C8、C10、C11、C14、C17、C18、C22、C23、C25、C26、C30、C33。机械修改不再评：C3、C5、C7、C9、
+  C12、C16、C20、C21、C24、C27、C28、C31、C32。reader 意见要采纳的在报告 "Readers' points the judge says to act on"。**用户同意前不改代码**；中文汇报已发
+  （2026-10-25）。下一步：按用户答复改代码与方案（方案改动手改），跑 pytest/玩具测试/变异检查，再起一轮定向评审（author_decides_then_rereview 的条目）。
+- **用户 2026-10-25 对评审的裁决（全部已定，可以开工）**：问"是否与设计有关，无关的自决"。设计相关三件：**C15 按建议改**（hole = applied 下面有任何不是
+  applied 的；`status --feature F` 退出 0 当且仅当 1..F 全 applied；决定 6 原文随之手改）；**C29 删句**（"Once a higher feature has changed a file, a lower
+  feature's patch for that file reads CONFLICT; that is inherent in stacking" 从工具 README、迁移方案附录 A、§5.3、§7 规则 15 四处删掉，不补替代句，
+  迁移方案 §0 加带日期的记录）；**C34 按建议改**（链接不上时 pre-unlink 写链接不上文案 + 更新/卸载两支，不列文件；删 `single_feature_levels`、
+  `_residue_chain_broken`、`REASON_CHAIN`，残留原因四减三；决定 9 与 §4 手改）。其余十件作者自决如下：C2 全平台 ASCII+`backslashreplace`；C4 `-d` 目录被
+  所在仓库忽略（`git check-ignore -q .` 成功）则不算、第 32/35 条措辞加注记；C36 `dir:` 行只算已跟踪文件（`--untracked-files=no`），规则 11、README、
+  glossary、第 32/35 条措辞随之改并加注记；C13 CONFLICT 文案改"until this is fixed, the tool applies neither F nor the packages that depend on it"，
+  README 同改；C19 `--feature` 同时接受 feature 名与包名（`names.feature_name`）；C35 只读 `release_tag`/`base_tag`（与 C1 合修）；C37 删 checklist 空文件条，
+  `check-roundtrip` 从 `git diff-tree --diff-filter=A` 取新建文件；C38 决定 15 锁用例改措辞、哨兵测试加 `status` 与 `apply --dry-run`；checklist 移到
+  `make-patches` 之前、对 `git diff-tree <基 tag> <tip>` 过、每条给手工命令、不写检查代码；`isabelle` 包每次被替换会删用户目录在 README/统一文本说一次；
+  CONFLICT 文案末行 0.x 指针暂留。**实施清单**（细节在 `…CODE_REVIEW1.md` 各 challenge 的 JUDGE ACTION）：
+  1. 阻塞项：C3（`removed` 从 `git ls-tree HEAD` 算）、C11（写入顺序测试做成函数并在 cpkg 跑；post-commit hook 造"门禁与 (c) 之间提交组件文件"；门禁 (c)
+     两例拒绝；`check-roundtrip` 四项检查各一个伪工具用例）、C22+C25（`common.run(text=False)`、`patch_blocks(bytes)` 共用、`check-roundtrip` 用
+     `Tree.read`/`FeatureDir.read` 先拒后拷、conftest 用共用切块、CRLF 玩具用例）。
+  2. 工具：C1+C35（`FeatureDir(dir, name, release_tag, base_tag)`，name 取 `release_tag` 第二段；每目录检查 `<R'>/pristine/<X>` 不等于树 → not_pristine；
+     剩余目录报"base 没人发布"的那个；测试目录名乱序两例）；C15；C17（OSError→WriteFailed 在 `_session` 一处，删 engine 的 PermissionError 特判，
+     api.py:118 `read_bytes` 捕 FileNotFoundError，消息兼容 `filename=None`，加 EROFS/ENOSPC 用例）；C18（`features.locate(prefix)`、`FEATURES_D` 一处、
+     API 收 `Path`、`read_feature_dirs` 缺根返回 []、`cli.resolve` 用 `abspath`、`Replayer.read_target` 把 patch 路径取绝对）；C19（`features.feature_number`、
+     `_chain` 返回 `(chain, k)`、`Status.selected`、`exit_code` 改 property、接受包名）；C23（`apply-to`/`unapply-from` 成功时不打印 conda 环境的文案，
+     只 `-v` 列文件与 CONFLICT 行；api.py:182 加注释）；C2（`.messages.txt` 写 `encoding="ascii", errors="backslashreplace"`，加非 ASCII 前缀用例）；
+     C7（`locked(tree, exclusive)` 调用时读 `LOCK_TIMEOUT`，删 api 的 timeout 参数，测试用 monkeypatch，断言 "0.2 s"）；C14（Busy/WriteFailed 共用
+     `api.status(lock=False)` + 一个 `_residue(...)` 辅助函数，删 `_residue_without_lock`，残留算不出就让异常传播、钩子 `||` 行说话；文案"conda-hook 写出了
+     自己的消息才退出 0"进 conda_hook 文档串、cli.py:16、reference.md、AGENTS.md、方案 §4 与决定 9（作者决定，记交接）；加 REASON_WRITE 残留用例与
+     "算残留失败 → 非零退出且不写"用例）；C34；C26（前缀只在 `conda_hook.run` 写文件处每段加一次，`texts` 钩子文案去 `{PREFIX}`，`interrupted` 保留，
+     test_hooks 加 `said()`）；C6（钩子四处兜底换成 texts 两个框架：post-link "没打上 + 细节 + then run apply"，pre-unlink 两支；符号链接拒绝给
+     `conda config --set always_softlink false; conda config --set allow_softlinks false; --force-reinstall isabelle`；五份文档"全部文案已校读"改实话）；
+     C16（`interrupted` 的 Windows 命令填真实路径；README.md:102 用 `<prefix>`）；C13；C10（conda_hook 用 `feature_states` 里第一个 CONFLICT 的 feature，
+     删 `min(...)`；test_levels 加三例多 feature 同文件 CONFLICT 规则，test_hooks 加 post-link 点名 f1 例；重跑六个变异体）；C27（五个无测试分支：
+     REASON_WRITE、git 查找与版本、删除 0755 文件的恢复、`apply -v`/`-q`、默认调用；`EXECUTABLE` 加 `src/Pure/c.ML`）；C28（test_write.py:32 改真断言，
+     共享 inode 用 a.ML 0600）；C9（test_isolation GIT_WORK_TREE=tmp_path；ceiling 测试 monkeypatch `tempfile.tempdir`）；C12（只读树测试连父目录；
+     C38 哨兵测试加 status/dry-run）。
+  3. 发布侧：C4（`repo_state` 加 `git check-ignore -q .`，文档/方案措辞）；C36（`Repo.status(tree, untracked=True)`，`repo_state` 传 False；
+     test_trees 与 test_make_patches 的用例；规则 11 等措辞）；C20（note 走 stdin `-F -`；3000 个未跟踪文件的用例）；C21（run-all.sh 删 `|| true`）；
+     C24（删 `MAKE_PATCHES_FAIL_AFTER`，测试用 `.git/index.lock`、`refs/tags/<tag>.lock` 造失败；注释写"write step (b)"）；C8（`Wanted(name, version,
+     build_string_prefix, pin)` 纯数据、`isabelle_pin()`；**实际保留三参数** `plan_builds(repodata, wanted, fetch)`，钉死随每个 `Wanted` 走，
+     偏离已记在决定 10 与 §10.0）；C37（`created_files` 删掉改 diff-tree）；checklist 前移（RELEASE.md 重写该节：
+     对 `git diff-tree <base> <tip>` 过、每条手工命令、之后才 `make-patches`；方案决定 16 第 10 点手改）。
+  4. 文档与文案：C5（四处 `--force-reinstall isabelle` 前单独一句：保存 isa/ 与用户目录里自己的东西，用户目录 `isabelle getenv -b ISABELLE_HOME_USER` 含
+     heap/settings/preferences/components 登记，下一步会删，装了的包自己重登记、自己的设置不回来）；C29 四处删句；C30（AGENTS "the tree is fine" 改实话）；
+     C31（RELEASE.md 列明未写的三件、roundtrip 复制 `isa/`、smoke 在发布后只报告、"只改权限位"条加理由；develop.md 两处）；C32（AGENTS 0.x 节改
+     `skip_nitpick_examples` 说法、仓库 URL 一次、`isabelle build` 规则移到 "In this repository"；README 0.x 指针句改）；C33（统一文本 = README 第 19 行到
+     0.x 节之前整段，两处"消息会说怎么修"改指 README 章节，test_docs 用 `conda create -n ` 选行）；reader 意见全部采纳（见报告 "Readers' points the judge
+     says to act on"：统一文本加健康输出样例与每种坏状态第一步、何时手跑 apply、激活环境/`conda run`、定义 `isa/` 与 `<prefix>`、更新时不带 `-c` 会怎样；
+     `--help` 重写给用户；CONFLICT 文案先给最简单的路、末尾加"然后跑 status"、保留自己改动会再 CONFLICT、去掉找不到的"其他环境"指令或给命令；AGENTS
+     CONFLICT 条去掉 "moved either way"；RELEASE.md 给维护者写当前能否发布、完整命令、首次建 feature 仓库要哪些文件、名词原地定义、"五条腿"改
+     "roundtrip 加四条 accept 腿"、每条 checklist 的检查办法）；所有新写/改写的文案（含 texts.py 里从未校读的 chain_broken、not_pristine、lock_busy、
+     HEAP_PARAGRAPH、BACK_AT_BOTTOM、write_failed、interrupted）再过一遍 reader（medium）。方案手改：§0 加第 38 条记本轮裁决；决定 3、6、9、15、16 第 10 点、
+     §4 相应段；§10.1 加 "rev 6 → 代码评审一轮" 对照。
+  5. 全部改完：pytest、`tools/tests/run-all.sh`、评审员的变异体（scratchpad `review-code1/critic-tests/`、`defender-C10/` 等有现成插件）全过；
+     交接与 develop.md 的"两分钟"归因改正；然后对 author_decides_then_rereview 的条目（C1、C6、C8、C10、C11、C14、C17、C18、C22、C23、C25、C26、C30、C33）
+     起一轮定向评审（Workflow、Opus、xhigh、每条一个 defender、judge 判是否可进第 3 步）；用户说"提交"才提交。
+- **裁决已全部实施（2026-10-25 16:40 +08，未提交）**，上面实施清单 1–4 全做完，第 5 的测试与变异检查已过，reader 校读与定向再评正在起：
+  - 代码：`features.py`（`FEATURES_D`/`locate`、`FeatureDir(dir, name, release_tag, base_tag)` 只读两字段、逐目录核 `(R', X)`、剩余目录报
+    base 没人发布的那个、`feature_number` 接受包名、`read_feature_dirs` 缺根返回 `[]`）；`model.py` hole 改 `!= APPLIED`；`engine.py`
+    `locked(tree, exclusive)` 调用时读 `LOCK_TIMEOUT`、删 PermissionError 特判、`read_target` 取绝对路径；`api.py` 删 timeout 参数、`_chain`
+    返回 `(chain, k)`、`Status.selected` 与 `exit_code` property（1..F 全 applied）、`_session` 外层 `OSError → WriteFailed(texts.os_error)`、
+    `read_bytes` 捕 FileNotFoundError、API 收 `Path`、删 `single_feature_levels`、`_directory` 的 FeatureDir 加注释；`texts.py` 去掉钩子文案的
+    `{PREFIX}`、`SAVE_LINE`、`conflict_full(feature, (path, created) 对, …)` 按 C13 与 reader 意见改写、新 `chain_broken_removal`/`post_link_failed`/
+    `post_link_write_failed`/`pre_unlink_failed`/`symlink`/`os_error`、删 `REASON_CHAIN`、`interrupted` 两边印真实路径、`step2` 的"其他环境"给
+    `conda env list`；`conda_hook.py` 写者逐段加前缀、ASCII+backslashreplace、`post_link` 返回段列表、第一个 CONFLICT 的 FeatureState、
+    WriteFailed 单独处理说打到哪、Busy/WriteFailed 共用 `api.status(lock=False)` + 一个 `_residue()`、ChainBroken 写链接不上文案两支、其他 Error 套框架；
+    `cli.py` `--help` 为用户改写、用 `locate`/`abspath`、`status(feature=)`、`report_moves` 对目录接口不印环境文案、`--feature` 的 help 说接受包名。
+  - 发布侧：`common.py`（`run(text=)`、`git(input=)`、`main` 也捕工具的 Error、`patch_blocks(bytes)` 共用、`Repo.status(untracked=)`、
+    `repo_state` 加 `check-ignore` 且 `-uno`、`Wanted(name, version, build_prefix, pin)` 纯数据带 `filename()`/`accepts()`、`isabelle_pin`）；
+    `make-patches`（删 `fail_after` 与 `MAKE_PATCHES_FAIL_AFTER`、`committed_files()` 共用于 removed 与 (d)、块按字节写、注释写"write step"、
+    docstring 加门禁编号来源）；`run-tree`（note 走 `-F -` stdin、文案改"属于某 git 工作树"/"已跟踪文件"）；`check-roundtrip`（`Tree.read`/
+    `FeatureDir.read` 先拒后拷、新建文件取 `diff-tree --diff-filter=A`、diff 按字节喂 patch）。
+  - 测试：pytest **123 例约 25 秒**；`tools/tests/run-all.sh` 全过（`test_make_patches.sh` 102 例：`write_order` 函数在 pkg 与 cpkg 各跑一遍、git 锁文件
+    造失败、门禁与 (c) 之间 post-commit 钩子提交 ROOT、门禁 (c) 符号链接（指向 `/dev/null`，重放副本读得到才走到前向比较）与重复上下文两例、
+    CRLF 文件保 CR、随包文件构建时未跟踪事后提交被拒；`test_trees.sh` 70 例：`dir:` 行只列已跟踪改动、构建中新建未跟踪文件仍有记录、外层仓库
+    忽略的 `-d` 目录不绑、4000 个已改文件的长 `dir:` 行；`run-all.sh` 删 `|| true`、打印退出码）。变异检查：scratchpad `mutcheck/mutants2.py`
+    （29 个内存变异体，`mutcheck/run.sh`，结果 `mutcheck/results.txt`）——28 个被杀，剩 1 个 `exit_code_selected_only` 是等价变异体（hole 规则
+    放宽后"F applied 且无 hole"等于"1..F 全 applied"）；评审员的旧插件（`review-code1/`）针对的是改前代码，大多已不能加载，故自写。
+  - 文档：README（统一文本扩到 0.x 节之前、健康样例与四种坏状态的第一步、何时手跑 apply、激活/`conda run`、定义 `isa/` 与 `<prefix>`、忘带 `-c`、
+    C5 保存句、C13、C33 指向章节、Windows 路径占位符、删 C29 句、规则 11 措辞）、`common-readme.md` 由 README 生成、AGENTS（仓库 URL 一次、
+    hole 定义、退出码、`no feature packages installed` 实话、CONFLICT 条、"In this repository" 收 isabelle build 规则、0.x 条、C5 保存句）、
+    reference（决定 3 读法、`--feature` 包名、hole/退出码、目录接口静默、conda-hook 退出码与 ASCII、三种残留原因、文案归属实话）、develop
+    （`locate`/`feature_number`、OSError 规则、`patch_blocks`、git 锁文件造失败、25 秒、覆盖清单、§5 第 5 步未写）、RELEASE（现状、名词、feature
+    仓库首次设置、checklist 在 `make-patches` 之前且每条给命令、完整命令行、roundtrip 复制 `isa/`、smoke 只报告、publish 前两条件）。
+  - 方案手改：本计划 §0 第 38 条、§2.3 一行、决定 2、3、6、9、10、15、16 第 10 点、§4 多处、§10.0 对照表；迁移方案 §0 第 32 条注记、新第 33 条、
+    glossary、`run-tree` 说明、§5.3、§7 第 11、15 条、附录 A。
+  - **待办**：reader 校读（三位 Opus、medium：README 统一文本、AGENTS、`--help`、texts.py 全部钩子文案含从未校读的七段）与 author_decides_then_rereview
+    14 条的定向再评（Opus、xhigh、每条一个 verifier、judge）正在一个 Workflow 里跑（2026-10-25 16:50 +08 起；任务 `wwgfh3tm8`，run
+    `wf_9e406159-aa0`，脚本 `~/.claude/projects/-home-qiyuan-Current-MLML/f1ebd39a-eda3-4c68-b769-d435321fa8d4/workflows/scripts/patch-tool-code-review-2-targeted-wf_9e406159-aa0.js`，
+    结果 `/tmp/claude-1002/-home-qiyuan-Current-MLML/f1ebd39a-eda3-4c68-b769-d435321fa8d4/tasks/wwgfh3tm8.output`，`result` 里有 `readings`、
+    `verdicts`、`judgement`；评审员的实验在 scratchpad `review-code2/`，每条 challenge 的原文在 `review-code2/challenges/C*.txt`）。**评审跑的时候
+    不改工作树**。完成后：存 `ISABELLE_PATCH_CONTROL_CODE_REVIEW2_detail.json`、渲染 `…CODE_REVIEW2.md`（仿 `render_code1.py`），按 judge 的
+    must-fix 与 reader 意见再改，然后用中文向用户汇报、等"提交"。
+  - **scratchpad 清理（2026-10-25 17:05 +08，light locale 会话转来用户提醒：/tmp 24G tmpfs 已 99%）**：前五轮方案评审的实验目录 `review-ipc2..5`、
+    `review2`（共约 15G）已压成 `~/archive/claude-scratchpad/f1ebd39a-<目录名>-2026-10-25.tar.zst`（`zstd -t` 与条目数核对后才删源），/tmp 降到 37%。
+    留下的：`review-code1/`（代码评审一轮实验，518M）、`review-code2/`（正在跑的再评）、`mutcheck/`、`realchain/`、`mp-test`/`trees-test`（玩具测试的
+    临时目录，可随时删）。本会话结束前把 `review-code1/`、`review-code2/` 也照此归档。
+- **代码评审第二轮（定向再评）已完成并按其结果改完（2026-10-25 18:10 +08，未提交）**：报告 `ISABELLE_PATCH_CONTROL_CODE_REVIEW2.md`、明细
+  `…CODE_REVIEW2_detail.json`（渲染脚本 scratchpad `render_code2.py`）。18 个 agent、35 分钟：14 位 verifier 判 11 条 fixed/fixed_differently、3 条
+  partially_fixed（C6、C30、C33，都是文档与测试的边角）；**judge 判 ACCEPTED，可进 §5 第 3 步**——剩下的全是 author_fixes_no_rereview，没有一条改变
+  发布 tag 的内容。judge 另查出三件（均已修）：C6 的修法引入的回归——post-link 写失败后第二次 `api.status` 没有兜底，同样的失败再来一次就 exit 1 什么都不写
+  （现在：兜住 `api.Error`，写不带 "Applied so far" 的框架）；"Applied so far" 把 (hole below) 的 feature 也算成 applied（现在按 C15 过滤 `not s.hole`）；
+  `OSError → WriteFailed` 的翻译只在 `_session` 里、`_chain` 读来历文件不在里面（现在是公开入口上的 `@_public` 装饰器，`errors.WriteFailed` 文档串随之改）。
+  其余已修：`Wanted.build_string_prefix` 与来历文件同一拼法（`filename()` 自己加 `_`）、`check-roundtrip` 文档串换行、`patch_blocks` 也拒 "Binary files"、
+  RELEASE.md 与 `make-patches --help` 的 gate (f) 命令补 `-r --no-renames`、`--help` 第一句换成给用户的话并把 "(plan §4)" 挪进注释、`--features-dir` 的 help。
+  reader 意见按 judge 的取舍落进 texts.py（SAVE_LINE 点明"这个环境自己的用户目录"、chain_broken/not_pristine 动作在前细节在括号里、lock_busy 不说 inode、
+  write_failed/os_error 给下一步、chain_broken_removal/pre_unlink_failed/BACK_AT_BOTTOM 改写、step2 无缓存形式带"其他 feature 包自动重打"、CONFLICT 文案的
+  "实验放在别的 Isabelle 安装里"、`interrupted` 加 `ls <prefix>/conda-meta`——实测 `conda list -p` 在没有 history 时拒绝列出）、README 统一文本（更新后
+  先跑 status、第一行是什么、hole 的方向、`command not found`、识别工具消息的前缀、`conda env export --from-history` 实测可列出点名装的包、Ctrl-C 后列包的办法、
+  C30 删"(Isabelle does not load them)"、C33 新建文件先看下一段、样例改单空格）、AGENTS（C30 条改为"照消息做"、文档清单加 RELEASE.md）、reference
+  （in-the-way 规则按代码写、`k below` 含义）、develop、RELEASE（owner/命令运行位置/版本号形态/level 定义进名词段、checklist 挪到构建之前、第 1、2 条给可复制
+  的循环与命令、哪几条只有维护者查、删"hand edit"条改成"never hand-edit patches/"、完整示例值、`features` 输入含整条链）。方案手改：§4 四段文案去前缀、
+  残留块第 1 步换 SAVE_LINE 文本、决定 16 第 10 点符号链接句收窄、决定 11 smoke 选行键、§10.0 加 C10 行、CONFLICT 文案第 4 行加待答注。
+  测试 **129 例约 19 秒**、`run-all.sh` 全过；变异检查重跑中（`mutcheck/results.txt` 会刷新）。judge 没采纳的 reader 意见：CONFLICT 文案不说"Isabelle 还能用"、
+  不说"status -v 显示差异"（没有这个功能）、不删 0.x 指针行；"忘带 -c 没坏事"那句没测过所以不写。
+  **留给用户的两问**（见中文汇报）：(1) `apply/unapply --feature F` 遇到范围之外的 CONFLICT 文件的退出码——代码与测试是"只算 F 及其下面（apply）/上面
+  （unapply）碰过的"，决定 7 与原 reference 写的是"任何 CONFLICT 都列出、exit 1"，judge 建议保留代码规则、改文档；(2) CONFLICT 文案第 4 行 "can undo it
+  exactly" 用户无从知道改了什么，judge 建议改成 "If you remember exactly what you changed: undo it, then run isabelle-patch-control apply."。
+  judge 另要求：统一文本冻结（首次发布）之前再过一遍 reader（§5 第 5 步前），范围含 texts.py 外被钩子引用的拒绝句。
+  **用户 2026-10-25 对两问都答"按你建议来"**：(1) 保留代码的挡路规则，决定 7 加了一条、§10.0 的 C10 行改为已做；(2) CONFLICT 文案第 4 行改成
+  "If you remember exactly what you changed: undo it, then run isabelle-patch-control apply."（texts.py、§4、README 三处）。变异检查重跑结果已刷新
+  （28 杀 / 1 等价）。
+- **评审明细不进仓库（用户 2026-10-25："明细是我绝对不能忍受的"，评审报告"能忍受但不喜欢"）**：四个新文件 `…CODE_REVIEW{1,2}.md` 与
+  `…CODE_REVIEW{1,2}_detail.json` 不提交（两份 `.md` 留在磁盘上未跟踪，两份 `_detail.json` 删掉）；前五轮的 `…REVIEW{1..5}_detail.json` 用
+  `git filter-repo --invert-paths --path-glob 'ai-artifacts/*_detail.json'` 从工具仓库历史里去掉（用户"确认"）：113a28f→2928d8e、cc0e603→53c3abf、
+  fa1d64a→74e2d78、321646d→b5eee10，树除那 5 个文件外逐 blob 相同，GitHub `origin/main` 已强推到 b5eee10（lease 对旧哈希），本地 `main` 用
+  `update-ref` + `git reset`（只重读索引）跟上，旧对象经 reflog 过期 + `gc --prune` 清掉；`.gitignore` 加 `ai-artifacts/*_detail.json`。
+  **后果（用户接受）**：主仓库三个未推送的 bump 提交 3bf74ab0、a17dd76d、7c212ced 指向的子模块哈希 cc0e603、fa1d64a、321646d 不再存在，不改写
+  主仓库，随本轮提交新加一个 bump。以后：评审明细一律只留 scratchpad/归档，不进任何仓库；评审报告 `.md` 不再提交（已跟踪的五份不动）。
+  本节上文凡提到 `…_detail.json` 的，其文件只在 scratchpad（`review-code1/`、`review-code2/` 的归档）里。
+- **评审之后**：按裁决改代码（再评一轮），然后 §5 第 3 步，每件都要用户下令：GitHub 建
   `isabelle-base-features`、`qiyuan_dev_patches`（`localized_record` 的仓库用户指派）；本地建 `contrib/isabelle-base-features/`（两个子目录，决定 13 的
   清单文件；README 从 fa1d64a 的父 commit cc0e603 复制 `patches/expose_foreign.md`、`patches/future_assign_interrupt.md`）；`make-patches expose_foreign 1`、
   `make-patches future_assign_interrupt 1`（注意新门禁第 7 点：包目录须在 git 仓库里、清单已提交；两棵私有树已各有 Pure 的 tested 记录，§8）；light：

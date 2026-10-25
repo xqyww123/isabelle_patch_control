@@ -25,4 +25,4 @@ class Busy(Error):
 
 
 class WriteFailed(Error):
-    """git could not finish writing a copy, or the tree could not be written."""
+    """git could not finish writing a copy, or a file or work directory could not be read or written."""

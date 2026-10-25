@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import ROOT, same_tree, snapshot, tool
+from conftest import ROOT, run_cli, same_tree, snapshot, tool
 from isabelle_patch_control import api, engine
 
 KILL = Path(__file__).parent / "kill_after.py"
@@ -29,7 +29,7 @@ def test_interrupted_apply_leaves_each_file_old_or_new_and_converges(chain3, k):
     for rel in set(old) | set(new):
         got = snapshot(t).get(rel)
         assert got in (old.get(rel), new.get(rel)), rel
-    assert not Path(str(t) + ".staging").exists() or True       # the killed run could not clean up; the next does
+    assert Path(str(t) + ".staging").exists()                   # os._exit skipped the cleanup; the next run does it
     assert tool(t, chain3.features_d, "apply").code == 0
     same_tree(t, new)
     assert not Path(str(t) + ".staging").exists()
@@ -64,7 +64,7 @@ def test_git_write_failure_changes_nothing(fresh, monkeypatch):
     assert "cannot read" not in msg and "corrupt" not in msg          # it does not blame the patch file
     assert snapshot(t) == before
     r = tool(t, toy.features_d, "apply")
-    assert r.code == 1 and "git could not finish writing" in r.err
+    assert r.code == 1 and "git could not apply" in r.err and "nothing in the tree was changed" in r.err
 
 
 def test_os_replace_failure_is_reported_with_status(fresh, monkeypatch):
@@ -80,18 +80,18 @@ def test_os_replace_failure_is_reported_with_status(fresh, monkeypatch):
 
 
 def test_shared_inode_keeps_content_and_mode(fresh, tmp_path):
-    """Files hard-linked from the package cache (or another environment) are not changed."""
+    """A changed file hard-linked from the package cache (or another environment): the other link
+    keeps the old content and the old mode, and the tree file gets a new inode."""
     toy, t = fresh
     other = tmp_path / "other"
     other.mkdir()
-    a, b = t / "src" / "Pure" / "a.ML", t / "bin" / "tool"
-    b.chmod(0o755)
+    a = t / "src" / "Pure" / "a.ML"
+    a.chmod(0o600)
     os.link(a, other / "a.ML")
-    os.link(b, other / "tool")
     assert tool(t, toy.features_d, "apply").code == 0
     assert (other / "a.ML").read_bytes() == toy.expected(None)["src/Pure/a.ML"][0]
-    assert os.stat(other / "tool").st_mode & 0o777 == 0o755
-    assert (a.stat().st_ino != (other / "a.ML").stat().st_ino)
+    assert os.stat(other / "a.ML").st_mode & 0o777 == 0o600
+    assert a.stat().st_ino != (other / "a.ML").stat().st_ino
 
 
 @pytest.mark.parametrize("umask", [0o002, 0o077])
@@ -135,9 +135,14 @@ def test_directory_interface(chain3, tmp_path):
     (plain / "src" / "Pure" / "a.ML").write_text("x\n")
     res = api.apply_to(plain, chain3.features_d / "f1")
     assert res.exit_code == 1 and [lv.target for lv in res.conflicts] == ["src/Pure/a.ML"]
-    r = subprocess.run([sys.executable, "-m", "isabelle_patch_control", "apply-to", str(plain), str(chain3.features_d / "f1")],
+    r = run_cli("apply-to", plain, chain3.features_d / "f1")
+    assert r.code == 1 and "CONFLICT  src/Pure/a.ML" in r.out
+    # success is exit 0 and nothing printed: the texts about the conda environment do not apply here
+    r = run_cli("unapply-from", plain, chain3.features_d / "f2")
+    assert (r.code, r.out, r.err) == (0, "", "") and not (plain / "bin" / "new2").exists()
+    r = subprocess.run([sys.executable, "-m", "isabelle_patch_control", "apply-to", str(plain), str(chain3.features_d / "f2"), "-v"],
                        cwd=ROOT, capture_output=True, text=True)
-    assert r.returncode == 1 and "CONFLICT  src/Pure/a.ML" in r.stdout
+    assert r.returncode == 0 and r.stdout.splitlines() == ["  README  level 0 -> 1", "  bin/new2  level 0 -> 1", "  src/Pure/b.ML  level 0 -> 1"]
 
 
 def test_apply_unapply_leaves_the_pristine_file_set(applied):

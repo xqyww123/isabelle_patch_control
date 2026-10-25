@@ -11,7 +11,6 @@ from __future__ import annotations
 import contextlib
 import io
 import os
-import re
 import shutil
 import stat
 import subprocess
@@ -23,7 +22,9 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "tools"))
 
+from common import patch_blocks  # noqa: E402  (the fixture cuts patch files the way make-patches does)
 from isabelle_patch_control import api, cli  # noqa: E402
 
 RELEASE = "Isabelle2025-2"
@@ -48,7 +49,7 @@ PRISTINE_FILES = {
     "bin/tool": "#!/bin/sh\necho tool\n",
     "README": "readme without trailing newline",
 }
-EXECUTABLE = {"bin/tool"}
+EXECUTABLE = {"bin/tool", "src/Pure/c.ML"}       # c.ML: f1 deletes a 0755 file, unapply restores it
 
 
 class Toy:
@@ -69,8 +70,8 @@ class Toy:
         self.git("tag", self.tags[0])
 
     # --- the repository
-    def git(self, *args) -> str:
-        r = subprocess.run(["git", *GIT_FLAGS, *args], cwd=self.repo, env=git_env(), text=True,
+    def git(self, *args, text: bool = True) -> str | bytes:
+        r = subprocess.run(["git", *GIT_FLAGS, *args], cwd=self.repo, env=git_env(), text=text,
                            capture_output=True, check=True)
         return r.stdout
 
@@ -98,10 +99,9 @@ class Toy:
         base = self.tags[-1]
         d = self.features_d / name
         d.mkdir()
-        diff = self.git("diff-tree", "-r", "-p", "--no-renames", base, tag)
-        for block in (b for b in re.split(r"(?m)^(?=diff --git )", diff) if b):
-            path = block.split("\n", 1)[0].removeprefix("diff --git a/").split(" b/")[0]
-            (d / (path.replace("/", "-") + ".patch")).write_text(block)
+        diff = self.git("diff-tree", "-r", "-p", "--no-renames", base, tag, text=False)
+        for file, block in patch_blocks(diff).items():
+            (d / file).write_bytes(block)
         (d / "provenance.txt").write_text(
             f"feature: {RELEASE}/{name}\nrelease_tag: {tag}\ncommit: {self.git('rev-parse', tag).strip()}\n"
             f"base_tag: {base}\nbase_commit: {self.git('rev-parse', base).strip()}\n"

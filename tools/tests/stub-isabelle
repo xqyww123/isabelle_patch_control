@@ -2,9 +2,10 @@
 # Stand-in for bin/isabelle in the toy repositories of the tests.  Like getsettings it takes the
 # identifier from the environment when set, else from etc/ISABELLE_IDENTIFIER.  `sessions`
 # prints Pure and the selected names.  `build` succeeds unless $HOME/.stub-build-rc holds another
-# exit code, writes the file named in $HOME/.stub-build-touch into the tree, and appends a line to
-# the file named in $HOME/.stub-build-edit and puts it back (a change made and undone during the
-# build).  run-tree passes HOME through, nothing else.
+# exit code, writes the file named in $HOME/.stub-build-touch into the tree, creates the file whose
+# absolute path is in $HOME/.stub-build-create, and appends a line to the file named in
+# $HOME/.stub-build-edit and puts it back (a change made and undone during the build).  run-tree
+# passes HOME through, nothing else.
 here=$(cd "$(dirname "$0")/.." && pwd)
 id=${ISABELLE_IDENTIFIER:-$(cat "$here/etc/ISABELLE_IDENTIFIER" 2>/dev/null)}
 case ${1:-} in
@@ -18,6 +19,7 @@ case ${1:-} in
     printf '%s\n' Pure "$@" ;;
   build) echo "stub build: $*"
     [[ -f $HOME/.stub-build-touch ]] && echo touched > "$here/$(cat "$HOME/.stub-build-touch")"
+    [[ -f $HOME/.stub-build-create ]] && echo created > "$(cat "$HOME/.stub-build-create")"
     if [[ -f $HOME/.stub-build-edit ]]; then
       f=$(cat "$HOME/.stub-build-edit"); orig=$(cat "$f"); echo edited >> "$f"; sleep 0.01; printf '%s\n' "$orig" > "$f"; fi
     exit "$(cat "$HOME/.stub-build-rc" 2>/dev/null || echo 0)" ;;

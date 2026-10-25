@@ -159,6 +159,10 @@
     的包只接受"随包发出的文件在记录里无未提交改动、且在记录的 HEAD 与要发布的 commit 之间 `git diff --quiet -- <这些文件>` 为真"的记录
     （按内容比较，light 仓库里无关的 commit 不逼重跑构建）。这修订迁移方案对 tested 记录的定义（glossary 与 `run-tree` 的说明），记为
     迁移方案 §0 第 32 条。另外不论此条，批量发布 workflow 在 linux-64 上总是构建装好的带组件载荷的 session（评审 C10）。
+    **2026-10-25 措辞收窄**（代码评审一轮 C4、C36，作者自决，第 38 条）："位于 git 工作树里"改为"属于某 git 工作树（未被它忽略：在该目录里
+    `git check-ignore -q .` 不成功）"——MLML 忽略 `/contrib`，AFP 检出在那下面，原措辞会把 AFP 目录绑到 MLML 整个仓库上；"未提交的文件"改为
+    "已跟踪文件的未提交改动"（`git status --porcelain --untracked-files=no`）——未跟踪文件对门禁 (e) 的安全性没有贡献（随包发出的文件构建时若未跟踪，
+    记录的 HEAD 里没有它，门禁 (e) 的内容比较照样拒绝，玩具测试有此例），代价只是构建中新建的草稿不再让记录作废。迁移方案 §0 第 32 条同注。
 36. （2026-10-24，第五轮评审 C11 的问题 1）**重跑契约的措辞改为**："直接依赖 `isabelle` 的包的 post-link 必须能在任何时候重跑：重跑只把它
     自己装包时建立的东西（组件登记、补丁）恢复回来，除此之外什么都不改"（"C11 赞同 (a)"）；用户另加：**可以要求这些被重跑的 post-link 必须是
     idempotent**（连跑两次等于跑一次）。这替换第 34 条和决定 12 第 7 点、附录 A 里"在自己的文件没变时重跑必须无效果"那句——那句读成字面意思会让
@@ -173,6 +177,16 @@
     （决定 2、3 的四种拒绝，决定 16 第 2–6 点）并问此条是否也覆盖迁移方案已有的门禁 (a)–(k)、决定 16 第 1、7、8 点与第 35 条；用户答："如果已经
     实现了，而且是没有问题的就不用了。这条裁定只是说你不要在无意义的方向上过度浪费时间，不要过度设计。"——那些保留。清单落在决定 16 第 10 点与
     §10.1 末段。
+38. （2026-10-25，代码评审第一轮之后；记录在 `ISABELLE_PATCH_CONTROL_CODE_REVIEW1.md`）用户问评审提出的十四个"要用户定"的问题哪些与设计有关，
+    "无关的话请你自决"。与设计有关的三件用户裁定：**决定 6 的 hole 改成"下面有任何不是 applied 的"**（C15，"按你的建议来"：`status --feature F`
+    退出 0 当且仅当 1…F 全部 applied；工具自己被中断的 unapply 会留下 half-applied 的下层，旧规则对它说 0）；**README/迁移方案附录 A/§5.3/§7 第 15 条
+    里"上层 feature 改过的文件，下层 feature 的 patch 读作 CONFLICT，这是堆叠固有的"一句删掉、不补替代句**（C29，"请删掉！"：决定 6 下几个 feature
+    改同一文件是一个层级，不是 CONFLICT）；**链接不上时 pre-unlink 不再算"单 feature 层级"的残留块，改写链接不上的文案加更新/卸载两支，不列文件**
+    （C34，"按你建议来"：残留原因四减三，删 `single_feature_levels`、`REASON_CHAIN`）。其余十件作者自决（记在决定 2、3、9、10、16 与 §4）：
+    `.messages.txt` 全平台 ASCII+`backslashreplace`（C2）；被所在仓库忽略的 `-d` 目录不算该仓库的（C4）；`dir:` 行只算已跟踪文件的未提交改动（C36，
+    迁移方案 §7 第 11 条随之改）；CONFLICT 文案改说"直到修好之前工具不打 F 及依赖它的包"（C13）；`--feature` 也接受包名（C19）；来历文件只读
+    `release_tag`、`base_tag`（C35）；checklist 删"空文件"一条（C37）并挪到 `make-patches` 之前、每条给手工命令；决定 15 的锁用例改措辞（C38）；
+    "`isabelle` 包每次被替换都删用户目录"在 README 说一次；CONFLICT 文案末行的 0.x 指针暂留。
 
 作者 2026-10-24 对用户的更正（第二轮评审 C16、C22 与第三轮 C4 查出）：
 - 作者 2026-10-23 04:46 对用户说"问题 10 后半（内置 feature 出新版）消失了"是错的；该问题以问题 3 重新提出，由第 22 条解决。
@@ -221,6 +235,10 @@
 - pip 用户：任何 `pip install my-better-isabelle-prover` 的人。他们继续用 0.3.0；新工具不发 PyPI（第 23 条），README 的 0.x 一节说明。
 
 ### 2.3 conda 侧的事实（本计划要适应的）
+
+- conda 读 `.messages.txt` 用的是不带编码参数的 `open()`（conda 25.11.1 `core/link.py:1701`）：Windows 上就是 ANSI 代码页，一个 UTF-8 写入的
+  非 ASCII 字符（环境路径里的用户名之类）会让读取抛 `UnicodeDecodeError`，post-link 之后这会回滚事务、pre-unlink 之后中止 conda（代码评审一轮 C2，
+  辩护方在 conda 自己的 `messages()`/`run_script` 上以 ANSI 编码复现）。所以决定 9 让钩子以 ASCII 加 `backslashreplace` 写这个文件。
 
 - `isabelle` 包：整棵树在 `$PREFIX/isa`，`$PREFIX/bin/isabelle` 是相对符号链接（`recipe.yaml:75-87,176-177`）；没有 `requirements`
   （`:235-237`）；build string 只是 build 号（`:30-43`）；pkgs 缓存只有 linux-64 的 `isabelle-2025.2-0`。`etc/ISABELLE_ID` 今天是 CI 那次
@@ -370,23 +388,29 @@ README 已有 "Working in the Isabelle source repository" 一节。都未提交�
 - 工具**永不运行 `isabelle`**，不用 `shutil.which`，不读环境变量 `ISABELLE_HOME`、`CONDA_PREFIX`：发行版名从 `树/etc/ISABELLE_IDENTIFIER` 读
   （conda 树是 `Isabelle2025-2`），构建身份从 `树/etc/ISABELLE_ID` 读。
 - 每个命令开始时的拒绝（exit 3）：`树/.git` 存在（目录或文件）——工具不碰 git 管着的树，共享树与私有树都算；某个 patch 文件的目标是符号链接
-  （`realpath(树/p) != realpath(树)/p`，在读 feature 目录时检查、重放之前）——报文点名 conda 的 `always_softlink`/`allow_softlinks` 设置；
-  `--feature` 给的名字不在 feature 目录里。（rev 5 还拒绝"目标存在但不是普通文件"，是防 feature 把文件改成目录之类；第 37 条后不查——
+  （`realpath(树/p) != realpath(树)/p`，在读 feature 目录时检查、重放之前）——报文点名 conda 的 `always_softlink`/`allow_softlinks` 设置，并给
+  关掉这两个设置再 `--force-reinstall isabelle` 的步骤（代码评审一轮 C6）；`--feature` 给的名字不在链里——名字可以是 feature 名，也可以是它的包名
+  （`names.feature_name` 反查；代码评审一轮 C19，作者自决），查名字在拿锁之前（`features.feature_number`，`status` 也一样）。（rev 5 还拒绝"目标存在但不是普通文件"，是防 feature 把文件改成目录之类；第 37 条后不查——
   feature 包可信，这类改动由 checklist 排除。）
 - `status` 的第一行永远打印它读的树和 feature 目录根；`apply`、`unapply` 在 `-v` 下打印。
 
 ### 决定 3：来历文件与按精确 tag 的链
 
 - 来历文件 `provenance.txt` 的字段就是 `make-patches` 今天写的：`feature`（`<R>/<feature>`）、`release_tag`、`commit`、`base_tag`、
-  `base_commit`、`base_package_version`、`base_pin`、`build_string_prefix`、`tree_hash`、`tree_hash_excludes`。工具读 `feature`、
-  `release_tag`、`base_tag`，其余给渲染器与人看。
+  `base_commit`、`base_package_version`、`base_pin`、`build_string_prefix`、`tree_hash`、`tree_hash_excludes`。工具读 `release_tag`、
+  `base_tag`（feature 名取 `release_tag` 的第二段，版本取第三段），其余给渲染器与人看。（rev 6 还读 `feature` 字段并核它的 `<R>` 等于树的发行版名；
+  代码评审一轮 C35 后不读：名字和发行版都已在 `release_tag` 里，发行版不配由下一点的"树不是原版构建"判据统一覆盖。`make-patches` 照旧写
+  `feature` 字段，输出格式不变。）
 - **链按精确 tag 链接**，不按名字：
   1. 链底永远是 `<R>/pristine/<ISABELLE_ID>`，`<R>` 来自 `etc/ISABELLE_IDENTIFIER`、`<ISABELLE_ID>` 来自 `etc/ISABELLE_ID`。
   2. 从链底开始，每一级恰好一个 feature 目录的 `base_tag` 等于当前的 tag，它的 `release_tag` 成为下一级；两个目录的 `base_tag` 相同、或某个
      目录的 `base_tag` 谁都不等于，都是 exit 3，报文点名是哪一个目录、它要的 tag、链上实际有的 tag。**"树不是原版构建"的判据**：某个目录的
-     `base_tag` 是 `<R>/pristine/<X>` 而 `X` 不等于树的 `ISABELLE_ID`——这时报文另加一句：这棵树的 `isabelle` 构建装不了 feature 包，
-     `conda update --all -c https://conda.qiyuan.me -c conda-forge`（§4）。工具不内置官方 changeset 表（第 29 条）。`feature` 字段的 `<R>`
-     必须等于树的发行版名。链接不上的报文经 `names.package_name` 把 feature 名换成包名、说"安装匹配的版本"（§4）。
+     `base_tag` 是 `<R'>/pristine/<X>` 而 `(R', X)` 不等于树的（发行版名，`ISABELLE_ID`）——这是每个目录自己的性质，在走链之前逐目录检查、
+     与目录的排序无关，先于其他任何拒绝报出（代码评审一轮 C1、C35：真实 feature 名不按链序排，`dev_patches` 排最前，rev 6 的"报第一个剩下的目录"
+     会在旧构建上报出一句自相矛盾的 chain broken）；报文另加一句：这棵树的 `isabelle` 构建装不了 feature 包，
+     `conda update --all -c https://conda.qiyuan.me -c conda-forge`（§4）。工具不内置官方 changeset 表（第 29 条）。走链之后还剩目录时，
+     报文点名的是**`base_tag` 没有任何目录发布的那一个**（不是排序最前的那一个）。链接不上的报文经 `names.package_name` 把 feature 名换成包名、
+     说"安装匹配的版本"（§4）。
   3. 没装任何 feature 包时链只有链底，`status` 打印 `no feature packages installed`、exit 0，不论树是哪个构建（第 29 条）。
 - 工具不读 `order.txt`、不读 `categories.toml`、没有 `after`。
 - 每个 patch 文件改哪个路径，用决定 4 的原语在一个临时目录里跑 `git apply --numstat --summary <patch 文件>` 读出（新建/删除/权限在 `--summary`
@@ -456,8 +480,9 @@ README 已有 "Working in the Isabelle source repository" 一节。都未提交�
   不存在就处于其下一级，内容不同就无层级。换 `isabelle` 包后留下的新建文件因此只是"一个已经在它的创建者层级上的文件"：`apply` 不碰它，
   `unapply` 删掉它。
 - feature `F`（编号 k）的**显示**状态：它改的文件层级都 ≥ k → `applied`；都 < k → `not-applied`；有的 ≥ 有的 < → `half-applied`；任一文件
-  CONFLICT → `CONFLICT`。某个 `applied` 的 feature 下面有 `not-applied` 的，`status` 在那一行后面标 `(hole below)`。这些词**只是显示**，
-  `apply`/`unapply` 不读它们，只按文件层级移动（决定 7）。
+  CONFLICT → `CONFLICT`。某个 `applied` 的 feature 下面有**不是 `applied`** 的（`not-applied`、`half-applied` 或 `CONFLICT`），`status` 在
+  那一行后面标 `(hole below)`（rev 6 只算 `not-applied`；第 38 条/代码评审一轮 C15：工具自己被杀的 unapply 按路径序移文件，留下 half-applied 的
+  下层，旧规则对坐在它上面的 feature 说 0）。这些词**只是显示**，`apply`/`unapply` 不读它们，只按文件层级移动（决定 7）。
 - `status` 的输出（第 17 条授权定稿）：
   ```
   tree /home/u/miniconda3/envs/e/isa   features.d /home/u/miniconda3/envs/e/share/isabelle_patch_control/features.d
@@ -468,8 +493,8 @@ README 已有 "Working in the Isabelle source repository" 一节。都未提交�
   CONFLICT     localized_record         Isabelle2025-2/localized_record/1         src/Pure/Isar/locale.ML
   ```
   `-v` 列出每个文件与它的层级（新建文件显示 `+++ b/` 那边的路径并在行尾标 `(created by the feature)`——残留块和 CONFLICT 文案用的就是这个
-  标记；多层级的列出全部）。退出码：选中的 feature（默认全部）都 `applied`
-  且没有 hole 为 0；有 `not-applied`、`half-applied`、`CONFLICT` 或 hole 为 1；链接不上（决定 3）或拒绝（决定 2）为 3；没装 feature 包为 0。
+  标记；多层级的列出全部）。退出码：`--feature F` 时 F 及其下面的全部 feature 都 `applied`（默认：全部 feature）为 0——hole 于是只是显示标记；
+  有 `not-applied`、`half-applied`、`CONFLICT` 或 hole 为 1；链接不上（决定 3）或拒绝（决定 2）为 3；没装 feature 包为 0。
 
 ### 决定 7：`apply`、`unapply`、`--feature`、`--dry-run`——逐文件移到各自的目标层级
 
@@ -484,7 +509,11 @@ README 已有 "Working in the Isabelle source repository" 一节。都未提交�
 - `unapply`：对每个层级 L > T_p 的文件，在副本上按降序反打编号在 (T_p, L] 内的补丁，装进树；L = T_p 的不碰；`unapply` 只往下移。
   CONFLICT 的文件移不了：**能移的都移，移不了的列出来**，exit 1。这取代 rev 1 评审 C3 的"下面还有 feature 就拒绝"规则，并让 pre-unlink 失败时
   留下的残留最少。
-- `apply` 有 CONFLICT 时 exit 1，打印 CONFLICT 的文件和 `git apply` 的输出；否则 exit 0。
+- **哪些 CONFLICT 文件算"挡路"**（列出、exit 1；代码评审一轮 C10 由测试钉住，二轮 judge 提为用户问题，用户 2026-10-25 "按你建议来"：保留此规则）：
+  `apply`（目标 T）只算被编号 ≤ T 的 feature 碰过的 CONFLICT 文件；`unapply --feature F` 只算被 F 及其上面的 feature 碰过的。范围之外的 CONFLICT
+  文件这次命令本来就不会动，不列、不改退出码，`status` 仍会报它。例：手改了只有 f2 碰的 b.ML，`unapply --feature f3` 撤掉 f3、exit 0。不带 `--feature`
+  时范围是整条链，任何 CONFLICT 都算。
+- `apply` 有挡路的 CONFLICT 时 exit 1，打印 CONFLICT 的文件和 `git apply` 的输出；否则 exit 0。
 - `--dry-run`：同一次重放，跳过决定 5 的装入，打印将要移动的文件（从哪一层到哪一层），退出码与真跑相同。在全打好的树上 `apply --dry-run`
   一个文件都不列。
 - 两者在真的改了 `src/` 下任何文件之后才打印 heap 提示（§4）。工具自己不构建任何东西。没有 `--force`。
@@ -559,7 +588,13 @@ README 已有 "Working in the Isabelle source repository" 一节。都未提交�
   （§2.3），所以本次事务里所有 feature 的目录都已在；整链 apply 让"重链接一个下层包"也把上层补回去。
 - `conda-hook pre-unlink <F>`：`unapply --feature F`（反打 F 及其上面的），**只反打、永不打**。此时 features.d 还列着本次事务里所有要走的包
   （§2.3），所以不能做成"对齐 features.d"。
-- **退出码一律 0**（第 12 条）。写 `.messages.txt` 的规矩（conda 每个脚本后就打印并删掉它，所以钩子之间不能互相看，§2.3）：
+- **钩子脚本的退出码一律 0**（第 12 条，由钩子文本的 `exit 0` 与 `||` 分支保证）。`conda-hook` 自己：写出了自己的消息就退出 0；跑不完时
+  （崩溃，或 pre-unlink 算不出哪些文件还带着该 feature 的改动——例如算残留时又遇到锁忙或写失败）**什么都不写、退出非零**，让钩子文本的 `||`
+  一行说话，而不是写一段可能不实的话（代码评审一轮 C14，作者决定；rev 6 的"退出码一律 0"指的就是钩子脚本，这里把两层分开说）。
+  `.messages.txt` 以 **ASCII 加 `backslashreplace`** 写，全平台一样（代码评审一轮 C2，作者自决）：conda 用不带编码的 `open()` 读它，Windows 上就是
+  ANSI 代码页，一个非 ASCII 的前缀路径会让 conda 的读取抛异常、post-link 之后回滚事务（§2.3）；非 ASCII 的路径字符于是显示成 `\uXXXX`。
+  每段钩子消息的 `isabelle-patch-control: ` 前缀由写文件的那一处（`conda_hook.run`）逐段加上，§4 的文案本身不带（代码评审一轮 C26）。
+  写 `.messages.txt` 的规矩（conda 每个脚本后就打印并删掉它，所以钩子之间不能互相看，§2.3）：
   - 每次钩子运行只报告**它自己这次改了什么**：打了/反打了哪些 feature（按 feature 列），`src/` 下有改动就附 heap 提示（§4）。什么都没改、链又
     正常的运行**一个字都不写**。于是一个事务里装三个 feature 包，只有第一个跑的 post-link 说话；卸载时每个 pre-unlink 自上而下各报自己反打的
     那一个。
@@ -570,10 +605,13 @@ README 已有 "Working in the Isabelle source repository" 一节。都未提交�
     第 26 条的重跑，链顶包也换时经它自己的 post-link。所以**不变式**是：凡链接（装或重装）了 `isabelle` 或链顶 feature 包的命令，恰有一段完整
     诊断，否则只有一行提示（评审四 C3/C12 实测）。链还不存在时（例如第一个 feature 包就链接不上）每个 post-link 都会写一次诊断，接受。
   - pre-unlink 的残留块（§4）：凡它结束时**自己这个 feature** 的文件没有回到 k 以下的（含没有任何层级的 CONFLICT 文件）——不论原因是
-    CONFLICT、链接不上、锁超时、`os.replace` 失败、工具起不来（后者由钩子文本的 `||` 分支兜住）——都写：原因（用平白话印：a file has unexpected
-    content / another isabelle-patch-control was running / a feature package it needs is missing or has the wrong version / a file could not be
-    written）、文件清单（新建的标出 `(created by the feature)`，与 `status -v` 同一个标记；只列自己 feature 的）、按下面的卸载/替换规则分两支写的
-    说明与恢复步骤——**只印本次原因对应的那一支恢复步骤**。
+    CONFLICT、锁超时、`os.replace` 失败、工具起不来（后者由钩子文本的 `||` 分支兜住）——都写：原因（用平白话印：a file has unexpected
+    content / another isabelle-patch-control was running / a file could not be written）、文件清单（新建的标出 `(created by the feature)`，
+    与 `status -v` 同一个标记；只列自己 feature 的）、按下面的卸载/替换规则分两支写的说明与恢复步骤——**只印本次原因对应的那一支恢复步骤**。
+    锁超时与写失败两支都在不持锁的情况下重算一次状态（`api.status(lock=False)`）再算残留，共用同一个残留函数。
+    **链接不上**（第 38 条/代码评审一轮 C34）：pre-unlink 什么都没反打，也不按"单 feature 层级"算残留（那样算出的清单对链底以上的 feature 是假的，
+    `--no-deps` 就能到），而是写链接不上的那句文案（决定 3 的三种之一），加更新/卸载两支：更新支照旧跑 `status`，卸载支"先照上一行说的做，
+    再 `conda remove <包名>`"；不列文件。残留原因于是三选一，不是 rev 6 的四选一。
     恢复步骤点名的包是**此刻 features.d 里最高的那个 feature 包**：所有 pre-unlink 都在任何 unlink 之前跑（§2.3），所以同一条 conda 命令里
     每个残留块点名的包相同；但每块列的文件只是自己 feature 的，"删掉新建文件"要照每一块做（评审五 C1 更正 rev 5 的"按哪一块做都一样"）。
     残留块不说"(restores the package's files"——重装 `isabelle` 能否恢复，按下一条的硬链接判断分别措辞（评审五 C7）。锁超时时层级在不持锁的
@@ -589,6 +627,10 @@ README 已有 "Working in the Isabelle source repository" 一节。都未提交�
     chain、below/above、tree、block、shipped sources 这些词；每段先用一句平白的话说发生了什么（点名 feature 和文件），再给编号的命令；会删东西的
     后果（删 Isabelle 用户目录）单独一句、放在那条命令之前，不放括号里；只印适用的那一支（残留块只印本次原因的恢复步骤）；每段钩子消息第一行带
     `isabelle-patch-control` 前缀，好在 conda 的输出里认出来。
+  - 其他拒绝（树里有 `.git`、目标是符号链接、找不到树、名字不认识……）到了钩子里也套一个框架写（代码评审一轮 C6）：post-link 说"已装的 feature 包
+    没打上：<原因>，修好后 run: isabelle-patch-control apply"；post-link 中途写失败另说打到了哪几个 feature；pre-unlink 说"<feature> 没能撤掉：
+    <原因>"加更新/卸载两支（卸载支：修好后 `conda install <包>` 再 `conda remove <包>`）。符号链接那条自带修法：关掉 `always_softlink`、
+    `allow_softlinks`，再 `--force-reinstall isabelle`（前面照样先写"保存自己的东西"那句）。
   - 诊断按原因给修法（§4）。用户改过的跟踪文件 → 先保存自己在 `isa/` 和用户目录里的改动，再 `conda install -c … --force-reinstall isabelle`
     （替换包的每个文件、删掉该环境的用户目录；原版构建的 post-link 随后重跑依赖者的 post-link，feature 和已装包的组件登记自动恢复，用户自己
     的设置和手工 `components -u` 的登记不恢复，第 26、33 条）。**经硬链接原地写入的编辑**（vim 的 `backupcopy=auto` 就这样）连包缓存那份一起
@@ -620,8 +662,10 @@ README 已有 "Working in the Isabelle source repository" 一节。都未提交�
   `isabelle-local-type-abbrev`、`isabelle-localized-record`、`isabelle-local-datatype`），唯一的例外条目 `dev_patches → qiyuan-dev-patches`
   （light 计划 D1）。
 - 版本 = 发布 tag 里的版本号。build string **`Isabelle2025_2_<该 feature 包的 build 号>`**（第 30 条）。noarch generic。
-- **复用与 build 号由一个函数、一条规则决定**（`tools/common.py` 的 `plan_builds(repodata, isabelle_build, wanted, fetch)`，pytest 覆盖；评审四 C2、
-  评审五 C2）。规则对本批要发的**每个**包一样，工具包也在内：候选 = 线上 `noarch/repodata.json` 里该 (包名, 版本) 的记录，加上渠道实际在服务
+- **复用与 build 号由一个函数、一条规则决定**（`tools/common.py` 的 `plan_builds(repodata, wanted, fetch)`，pytest 覆盖；评审四 C2、
+  评审五 C2；代码评审一轮 C8：rev 6 写的是四参数 `plan_builds(repodata, isabelle_build, wanted, fetch)`，实现是三参数——`isabelle` 的钉死不是整批
+  一个参数，而是每个 `Wanted(name, version, build_prefix, pin)` 自带的 `pin`，由同一文件的 `isabelle_pin(build_string_prefix, isabelle_build)`
+  算出，渲染器写进配方的也必须是这个函数的值，于是配方写的钉死与 `plan_builds` 找的钉死不可能走散；`pin` 为 None 的是工具包）。规则对本批要发的**每个**包一样，工具包也在内：候选 = 线上 `noarch/repodata.json` 里该 (包名, 版本) 的记录，加上渠道实际在服务
   的文件（`https://conda.qiyuan.me/noarch/<文件名>` 对 HEAD 答 200——已上传、索引还没重建的文件；从"已索引的最高 build 号 + 1"起向上探，
   `fetch` 参数注入这一步）。候选若**正是本批想要的**就**复用**——原样下载进本地渠道，不重建：工具包是"同一版本"（文件名取
   `rattler-build build --render-only` 的结果），feature 包是 `info/index.json` 的 `depends` 恰含 `isabelle 2025.2 <isabelle 的 build string>`。
@@ -680,7 +724,8 @@ README 已有 "Working in the Isabelle source repository" 一节。都未提交�
   4. **`publish`**（`needs: [build, roundtrip, accept]`，仅 `publish=true`）：对 `feature-packages` **调一次**
      `xqyww123/isabelle-packaging-ci/.github/workflows/publish-conda.yml@main`（第 27 条），显式传 `CONDA_R2_ACCESS_KEY_ID`、
      `CONDA_R2_SECRET_ACCESS_KEY`，不用 `secrets: inherit`。
-  5. **`smoke`**（`needs: publish`；linux-64 与 win-64）：第一条命令**从渲染器复制的那份统一 README 文本文件里读出安装命令那一行**、原样执行
+  5. **`smoke`**（`needs: publish`；linux-64 与 win-64）：第一条命令**从渲染器复制的那份统一 README 文本文件里读出安装命令那一行**（选行的键：
+     以 `conda create -n ` 开头的那一行——统一文本里另有恢复用的 `conda create -p …`；`tests/test_docs.py` 用同一个键）、原样执行
      （决定 14 的 README 文本：`conda create -n isabelle -c https://conda.qiyuan.me -c conda-forge isabelle isabelle-light-locale`；文档里的命令和
      测的命令于是不可能漂移，评审五 C8）；第二条命令另装 `qiyuan-dev-patches`，明说是为了覆盖整条链、不是 README 的命令。两个环境各跑
      `status` 全 applied、conda 输出里恰一次 heap 提示；runner 是新的，不需要私有包缓存。
@@ -805,8 +850,11 @@ Performant_Isabelle_ML `release-conda.yml:423-425,527-529` 与 auto_sledgehammer
     `GIT_DIR`、`GIT_WORK_TREE`、`GIT_CONFIG_COUNT`；树里有 `.git` 时 exit 3；
   - 损坏的 patch 文件 exit 3 并点名；符号链接目标 exit 3（conda 的 softlink 设置，决定 2）；（rev 5 还测目录目标、FIFO 目标、两个 patch 文件同一
     目标、头部行以 CR 结尾各 exit 3，第 37 条后这些不查、不测）；
-  - 锁：`status` 与 `apply --dry-run` 在只读树上都能跑；两个排他运行串行；锁被占时在上限内报忙；一个持锁者正在装入时，一个超时后不持锁算层级的
-    pre-unlink 不碰它的暂存目录、持锁者装入的文件完好；`apply` 后 `unapply`，树的文件集合等于包的文件集合；
+  - 锁：`status` 与 `apply --dry-run` 在只读树上（树的父目录也只读）都能跑；两个排他运行串行；锁被占时在上限内报忙（上限 `engine.LOCK_TIMEOUT`
+    在调用时读，测试用 monkeypatch 缩短，代码评审一轮 C7）；**不持排他锁的运行**（`status`、任何 `--dry-run`、锁超时后不持锁算层级的 pre-unlink）
+    **不碰暂存目录**（哨兵文件用例；代码评审一轮 C38 改写 rev 6 的"持锁者装入的文件完好"一句：那半句从代码形状推出——只有持排他锁的运行在暂存目录里
+    重放，不持排他锁的运行没有任何写树的路径，持锁者的内容在内存里、副本写完立即 `os.replace`——不另写并发用例）；`apply` 后 `unapply`，树的
+    文件集合等于包的文件集合；EROFS、ENOSPC 之类的 `OSError` 一律变成 exit 1 加 `status` 重印，不是 traceback（代码评审一轮 C17）；
   - 决定 10 的 `plan_builds`：HOL 侧单版本重发、新 `isabelle` 构建、重复 dispatch、已上传未索引的文件四种输入；最后一种覆盖三个形状——被搁置的
     工具包（同版本，复用）、钉着本批 `isabelle` 构建的 feature 文件（复用）、钉着别的构建的 feature 文件（跳过，n + 1）（评审五 C2）；
   - 目录接口；`--isabelle-home`/`--features-dir` 的推导与拒绝（别的环境的工具加 `--isabelle-home X/isa` 读 X 的 features.d；conda 环境里传
@@ -893,14 +941,21 @@ Performant_Isabelle_ML `release-conda.yml:423-425,527-529` 与 auto_sledgehammer
      字节相同它就分不清（第 28 条）；上层进一步改动下层改过的文件、改下层加的行都正常。
    - 每个 hunk 的上下文在它改的文件里只出现一次——否则打完的文件再正打一次还能在别处对上，`status` 读成同时处于两个层级、报 CONFLICT
      （决定 6；第五轮作者用 `x1 x2 x3 A y1 y2 y3` 出现两次的文件实测，`git apply` 在偏移 10 行处第二次成功）。碰到了就多带几行独特的上下文。
-   - 不新建、不删除空文件（git 对空文件的块没有 `---`/`+++` 对，工具读不出目标）。
-   - 只改普通文件，权限 `100644`/`100755`；不加符号链接、gitlink，不把文件改成目录。
+   - （rev 6 有"不新建、不删除空文件"一条，理由是"git 对空文件的块没有 `---`/`+++` 对，工具读不出目标"；代码评审一轮 C37 实测理由不实——
+     决定 3 用 `git apply --numstat --summary` 读目标，空文件整个来回都对；此条删去，第 38 条。`check-roundtrip` 的"新建文件"清单改从
+     `git diff-tree --diff-filter=A` 取，不再自己解析 `--- /dev/null`。）
+   - 只改普通文件，权限 `100644`/`100755`；不加符号链接、gitlink，不把文件改成目录；不做只改权限位的改动——工具重放并装入的是文件字节、权限位取自
+     patch 头部：符号链接装不上（门禁 (c) 拒绝——链接目标在重放副本里读得到时以"forward application gives tree …"，读不到时更早以
+     "could not write …"），只改权限位的文件字节不变、同时处于两个层级读成 CONFLICT
+     （代码评审一轮 C31）。
    - 不改 `etc/ISABELLE_ID`（决定 5 用它当锁文件）。
    - 新 patch 文件在 pkgs 缓存里的完整路径（决定 10 的公式，取版本 99、build 号 99）不超过 198 字符（Windows，`pack.sh:335-339,357`）。
    - patch 文件不经 CRLF 转换（feature 仓库的 `.gitattributes` 有 `*.patch -text`）；每个被改路径恰一个 patch 文件（`make-patches` 按文件切块，
      手改过 `patches/` 之后重新核一遍）。
-   `make-patches` 之后、dispatch 之前过一遍这张单子；批量发布 workflow 的 `roundtrip`、`accept`、`smoke` 对装好的整条链跑 `status`，链顶状态上
-   漏掉的多层级文件会在那里以 CONFLICT 露出来、整批不发布（版本号作废、发 v+1）；中间状态只靠这张单子。
+   **`make-patches` 之前**过一遍这张单子（第 38 条；rev 6 写"之后、dispatch 之前"——`make-patches` 一跑就打 tag，之后发现问题就烧掉一个版本号），
+   每条对 `git diff-tree -r --no-renames <基 tag> <tip>` 用一两条手工命令核，`RELEASE.md` 给出命令，不写检查代码；批量发布 workflow 的
+   `roundtrip`、`accept` 对装好的整条链跑 `status`，链顶状态上漏掉的多层级文件会在那里以 CONFLICT 露出来、整批不发布（版本号作废、发 v+1），
+   `smoke` 在发布之后只报告；中间状态只靠这张单子。
 
 ### 决定 17：(b2) 脚本
 
@@ -927,19 +982,25 @@ isabelle-patch-control [--isabelle-home DIR] [--features-dir DIR] [-v|-q] <comma
   unapply  [--feature F] [--dry-run]   把每个文件移到链底（或 F 之下）它自己的目标层级，只往下
   apply-to      <dir> <feature dir>    目录接口：把 <dir> 当树、该 feature 目录当唯一 feature 打上
   unapply-from  <dir> <feature dir>    目录接口：反打
-  conda-hook    post-link              供钩子调用：整链 apply；总是 exit 0，写 $PREFIX/.messages.txt
-  conda-hook    pre-unlink <feature>   供钩子调用：反打 <feature> 及其上面的；总是 exit 0
+  conda-hook    post-link              供钩子调用：整链 apply；写 $PREFIX/.messages.txt，写了就 exit 0
+  conda-hook    pre-unlink <feature>   供钩子调用：反打 <feature> 及其上面的；写了就 exit 0
   help                                 打印 AGENTS.md
 ```
+（`--help` 打印的英文原文按代码评审一轮 reader 的意见为用户改写：开头一句说 `status` 是用来查看的命令，`apply-to`/`unapply-from`/`conda-hook`
+标成"不供手工使用"，`help` 说成"常见情形下该做什么"；`apply-to`/`unapply-from` 成功时不打印环境相关的文案——heap 段和"back at the shipped
+sources"对任意目录不成立，代码评审一轮 C23——只在 `-v` 下列每个文件、有 CONFLICT 时列 CONFLICT 行，成功即 exit 0。）
 
 退出码：0 成功（含没装 feature 包）；1 有 not-applied/half-applied/CONFLICT/hole、`apply`/`unapply` 有移不动的文件、`git` 在副本上写失败、锁忙；
 2 找不到树、`git` 缺失或版本太旧；3 拒绝——链接不上、feature 目录的基不是这棵树的构建、树里有 `.git`、目标是符号链接、patch 文件
 解析不了或目标不是恰好一个、feature 目录没有 patch 文件、`--features-dir` 不存在、不在 conda 环境里又没给目录、`--feature` 名字不存在。
-`conda-hook` 总是 0。（rev 5 还有四种 exit 3——目标不是普通文件、两个 patch 文件同目标、头部行以 CR 结尾、feature 碰 `etc/ISABELLE_ID`——第 37 条
-后不查。）
+`conda-hook` 写出了自己的消息就 0，跑不完时什么都不写、非零，钩子文本的 `||` 一行说话（决定 9）。1 也包括任何 `OSError`——只读文件系统上的
+锁文件、写副本时磁盘满、暂存目录的父目录不可写——统一在共享路径上变成 WriteFailed（代码评审一轮 C17），文案
+`<strerror> (<文件>); nothing in the tree was changed.`，`e.filename` 为空时不带括号。（rev 5 还有四种 exit 3——目标不是普通文件、两个 patch 文件
+同目标、头部行以 CR 结尾、feature 碰 `etc/ISABELLE_ID`——第 37 条后不查。）
 下文凡出现 `conda install`/`conda update`，都带 `-c https://conda.qiyuan.me -c conda-forge`（决定 14），这里为短省略为 `conda install -c …`。
 
-heap 提示（`apply`/`unapply` 真的改了 `src/` 下文件后打印；钩子写进 `.messages.txt`）。post-link 与命令行 `apply` 写整段：
+heap 提示（`apply`/`unapply` 真的改了 `src/` 下文件后打印；钩子写进 `.messages.txt`，写进去时第一行带 `isabelle-patch-control: ` 前缀——决定 9
+文案的写法；下文凡"钩子写"的文案都这样，本节只写正文）。post-link 与命令行 `apply` 写整段：
 ```
 Isabelle sources under $PREFIX/isa changed (applied: light_locale).
 The heaps shipped with the isabelle package were built from other sources; Isabelle rebuilds, on first use, every heap not
@@ -951,7 +1012,7 @@ pre-unlink 与命令行 `unapply` 只写第一行（`(reversed: light_locale)`�
 and the shipped heaps are used again.`（用户目录里的 heap 先被找到，`store.scala:334-336,488-492`，所以不删它们时不声称包内 heap 又能用。）
 pre-unlink 成功反打、树回到链底时写的是（决定 9 的卸载/替换规则，常见的一支在前）：
 ```
-isabelle-patch-control: light_locale was undone; Isabelle sources under $PREFIX/isa are back to the original.
+light_locale was undone; Isabelle sources under $PREFIX/isa are back to the original.
 If you are updating or reinstalling, for example conda update --all: when it finishes, run isabelle-patch-control status.
 If you are removing light_locale: you may delete heaps/ in your Isabelle user directory (isabelle getenv -b ISABELLE_HOME_USER);
 Isabelle then uses the original heaps again instead of rebuilding them on first use (several minutes).
@@ -962,52 +1023,77 @@ Isabelle then uses the original heaps again instead of rebuilding them on first 
 installed: isabelle-future-assign-interrupt 2. Install matching versions of these packages.`（包名经 `names.package_name`。）
 树不是原版构建（有 feature 目录时）：`$PREFIX/isa has etc/ISABELLE_ID 5533cd83156e, but features.d/expose_foreign was made for Isabelle2025-2 pristine
 89701cf1768e. Feature packages exist only for the pristine isabelle build. Run: conda update --all -c https://conda.qiyuan.me -c conda-forge`
-CONFLICT（完整诊断，链顶 feature 的 post-link 写，决定 9）：
+这两句到了 post-link 里套在框架里写（决定 9；代码评审一轮 C6）：`the installed Isabelle feature packages were not applied: <那句>` 换行
+`When this is fixed, run: isabelle-patch-control apply`；post-link 中途写失败：`the installed Isabelle feature packages were not fully applied: <写失败
+的那句>` 换行 `Applied so far: <feature 名, …或 none>. When this is fixed, run: isabelle-patch-control apply`。pre-unlink 遇到链接不上：
+`light_locale was not undone: <那句>` 换行更新支（同下）换行 `If you are removing light_locale: do what the first line says, then conda remove
+isabelle-light-locale.`；pre-unlink 遇到其他拒绝：`light_locale could not be undone: <原因>` 换行更新支 换行 `If you are removing light_locale: when
+this is fixed, run conda install -c … isabelle-light-locale; then conda remove isabelle-light-locale.`
+符号链接的拒绝（决定 2）：`<文件> is or lies under a symbolic link; isabelle-patch-control replaces files in place and does not follow links` 换行
+`(conda's always_softlink / allow_softlinks settings create such trees). To fix:` 然后 1. 保存那句（同下）、2. `conda config --set always_softlink
+false; conda config --set allow_softlinks false`、3. `conda install -c … --force-reinstall isabelle`。
+CONFLICT（完整诊断，链顶 feature 的 post-link 写，决定 9；代码评审一轮 C13 与 reader 意见改写：第二句只说工具保证的事——它不打 F 及依赖它的包，
+不说"它们没打上"，因为编辑之前打上的上层 feature 还在；先给最简单的路；按文件是不是 feature 新建的只印适用的修法；末尾加"然后跑 status"）：
 ```
-isabelle-patch-control: light_locale was NOT applied: src/Pure/Isar/locale.ML under $PREFIX/isa has content the tool does not recognise
-(did you edit it?). The feature packages light_locale depends on are applied; light_locale and the packages that depend on it are not.
-To fix:
-  1. Save any edits of your own under $PREFIX/isa and in your Isabelle user directory (isabelle getenv -b ISABELLE_HOME_USER):
-     the next step replaces every file of the isabelle package and deletes that directory. Installed packages re-register
-     themselves; your own settings and manual "isabelle components -u" entries do not come back.
-  2. conda install -c … --force-reinstall isabelle
-If the unrecognised file is one the feature itself creates (marked "(created by the feature)" in isabelle-patch-control status -v):
-move it aside, then run isabelle-patch-control apply.
+light_locale was NOT applied: src/Pure/Isar/locale.ML under $PREFIX/isa has content the tool does not recognise
+(did you edit it?). The feature packages light_locale depends on are applied; until this is fixed, the tool applies
+neither light_locale nor the packages that depend on it.
+If you remember exactly what you changed: undo it, then run isabelle-patch-control apply. Otherwise:
+  1. Copy anything of your own out of $PREFIX/isa and out of this environment's Isabelle user directory (isabelle getenv -b
+     ISABELLE_HOME_USER prints it; it is a directory under ~/.isabelle that belongs to this environment alone). The next step
+     replaces every file of the isabelle package and deletes this environment's Isabelle user directory: the heaps built there,
+     its etc/settings and preferences, and every component you registered by hand. Installed packages register their
+     components again; your own settings do not come back.
+  2. conda install -c … --force-reinstall isabelle   (your other feature packages are re-applied automatically)
+Then run isabelle-patch-control status; Isabelle rebuilds the heaps on first use.
+A personal edit of a file that a feature also changes reads CONFLICT again every time; make such experiments in a separate
+Isabelle installation (for example the official release), not under $PREFIX/isa.
 Details: isabelle-patch-control status -v.  Upgrading from my-better-isabelle 0.x? See: isabelle-patch-control help
 ```
+（第 4 行原为 "If you made the change yourself and can undo it exactly"；代码评审二轮的 reader 指出工具没有给用户看 diff 的办法，这句无法执行，
+judge 建议的措辞用户 2026-10-25 "按你建议来"；不加显示差异的功能。）
+不认识的文件是 feature 自己新建的（`status -v` 的 `(created by the feature)` 标记）时，第 1、2 步换成一步：`<文件> is a file the feature itself
+creates (created by the feature): move it aside, then run isabelle-patch-control apply.`；两种文件都有时第 1、2 步之后加它作第 3 步。
+第 1 步"保存"那句（`texts.SAVE_LINE`）在残留块、符号链接拒绝里逐字复用。
 （`status` 里仍显示 CONFLICT；"matches no level, or several levels" 这种内部说法只留给 `status -v`。）
 文件是经硬链接原地改写的（决定 9 的判据）时，第 2 步换成：
 ```
   2. Your edit went into conda's shared package cache, so a plain reinstall would keep it. Delete <extracted_package_dir> (conda re-creates
-     it from the .conda archive), then run conda install -c … --force-reinstall isabelle in this environment and in every other environment
-     that uses the same package cache (they may share the edited file without reporting anything).
+     it from the .conda archive), then run conda install -c … --force-reinstall isabelle in this environment and in every other
+     environment that has isabelle installed (conda env list names them; they may share the edited file without reporting anything).
 ```
-（`<extracted_package_dir>` 打印 conda-meta 里 `isabelle` 记录的真实路径。）
-其他钩子的一行提示：`isabelle-patch-control: light_locale was not applied (src/Pure/Isar/locale.ML has unexpected content); see isabelle-patch-control status -v`
+（`<extracted_package_dir>` 打印 conda-meta 里 `isabelle` 记录的真实路径；"其他环境"给出 `conda env list` 让人找得到，reader 意见。）
+其他钩子的一行提示：`light_locale was not applied (src/Pure/Isar/locale.ML has unexpected content); see isabelle-patch-control status -v`
 pre-unlink 的残留块（任何原因；点名的包是此刻 features.d 里最高的 feature 包，同一条命令的每块点名的包相同，各块列的文件只是自己 feature 的；
 两个标签分支按决定 9 的卸载/替换规则；"工具起不来"的情形由钩子文本的 `||` 分支兜住，不在这里）：
 ```
-isabelle-patch-control: light_locale could not be fully undone (reason: a file has unexpected content). These files under $PREFIX/isa
+light_locale could not be fully undone (reason: a file has unexpected content). These files under $PREFIX/isa
 still carry its changes:
   src/Pure/Isar/locale.ML
   src/Pure/Isar/light_locale_axiom_facts.ML   (created by the feature)
 If you are updating or reinstalling, for example conda update --all: when it finishes, run isabelle-patch-control status.
 If you are removing light_locale, clean up now (nothing will remind you later):
-  1. Save any edits of your own under $PREFIX/isa and in your Isabelle user directory: the next step deletes both.
+  1. Copy anything of your own out of $PREFIX/isa and out of this environment's Isabelle user directory (isabelle getenv -b
+     ISABELLE_HOME_USER prints it; it is a directory under ~/.isabelle that belongs to this environment alone). The next step
+     replaces every file of the isabelle package and deletes this environment's Isabelle user directory: the heaps built there,
+     its etc/settings and preferences, and every component you registered by hand. Installed packages register their
+     components again; your own settings do not come back.
   2. conda install -c … --force-reinstall isabelle   (your other feature packages are re-applied automatically)
   3. Delete every file marked "(created by the feature)" in these messages.
 ```
-原因四选一打印：`a file has unexpected content`（CONFLICT）、`another isabelle-patch-control was running`（锁超时）、`a feature package it needs
-is missing or has the wrong version`（链接不上）、`a file could not be written`（写失败）。锁超时时第 1–3 步换成一行：
+第 1 步"保存"那句与 CONFLICT 诊断的第 1 步相同（`texts.SAVE_LINE`，点明用户目录里会丢的东西；rev 6 的短句"the next step deletes both"由
+代码评审一轮 C5/reader 意见换掉）。原因三选一打印：`a file has unexpected content`（CONFLICT）、`another isabelle-patch-control was running`
+（锁超时）、`a file could not be written`（写失败）；链接不上不是残留块，见上（第 38 条/C34）。锁超时时第 1–3 步换成一行：
 `conda install -c … isabelle-light-locale=<版本>; then conda remove isabelle-light-locale`。清单里有经硬链接原地改写的文件时，第 2 步换成
 上面 CONFLICT 诊断里的包缓存那一段。
 锁忙。命令行：`another isabelle-patch-control run holds the lock on $PREFIX/isa/etc/ISABELLE_ID (its inode may be shared with another conda
-environment on this machine); gave up after 60 s. Retry later.` post-link 的 `.messages.txt` 里同一句后面加 `Then run: isabelle-patch-control apply`。
-pre-unlink 不写这句，写残留块。
+environment on this machine); gave up after 60 s. Retry later.` post-link 的 `.messages.txt` 里同一句后面加 `Then run: isabelle-patch-control apply`
+（写进去时第一行带前缀，决定 9）。pre-unlink 不写这句，写残留块。
 `conda install` 被 Ctrl-C 中断后（README；`status` 在 `conda-meta` 存在而 `conda-meta/history` 不存在时也打印——若中断的事务装的正是工具，`status`
 也没了，只有 README 还在）：conda 回滚了整个事务并删掉了 `conda-meta/history`，post-link 已写进 `isa/` 的改动留着，恢复之前每条 `isabelle` 命令
 都可能打印 `### Missing Isabelle component`；恢复：`conda create -p $PREFIX -c … <要保留的全部包和被中断的那个包>`（不需要先 `touch`），或
-`touch $PREFIX/conda-meta/history`（Windows：`type nul > "%PREFIX%\conda-meta\history"`）后 `conda install -c … <同一批包>`；若不想要那个
+`touch $PREFIX/conda-meta/history`（Windows：`type nul > "$PREFIX\conda-meta\history"`，两边都印真实路径——`%PREFIX%` 在用户的 cmd 里没有定义，
+代码评审一轮 C16）后 `conda install -c … <同一批包>`；若不想要那个
 feature，先这样恢复、再 `conda remove <它的包名>`——由工具反打、删新建文件、删暂存目录，比 `--force-reinstall isabelle` 干净（评审四 C16 实测）。
 
 ## 5. 落地顺序
@@ -1170,6 +1256,30 @@ feature，先这样恢复、再 `conda remove <它的包名>`——由工具反�
 - `isabelle-ai` 元包要不要依赖 `isabelle-future-assign-interrupt`（它是每个人都该有的修复，原版构建不带它）。
 
 ## 10. 对照表（**与裁决不同之处明说**）
+
+### 10.0 rev 6 → 代码评审第一轮（2026-10-25；38 条 challenge，报告 `ISABELLE_PATCH_CONTROL_CODE_REVIEW1.md`；用户裁决见 §0 第 38 条）
+
+代码评审改的是实现，方案只在下面这些地方跟着改；每条给位置。
+| judge 指令 | 本版 |
+|---|---|
+| C1、C35 决定 3 逐目录核原版构建、报 base 没人发布的目录；只读 `release_tag`/`base_tag` | 已做于决定 3 第一点与第 2 点 |
+| C2 `.messages.txt` ASCII | 已做于决定 9 "退出码"一条、§2.3 事实一行 |
+| C4、C36 `-d` 目录与 `dir:` 行的定义 | 迁移方案 §0 第 32 条、glossary、`run-tree` 说明、§7 第 11 条、附录 A；本计划 §0 第 35 条的措辞加注 |
+| C6、C14、C26 钩子框架、`conda-hook` 的退出码、前缀由写者加 | 已做于决定 9 "退出码"一条与"其他拒绝"一条、§4 |
+| C7 锁超时在调用时读 | 已做于决定 15 锁一条 |
+| C8 `plan_builds` 三参数、`isabelle_pin` | 已做于决定 10（**偏离** rev 6 的四参数签名，理由同处） |
+| C13、C5、reader CONFLICT 文案 | 已做于 §4 CONFLICT 段 |
+| C15 hole 与退出码 | 已做于决定 6（第 38 条） |
+| C16 Windows 命令印真实路径 | 已做于 §4 末段 |
+| C17 `OSError` 统一成 WriteFailed | 已做于 §4 退出码段、决定 15 锁一条 |
+| C19 `--feature` 接受包名、查名在拿锁前 | 已做于决定 2 |
+| C23 目录接口成功时不打印环境文案 | 已做于 §4 命令表之后 |
+| C29 删"堆叠固有 CONFLICT"句 | 迁移方案附录 A、§5.3、§7 第 15 条（第 38 条） |
+| C34 链接不上的 pre-unlink | 已做于决定 9 残留块一条、§4（第 38 条） |
+| C37 删 checklist 空文件条；C31 "只改普通文件"条加理由；checklist 挪到 `make-patches` 之前 | 已做于决定 16 第 10 点 |
+| C38 决定 15 锁用例措辞 | 已做于决定 15 锁一条 |
+| C10 测试钉住的"挡路"规则：`apply --feature F` 只把 F 及其下面的 feature 碰过的 CONFLICT 文件算挡路（列出、exit 1），`unapply --feature F` 只算 F 及其上面的碰过的；范围之外的 CONFLICT 文件不列、exit 0 | 代码评审二轮把它列为用户问题，用户 2026-10-25 "按你建议来"保留规则；已做于决定 7 新增的"哪些 CONFLICT 文件算挡路"一条与 reference.md |
+| 其余（C3、C9、C11、C12、C18、C20–C22、C24、C25、C27、C28、C30、C32、C33）只改代码、测试与仓库文档，方案无对应文字 | — |
 
 ### 10.1 rev 5 → rev 6（第五轮定向重评 11 条；**每条 judge 指令一行**，"已做于"给位置，"偏离"给理由）
 
