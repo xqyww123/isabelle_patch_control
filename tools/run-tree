@@ -16,7 +16,10 @@ from the tree).
 A `build` in a private tree that exits 0 with an empty `git status` before and after and HEAD
 unchanged gets a tested record: `git notes --ref=tested append` on HEAD with the command line and
 the session set `isabelle sessions` resolves from the same selection options.  No record when the
-selection is empty or the command line sets quick_and_dirty or skip_proofs with -o.
+selection is empty or the command line sets quick_and_dirty or skip_proofs with -o.  For every
+`-d` directory that lies in a git worktree the record carries a line `dir: <top> <HEAD> <uncommitted
+files>` (migration plan §0 item 32); if that repository changed during the build, even if it was
+changed back, there is no record and the reason names the directory.
 """
 import datetime
 import getopt
@@ -26,7 +29,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from common import Refused, Repo, git, has_products, main, run
+from common import Refused, Repo, git, has_products, main, repo_state, run, tracked_mtimes
 
 PASS_THROUGH = ("HOME", "USER", "LOGNAME", "PATH", "LANG", "LC_ALL", "TERM", "TMPDIR", "DISPLAY")
 BUILD_OPTIONS = "A:B:D:H:NP:RSX:abcd:efg:j:lno:vx:"   # isabelle build (src/Pure/Build/build.scala)
@@ -75,6 +78,20 @@ def session_set(isabelle: Path, env: dict, build_args: list[str]) -> list[str] |
     return names or "the session selection is empty"
 
 
+def dir_states(build_args: list[str]) -> dict[str, tuple]:
+    """For each `-d` directory inside a git worktree: (top, HEAD, uncommitted files) as the record's
+    `dir:` line says it, plus the tracked files' mtimes, which catch a change made and undone."""
+    try:
+        opts, _ = getopt.gnu_getopt(build_args, BUILD_OPTIONS)
+    except getopt.GetoptError:
+        return {}
+    states = {}
+    for o, v in opts:
+        if o == "-d" and v not in states and (state := repo_state(Path(v))) is not None:
+            states[v] = (state, tracked_mtimes(state[0]))
+    return states
+
+
 def cli():
     if len(sys.argv) < 3:
         print(__doc__, file=sys.stderr)
@@ -99,14 +116,18 @@ def cli():
     if record:
         status_before = Repo.status(tree)
         head_before = git("rev-parse", "HEAD", cwd=tree)
+        dirs_before = dir_states(args[1:])
     rc = subprocess.run([str(isabelle), *args], env=env).returncode
     if record:
+        changed = [d for d, s in dirs_before.items() if dir_states([f"-d{d}"]).get(d) != s]
         if rc:
             reason = f"isabelle build exited {rc}"
         elif status_before or Repo.status(tree):
             reason = "git status was not empty before or after the build"
         elif git("rev-parse", "HEAD", cwd=tree) != head_before:
             reason = "HEAD moved during the build"
+        elif changed:
+            reason = f"the repository of -d {changed[0]} changed during the build"
         else:
             sessions = session_set(isabelle, env, args[1:])
             reason = sessions if isinstance(sessions, str) else None
@@ -116,6 +137,8 @@ def cli():
             when = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
             note = (f"tested {when} in {tree.name}\ncommand: {shlex.join(['isabelle', *args])}\n"
                     f"sessions: {' '.join(sessions)}")
+            for (top, head, files), _ in dirs_before.values():
+                note += f"\ndir: {top} {head}" + "".join(f" {f}" for f in files)
             git("notes", "--ref=tested", "append", "-m", note, head_before, cwd=tree)
             print(f"run-tree: tested record written for {head_before[:12]}: {' '.join(sessions)}")
     return rc

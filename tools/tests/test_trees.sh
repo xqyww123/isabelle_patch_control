@@ -96,11 +96,19 @@ expect ok      "build with -o quick_and_dirty"                        -- "$tools
 check "no second record for quick_and_dirty" '[[ $(git -C "$t" notes --ref=tested show HEAD | /usr/bin/grep -c "^tested ") == 1 ]]'
 expect ok      "second clean build appends a record"                  -- "$tools/run-tree" "$t" build -d x -g main FOL ZF
 check "two records, the second lists FOL ZF" '[[ $(git -C "$t" notes --ref=tested show HEAD | /usr/bin/grep -c "^tested ") == 2 ]] && git -C "$t" notes --ref=tested show HEAD | /usr/bin/grep -q "^sessions: Pure FOL ZF$"'
+echo "--- run-tree: the state of -d repositories (migration plan §0 item 32)"
+git init -q "$work/light"; ( cd "$work/light" && echo root > ROOT && echo thy > Light.thy && git add -A && git commit -q -m light && echo wip > notes.txt )
+expect ok      "build with -d of a git worktree and -d of a plain directory" -- "$tools/run-tree" "$t" build -d "$work/light" -d "$work/home" -g main HOL
+check "one dir: line: top, HEAD, uncommitted files" '[[ $(git -C "$t" notes --ref=tested show HEAD | /usr/bin/grep -c "^dir: ") == 1 ]] && git -C "$t" notes --ref=tested show HEAD | /usr/bin/grep -q "^dir: $work/light $(git -C "$work/light" rev-parse HEAD) notes.txt$"'
+echo "$work/light/Light.thy" > "$HOME/.stub-build-edit"
+expect ok      "build during which a -d file is changed and changed back" -- "$tools/run-tree" "$t" build -d "$work/light" HOL
+check "no record, the reason names the -d directory" '/usr/bin/grep -q "no tested record: the repository of -d $work/light changed during the build" "$work/out" && [[ $(git -C "$t" notes --ref=tested show HEAD | /usr/bin/grep -c "^tested ") == 3 ]]'
+rm "$HOME/.stub-build-edit"
 echo 3 > "$HOME/.stub-build-rc"
 expect refused "failed build exits non-zero"                          -- "$tools/run-tree" "$t" build HOL
 rm "$HOME/.stub-build-rc"; echo src/dirty.ML > "$HOME/.stub-build-touch"
 expect ok      "build that leaves the tree dirty"                     -- "$tools/run-tree" "$t" build HOL
-check "no record when status is not empty afterwards" '[[ -f $t/src/dirty.ML && $(git -C "$t" notes --ref=tested show HEAD | /usr/bin/grep -c "^tested ") == 2 ]]'
+check "no record when status is not empty afterwards" '[[ -f $t/src/dirty.ML && $(git -C "$t" notes --ref=tested show HEAD | /usr/bin/grep -c "^tested ") == 3 ]]'
 rm "$t/src/dirty.ML" "$HOME/.stub-build-touch"
 expect ok      "stock tree runs (no record)"                          -- "$tools/run-tree" "$s" build HOL
 check "stock tree got no note" '! git notes --ref=tested show "$(git -C "$s" rev-parse HEAD)" >/dev/null 2>&1 || ! git notes --ref=tested show "$(git -C "$s" rev-parse HEAD)" | /usr/bin/grep -q "^tested "'

@@ -13,9 +13,14 @@ import os
 import subprocess
 import sys
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 TOOLS_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(TOOLS_DIR.parent))            # the checkout's isabelle_patch_control, not an installed one
+from isabelle_patch_control.names import package_name  # noqa: E402,F401  (re-exported for the scripts)
+
 HOOK_SOURCE = TOOLS_DIR / "hooks" / "reference-transaction"
 # build products a private or stock tree takes from its line's shared tree (decision 5 step 3):
 # copied because `scala_build` rewrites them in place, linked because they are read-only data
@@ -172,17 +177,22 @@ class Repo:
 
     # --- tested records (written by run-tree only)
     def tested_records(self, commit: str) -> list[dict]:
-        """The records of `git notes --ref=tested` on commit: {when, tree, command, sessions}."""
+        """The records of `git notes --ref=tested` on commit: {when, tree, command, sessions, dirs},
+        `dirs` mapping each `-d` repository's top-level directory to (HEAD, uncommitted files)
+        (migration plan §0 item 32)."""
         r = run(["git", "notes", "--ref=tested", "show", commit], cwd=self.common_dir, check=False)
         records = []
         for line in (r.stdout if r.returncode == 0 else "").splitlines():
             if line.startswith("tested "):
                 _, when, _, tree = line.split(" ", 3)
-                records.append({"when": when, "tree": tree, "command": "", "sessions": set()})
+                records.append({"when": when, "tree": tree, "command": "", "sessions": set(), "dirs": {}})
             elif records and line.startswith("command: "):
                 records[-1]["command"] = line[len("command: "):]
             elif records and line.startswith("sessions: "):
                 records[-1]["sessions"] = set(line[len("sessions: "):].split())
+            elif records and line.startswith("dir: "):
+                top, head, *files = line[len("dir: "):].split(" ")
+                records[-1]["dirs"][top] = (head, files)
         return records
 
     # --- the hook
@@ -242,3 +252,69 @@ def install_products(tree: Path, shared: Path):
 def has_products(tree: Path) -> bool:
     classes = tree / "lib" / "classes"
     return (tree / "contrib").is_dir() and classes.is_dir() and not classes.is_symlink()
+
+
+# --- the state of a `-d` repository (migration plan §0 item 32; written into tested records by run-tree)
+
+def repo_state(directory: Path) -> tuple[str, str, list[str]] | None:
+    """(top-level directory, HEAD, uncommitted files) of the git worktree `directory` lies in, or
+    None when it lies in none.  The `dir:` line of a tested record is exactly these three."""
+    if not directory.is_dir():
+        return None
+    r = run(["git", "rev-parse", "--show-toplevel"], cwd=directory, check=False)
+    if r.returncode:
+        return None
+    top = str(Path(r.stdout.strip()).resolve())
+    head = run(["git", "rev-parse", "HEAD"], cwd=top, check=False).stdout.strip() or "none"
+    files = sorted(line[3:] for line in Repo.status(Path(top)).splitlines())
+    return top, head, files
+
+
+def tracked_mtimes(top: str) -> dict[str, tuple[int, int]]:
+    """(mtime, size) of every tracked file: a file changed during a build and changed back leaves
+    the `dir:` line unchanged but not this."""
+    out = {}
+    for rel in run(["git", "ls-files", "-z"], cwd=top).stdout.split("\0"):
+        if rel:
+            try:
+                st = os.lstat(os.path.join(top, rel))
+                out[rel] = (st.st_mtime_ns, st.st_size)
+            except FileNotFoundError:
+                out[rel] = (0, -1)
+    return out
+
+
+# --- which packages the release workflow builds and which it reuses (patch tool plan decision 10)
+
+@dataclass(frozen=True)
+class Wanted:
+    """One package the batch wants: its name and version, the file name a build with build number
+    n would have, and whether a candidate on the channel is exactly what the batch wants (the tool:
+    any build of the version; a feature package: one that pins this batch's isabelle build)."""
+    name: str
+    version: str
+    filename: Callable[[int], str]
+    accepts: Callable[[dict], bool]
+
+
+def plan_builds(repodata: dict, wanted: list[Wanted], fetch: Callable[[str], dict | None]) -> dict[str, tuple[str, str | int]]:
+    """For every wanted package: ("reuse", <file name on the channel>) or ("build", <build number>).
+
+    Candidates are the channel's indexed records of (name, version) plus the files the channel
+    serves but has not indexed yet: `fetch(filename)` returns such a file's index record or None,
+    probed from the highest indexed build number + 1 upwards.  A candidate the batch wants is
+    reused; a served candidate it does not want is skipped; with no wanted candidate the package
+    is built with the next number after everything indexed or served (0 when there is nothing).
+    So a dispatch repeated with the same inputs resumes byte for byte."""
+    records = {**repodata.get("packages", {}), **repodata.get("packages.conda", {})}
+    plan = {}
+    for w in wanted:
+        candidates = [(fn, rec) for fn, rec in records.items()
+                      if rec.get("name") == w.name and rec.get("version") == w.version]
+        n = max((int(rec["build_number"]) for _, rec in candidates), default=-1) + 1
+        while (rec := fetch(w.filename(n))) is not None:
+            candidates.append((w.filename(n), rec))
+            n += 1
+        matching = [(int(rec["build_number"]), fn) for fn, rec in candidates if w.accepts(rec)]
+        plan[w.name] = ("reuse", max(matching)[1]) if matching else ("build", n)
+    return plan

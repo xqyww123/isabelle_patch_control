@@ -68,9 +68,42 @@
   模块表、测试、真实链核对的做法、feature 包怎么产生）、`RELEASE.md`（conda 发布；决定 16 第 10 点的 checklist 七条带理由；发布步骤；决定 11 的
   workflow 输入与作业；版本与 build 号；恢复；一次性手续，注明 workflow 在 §5 第 5 步落地、落地前它是规格）。`pyproject.toml` 改名
   `isabelle-patch-control` 1.0.0、URL 换新仓库名、只剩新入口与新包。pytest 91 例全绿。这些文案都是作者写的、没经 reader 校读。
-- **下一步**：等用户说"提交"后提交决定 14 这批（删 29 个、改 6 个、新增 2 个），push、bump 主仓库指针；然后 §5 第 2 步（决定 16：门禁 (c) 改
-  `import` `apply_to/unapply_from`、第 7–8 点写入顺序、第 9 点玩具测试；`tools/common.py` 从 `isabelle_patch_control.names` 导入 `package_name`、
-  加 `plan_builds`；`run-tree` 的 `-d` 行与 `test_trees.sh` 两例；决定 17 `check-roundtrip`）。
+- 决定 14 这批已提交：工具仓库 fa1d64a（用户 2026-10-25 "批准提交"），已 push；主仓库 a17dd76d bump 指针（未 push）。
+- **§5 第 2 步已做（2026-10-25，未提交）**：
+  - `tools/common.py`：`sys.path` 加仓库根后 `from isabelle_patch_control.names import package_name`（再导出）；`tested_records` 解析 `dir:` 行
+    （`dirs[top] = (HEAD, 未提交文件)`）；`repo_state(dir)`、`tracked_mtimes(top)`；决定 10 的 `plan_builds(repodata, wanted, fetch)` 与 `Wanted(name,
+    version, filename(n), accepts(record))`——候选 = 索引里同 (名, 版本) 的记录 + 从最高 build 号 + 1 起用 `fetch(文件名)` 探到的在服务文件
+    （`fetch` 返回该文件的 index 记录或 None），想要的候选取最高 build 号复用，否则新建、号 = 跳过之后的下一个。
+  - `tools/run-tree`：每个位于 git 工作树的 `-d` 目录在记录里多一行 `dir: <顶层> <HEAD> <未提交文件>`；构建前后比较这一行**以及**该仓库全部已跟踪
+    文件的 (mtime, size)（"改了又改回"只有 mtime 能看出来；1 秒精度的文件系统上同秒改回会漏），变了就不写记录、原因点名那个 `-d` 目录。
+    `stub-isabelle` 加 `$HOME/.stub-build-edit`（构建中改一个文件再改回）；`test_trees.sh` 加两例（64 例全过）。
+  - `tools/make-patches`：第 7 点（包目录所在的 feature 仓库：三份清单与 `tools/component_files.txt` 及其所列文件必须已提交且无改动；tip 已有本 feature
+    的发布 tag → 拒绝"commit first"；记 H）；门禁 (e) 对带组件文件的包只计"`dir:` 行有该仓库、所列文件无未提交、记录 HEAD 与 H 之间
+    `git diff --quiet -- <所列文件>` 为真"的记录（其他记录打印 `not counted: 原因`）；门禁 (c) 改走 `api.apply_to/unapply_from`（块先写进临时目录，
+    `patch` 命令不再使用）；第 8 点写入顺序 (b) 删旧 patch、复制新文件与 provenance → (c) 按名 `git add`/`git rm --cached`、
+    `git diff --cached --quiet -- L`、`git commit -- L` → (d) 核对将打 tag 的 commit（已有 tag 指的或 HEAD）的 blob 恰等于生成的，带组件文件的另核
+    `git diff --quiet H <commit> -- 组件文件`，不符则拒绝、已有 tag 时说"this version number is spent: release v+1" → (e) feature 仓库打 tag →
+    (f) 最后 Isabelle 仓库打 tag。测试接缝 `MAKE_PATCHES_FAIL_AFTER=b|c|e`（docstring 里注明 tests only）。`test_make_patches.sh` 重写：包目录成为
+    git 仓库；第 7 点两种拒绝且不留 tag；三处失败注入各一次、重跑完成（含"无第二个 commit"）；无关的已暂存文件不进发布 commit；带组件文件的包：
+    无 `dir:` 行的记录不计、无关 commit 后通过（第 35 条验收例）、组件文件改后提交被拒、构建时组件文件未提交被拒、(e) 后改组件文件再重跑被拒并说
+    版本号作废、light 首次发布形状（旧 patch 文件重写、stale 文件删除、provenance 新增）；70 例全过。输出多了几行（committed/tag/not counted），
+    "N patch files written to" 那行保留原样。
+  - `tools/check-roundtrip`（决定 17，新文件，可执行）：`<原版树> <链顶 feature> --features-dir FD [-C 仓库] [--tool 命令] [--keep]`；umask 022；
+    副本 A/B 用 `cp -a` 建在原版树旁的 mkdtemp 里；A 走工具 apply + `status -v`（每个 `--- /dev/null` 新建的路径必须以 `    <path>  level` 出现）；
+    B 走 `patch -p1 -F0 -d B` 吃 `git diff-tree -r -p --no-renames <底 tag> <顶 tag>`；`diff -r --no-dereference -q` 加排序的
+    `find . -printf '%M %P'` 清单比对；A 必须异于原版；unapply 后 A 等于原版；`--tool` 默认本 checkout 的 `python -m isabelle_patch_control`
+    （PYTHONPATH 指仓库根）。pytest `tests/test_roundtrip.py` 4 例（通过、A≠B、补丁打不上、`--keep`），GNU patch 2.7.6 对新建 100755 文件的权限位
+    与工具一致（清单比对过了）。`tests/test_plan_builds.py` 5 例（决定 15 的四种输入 + 空渠道）。
+  - 文档：README 的脚本清单加 `check-roundtrip`；develop.md 加一段。pytest 100 例、`tools/tests/run-all.sh` 全部通过。
+  - 作者自定的：`plan_builds` 的接口形状（`Wanted` 的两个回调、`fetch` 返回记录）；mtime 指纹；`MAKE_PATCHES_FAIL_AFTER`；`check-roundtrip` 的 `--keep`
+    与 `-C` 默认当前目录。
+- **下一步**：等用户说"提交"后提交第 2 步这批（改 8 个、新增 3 个），push、bump 主仓库指针。然后 §5 第 3 步，每件都要用户下令：GitHub 建
+  `isabelle-base-features`、`qiyuan_dev_patches`（`localized_record` 的仓库用户指派）；本地建 `contrib/isabelle-base-features/`（两个子目录，决定 13 的
+  清单文件；README 从 fa1d64a 的父 commit cc0e603 复制 `patches/expose_foreign.md`、`patches/future_assign_interrupt.md`）；`make-patches expose_foreign 1`、
+  `make-patches future_assign_interrupt 1`（注意新门禁第 7 点：包目录须在 git 仓库里、清单已提交；两棵私有树已各有 Pure 的 tested 记录，§8）；light：
+  `tools/component_files.txt`、用户命令的完整构建（run-tree 要带 `-d <light 仓库>` 才有 `dir:` 行）、`make-patches light_locale <v>`。第 4 步：
+  `check-roundtrip` 在官方 tarball 的树上本地跑一遍（`~/isa_release_proto/Isabelle2025-2_linux.tar.gz`，FD 由各包的 `patches/Isabelle2025-2/` 复制成
+  `FD/<feature>/`）。第 5 步：渲染器 `tools/render-feature-recipe`、工具的 `conda/recipe.yaml`、`release-features.yml`、钩子层真 conda 测试。
 
 ## compact 之后怎么开工（2026-10-24 深夜写）
 1. **§5 第 0 步已完成**（用户 2026-10-24 "批准提交"）：工具仓库 `main` 上 7336934（`tools/` 与 README 一节，README 的 tested 一条补了第 35 条

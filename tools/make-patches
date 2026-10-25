@@ -8,21 +8,34 @@ release line of the branch checked out where the command runs.  The feature's pa
 (light locale's layout) and receives patches/<R>/*.patch and patches/<R>/provenance.txt.
 
 Gates, in order, all before anything is written or tagged:
+  7. the feature repository (<dir> lies in it): tools/patched_files.txt, signature_additions.txt,
+     required_sessions.txt and, if present, tools/component_files.txt with the files it lists are
+     committed and unchanged; <tip> carries no release tag of this feature yet (commit first).
   0. base tag: `git merge-base --all <base> <tip>` is one commit, and exactly one release tag
      <R>/<base>/* points at it.  Every gate below is relative to that tag.
   1. own commits: every commit in <base tag>..<tip> is on the first-parent chain of this feature's
      branch (in some release line) beyond that line's base branch.
   (f) `git diff-tree --name-only` between the two equals tools/patched_files.txt.
   (d) check-signatures with tools/signature_additions.txt.
-  (e) the tested records of <tip> (printed) together cover tools/required_sessions.txt.
-Then the patch files are generated (one `git diff-tree -p` block per file, flat names as light
-locale uses them), gate (c) replays them on `git archive <base tag>` forward and backward and
-compares tree hashes, the provenance file is written, and last the annotated tag
-<R>/<feature>/<version> is created.
+  (e) the tested records of <tip> (printed) together cover tools/required_sessions.txt.  For a
+     package with component files only records count whose `dir:` line of the feature repository
+     shows no uncommitted shipped file and whose HEAD has the same shipped files as HEAD now.
+  (c) the patch files (one `git diff-tree -p` block per file, flat names as light locale uses
+     them), generated into a temporary directory, replayed through the patch tool's directory
+     interface on `git archive <base tag>` forward and backward, compared by tree hash.
+Then, each step repeatable after a failure (patch tool plan decision 16 point 8): the package's
+patches/<R>/ receives the files and the provenance file; they are staged and committed by name
+in the feature repository; the commit to tag (the new one, or the one an existing tag of this
+version points at) is checked to hold exactly the generated files and the gates' component files;
+the annotated tag <R>/<feature>/<version> is created in the feature repository; and last in the
+Isabelle repository, whose tag marks the release as done.
 
 `pristine <hg id>` runs check (a) only (§5.2): the tip of <R>/pristine equals the hg tag <R>
 minus Admin/, README_REPOSITORY and .hg*, plus the five release text files of the official
 tarball and the commit's own .gitignore; then tags <R>/pristine/<hg id>.
+
+MAKE_PATCHES_FAIL_AFTER=b|c|e (tests only) fails right after the files are written, after the
+commit, or after the feature repository's tag.
 """
 import argparse
 import os
@@ -35,6 +48,7 @@ import tempfile
 from pathlib import Path
 
 from common import TOOLS_DIR, Refused, Repo, main, run, split_branch
+from isabelle_patch_control.api import apply_to, unapply_from
 
 # paths git tracks that an hg checkout of the release does not have, or has differently; the CI
 # build assertion hashes its hg checkout minus Admin/, README_REPOSITORY and .hg* and compares
@@ -60,13 +74,46 @@ def resolve_branch(repo: Repo, cwd: Path, name: str) -> str:
     return f"{split_branch(head)[0]}/{name}"
 
 
-def apply_patches(directory: Path, patches: list[Path], reverse: bool = False):
-    """Stand-in for the patch tool's directory interface (§5.3): plain `patch -p1 -F0`."""
-    for p in patches:
-        r = run(["patch", "-p1", "-F0", "--no-backup-if-mismatch", *(["-R"] if reverse else []), "-i", p],
-                cwd=directory, check=False)
-        if r.returncode:
-            raise Refused(f"gate (c): {p.name} does not apply{' in reverse' if reverse else ''}:\n{r.stdout}{r.stderr}")
+def replay(directory: Path, patches: Path, reverse: bool = False):
+    """Gate (c) through the patch tool's directory interface: every patch file of `patches` applied
+    to (or reversed from) `directory`, CONFLICT files refused."""
+    res = (unapply_from if reverse else apply_to)(directory, patches)
+    if res.conflicts:
+        files = "".join(f"\n  {lv.target}: " + (next(iter(lv.failures.values()), "").splitlines() or ["?"])[0]
+                        for lv in res.conflicts)
+        raise Refused(f"gate (c): the patches do not {'reverse' if reverse else 'apply'} cleanly:{files}")
+
+
+# --- the feature repository (decision 16 point 7)
+
+def feature_repo(package: Path) -> Path:
+    r = run(["git", "rev-parse", "--show-toplevel"], cwd=package, check=False)
+    if r.returncode:
+        raise Refused(f"{package} is not inside a git repository (every feature has its own)")
+    return Path(r.stdout.strip()).resolve()
+
+
+def shipped_files(package: Path) -> list[Path]:
+    """tools/component_files.txt and the files it lists: the component payload the package ships."""
+    cf = package / "tools" / "component_files.txt"
+    return [cf, *(package / line for line in listed(cf))] if cf.is_file() else []
+
+
+def require_committed(top: Path, paths: list[Path]):
+    rel = [os.path.relpath(p, top) for p in paths]
+    for p, r in zip(paths, rel):
+        if not p.is_file():
+            raise Refused(f"{p} is missing")
+        if run(["git", "ls-files", "--error-unmatch", "--", r], cwd=top, check=False).returncode:
+            raise Refused(f"{p} is not committed in the feature repository {top}: commit it first")
+    dirty = run(["git", "status", "--porcelain", "--", *rel], cwd=top).stdout
+    if dirty:
+        raise Refused(f"uncommitted changes in the feature repository {top}: commit them first\n{dirty.rstrip()}")
+
+
+def fail_after(step: str):
+    if os.environ.get("MAKE_PATCHES_FAIL_AFTER") == step:
+        raise Refused(f"injected failure after step ({step}) (MAKE_PATCHES_FAIL_AFTER, tests only)")
 
 
 def archive(repo: Repo, rev: str, into: Path):
@@ -92,6 +139,18 @@ def feature_release(repo: Repo, cwd: Path, branch: str, version: str, package: P
         raise Refused(f"{wt['path']} has uncommitted changes")
     base = repo.base_of(branch)
     base_name = split_branch(base)[1]
+
+    # 7. the feature repository
+    top = feature_repo(package)
+    shipped = shipped_files(package)
+    lists = [package / "tools" / f for f in ("patched_files.txt", "signature_additions.txt", "required_sessions.txt")]
+    require_committed(top, [*lists, *shipped])
+    earlier = repo.tags_at(tip, f"{branch}/*")
+    if earlier:
+        raise Refused(f"{tip[:12]} already carries release tag {' '.join(earlier)}: commit first (an empty commit "
+                      "will do) to release this commit's content again under a new version")
+    H = run(["git", "rev-parse", "HEAD"], cwd=top).stdout.strip()
+    shipped_rel = [os.path.relpath(p, top) for p in shipped]
 
     # 0. the base tag
     merge_base = repo.merge_base(base, tip)
@@ -143,48 +202,23 @@ def feature_release(repo: Repo, cwd: Path, branch: str, version: str, package: P
         raise Refused(f"gate (e): {tip[:12]} has no tested record (run-tree writes one after a clean build)")
     covered = set()
     for rec in records:
-        print(f"tested {rec['when']} in {rec['tree']}: {rec['command']} -> {' '.join(sorted(rec['sessions']))}")
-        covered |= rec["sessions"]
+        not_counted = ""
+        if shipped:                                   # migration plan §0 item 32: the record must cover the shipped files
+            entry = rec["dirs"].get(str(top))
+            if entry is None:
+                not_counted = f"the build did not use -d {top}"
+            elif touched := sorted(set(entry[1]) & set(shipped_rel)):
+                not_counted = f"shipped files were uncommitted during the build: {' '.join(touched)}"
+            elif run(["git", "diff", "--quiet", entry[0], H, "--", *shipped_rel], cwd=top, check=False).returncode:
+                not_counted = f"the shipped files differ between the build's {entry[0][:12]} and HEAD {H[:12]}"
+        print(f"tested {rec['when']} in {rec['tree']}: {rec['command']} -> {' '.join(sorted(rec['sessions']))}"
+              + (f"\n  not counted: {not_counted}" if not_counted else ""))
+        if not not_counted:
+            covered |= rec["sessions"]
     missing = sorted(required - covered)
     if missing:
         raise Refused(f"gate (e): the tested records do not cover {' '.join(missing)}")
     print(f"gate (e): records cover {' '.join(sorted(required))}")
-
-    # generation
-    diff = run(["git", "diff-tree", "-r", "-p", "--no-renames", base_tag, tip], cwd=repo.common_dir).stdout
-    blocks = re.split(r"(?m)^(?=diff --git )", diff)
-    blocks = [b for b in blocks if b]
-    out = package / "patches" / release
-    out.mkdir(parents=True, exist_ok=True)
-    for old in out.glob("*.patch"):
-        old.unlink()
-    written = []
-    for block in blocks:
-        head = block.splitlines()[0]
-        m = re.fullmatch(r"diff --git a/(.*) b/(.*)", head)
-        if not m or m.group(1) != m.group(2):
-            raise Refused(f"unexpected diff header: {head}")
-        if re.search(r"(?m)^(old mode|new mode|GIT binary patch|similarity index)", block):
-            raise Refused(f"{m.group(1)}: mode changes, renames and binary diffs are not released")
-        path = out / (m.group(1).replace("/", "-") + ".patch")
-        path.write_text(block)
-        written.append(path)
-    print(f"{len(written)} patch files written to {out}")
-
-    # (c) round trip on the base tag's archive, compared by tree hash
-    with tempfile.TemporaryDirectory(prefix="make-patches-") as tmp:
-        work = Path(tmp) / "tree"
-        work.mkdir()
-        archive(repo, base_tag, work)
-        apply_patches(work, written)
-        got, want = repo.tree_hash_of_dir(work), repo.git("rev-parse", f"{tip}^{{tree}}")
-        if got != want:
-            raise Refused(f"gate (c): forward application gives tree {got}, the commit's tree is {want}")
-        apply_patches(work, written, reverse=True)
-        got, want = repo.tree_hash_of_dir(work), repo.git("rev-parse", f"{base_tag}^{{tree}}")
-        if got != want:
-            raise Refused(f"gate (c): backward application gives tree {got}, the base tag's tree is {want}")
-    print("gate (c): round trip on the base tag's archive reproduces both trees")
 
     # provenance
     tree_hash = repo.tree_hash_excluding(tip, TREE_HASH_EXCLUDES)
@@ -203,10 +237,91 @@ def feature_release(repo: Repo, cwd: Path, branch: str, version: str, package: P
         f"tree_hash: {tree_hash}",
         f"tree_hash_excludes: {' '.join(TREE_HASH_EXCLUDES)}",
     ]
-    (out / "provenance.txt").write_text("\n".join(provenance) + "\n")
-    print("\n".join(provenance))
 
-    # the tag, last
+    with tempfile.TemporaryDirectory(prefix="make-patches-") as tmp:
+        # generation, into the temporary directory: the package is not touched before every gate passed
+        gen = Path(tmp) / "patches"
+        gen.mkdir()
+        diff = run(["git", "diff-tree", "-r", "-p", "--no-renames", base_tag, tip], cwd=repo.common_dir).stdout
+        for block in (b for b in re.split(r"(?m)^(?=diff --git )", diff) if b):
+            head = block.splitlines()[0]
+            m = re.fullmatch(r"diff --git a/(.*) b/(.*)", head)
+            if not m or m.group(1) != m.group(2):
+                raise Refused(f"unexpected diff header: {head}")
+            if re.search(r"(?m)^(old mode|new mode|GIT binary patch|similarity index)", block):
+                raise Refused(f"{m.group(1)}: mode changes, renames and binary diffs are not released")
+            (gen / (m.group(1).replace("/", "-") + ".patch")).write_text(block)
+        patch_names = sorted(p.name for p in gen.glob("*.patch"))
+        print(f"{len(patch_names)} patch files generated")
+
+        # (c) round trip on the base tag's archive through the tool's directory interface, compared by tree hash
+        work = Path(tmp) / "tree"
+        work.mkdir()
+        archive(repo, base_tag, work)
+        replay(work, gen)
+        got, want = repo.tree_hash_of_dir(work), repo.git("rev-parse", f"{tip}^{{tree}}")
+        if got != want:
+            raise Refused(f"gate (c): forward application gives tree {got}, the commit's tree is {want}")
+        replay(work, gen, reverse=True)
+        got, want = repo.tree_hash_of_dir(work), repo.git("rev-parse", f"{base_tag}^{{tree}}")
+        if got != want:
+            raise Refused(f"gate (c): backward application gives tree {got}, the base tag's tree is {want}")
+        print("gate (c): round trip on the base tag's archive reproduces both trees")
+        (gen / "provenance.txt").write_text("\n".join(provenance) + "\n")
+        print("\n".join(provenance))
+
+        # (b) the package directory: old patch files go, the generated files and the provenance file come
+        out = package / "patches" / release
+        out.mkdir(parents=True, exist_ok=True)
+        stale = sorted(p.name for p in out.glob("*.patch") if p.name not in patch_names)
+        for name in stale:
+            (out / name).unlink()
+        generated = [*patch_names, "provenance.txt"]
+        for name in generated:
+            shutil.copy2(gen / name, out / name)
+        print(f"{len(patch_names)} patch files written to {out}" + (f"; removed {' '.join(stale)}" if stale else ""))
+        fail_after("b")
+
+        # (c) staged and committed by name, never by directory (that would sweep in unrelated edits)
+        paths = [os.path.relpath(out / name, top) for name in generated]
+        removed = [os.path.relpath(out / name, top) for name in stale]
+        run(["git", "add", "--", *paths], cwd=top)
+        if removed:
+            run(["git", "rm", "--cached", "-q", "--ignore-unmatch", "--", *removed], cwd=top)
+        L = [*paths, *removed]
+        if run(["git", "diff", "--cached", "--quiet", "--", *L], cwd=top, check=False).returncode:
+            run(["git", "commit", "-q", "-m", f"{feature} release {version}: patches/{release}", "--", *L], cwd=top)
+            print(f"committed patches/{release} in {top}")
+        else:
+            print(f"patches/{release} already committed in {top}")
+        fail_after("c")
+
+        # (d) the commit to tag holds exactly the generated files (and the gates' component files)
+        r = run(["git", "rev-parse", "-q", "--verify", f"refs/tags/{tag}^{{commit}}"], cwd=top, check=False)
+        tag_exists = r.returncode == 0
+        commit = r.stdout.strip() if tag_exists else run(["git", "rev-parse", "HEAD"], cwd=top).stdout.strip()
+        in_commit = {}
+        for line in run(["git", "ls-tree", "-r", commit, "--", os.path.relpath(out, top)], cwd=top).stdout.splitlines():
+            meta, path = line.split("\t", 1)
+            in_commit[path] = meta.split()[2]
+        want = {p: run(["git", "hash-object", "--", gen / name], cwd=top).stdout.strip() for p, name in zip(paths, generated)}
+        differing = sorted(set(in_commit) ^ set(want) | {p for p in want if in_commit.get(p) != want[p]})
+        if not differing and shipped_rel and run(["git", "diff", "--quiet", H, commit, "--", *shipped_rel], cwd=top, check=False).returncode:
+            differing = ["(component files)", *shipped_rel]
+        if differing:
+            where = f"release tag {tag} already exists at {commit[:12]} and" if tag_exists else f"commit {commit[:12]}"
+            raise Refused(f"{where} does not hold the generated files: {' '.join(differing)}"
+                          + (f"\nthis version number is spent: release {int(version) + 1}" if tag_exists else ""))
+
+        # (e) the feature repository's tag
+        if not tag_exists:
+            run(["git", "tag", "-a", "-m", f"{branch} release {version}\n\n" + "\n".join(provenance), tag, commit], cwd=top)
+            print(f"release tag {tag} created in {top} at {commit[:12]}")
+        else:
+            print(f"release tag {tag} already in {top} at {commit[:12]}")
+        fail_after("e")
+
+    # (f) the Isabelle repository's tag, last: its existence marks the release as done
     repo.git("tag", "-a", "-m", f"{branch} release {version}\n\n" + "\n".join(provenance), tag, tip)
     print(f"release tag {tag} created at {tip[:12]}")
 

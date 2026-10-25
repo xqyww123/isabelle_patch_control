@@ -216,5 +216,6 @@ that discards or hides uncommitted changes" and "NEVER run `git clean` (in any f
   line, in chain order, through `new-tree`; later fixes of the older line are carried
   forward the same way. A newer line is never merged into an older one.
 
-The scripts (`new-tree`, `run-tree`, `make-patches`, `check-signatures`, `advance-daily`)
-and the repository hook live in [`tools/`](tools/); their toy runs are `tools/tests/run-all.sh`.
+The scripts (`new-tree`, `run-tree`, `make-patches`, `check-signatures`, `advance-daily`,
+`check-roundtrip`) and the repository hook live in [`tools/`](tools/); their toy runs are
+`tools/tests/run-all.sh` and, for `check-roundtrip`, `tests/test_roundtrip.py`.

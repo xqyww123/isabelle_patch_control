@@ -59,9 +59,19 @@ isabelle_patch_control/
   AGENTS.md      symlink to ../AGENTS.md; `help` prints it
 common-readme.md the text every feature package's README starts with; README.md embeds it
 tools/           the Isabelle source repository's scripts (make-patches, run-tree, ...) and their
-                 toy tests, see README.md "Working in the Isabelle source repository"
-tests/           pytest
+                 toy tests, see README.md "Working in the Isabelle source repository";
+                 check-roundtrip (plan decision 17: the tool against GNU patch on a copy of a
+                 pristine tree); common.py also holds plan_builds (decision 10) and imports
+                 package_name from the Python package
+tests/           pytest (the tool; also plan_builds and check-roundtrip)
 ```
+
+`make-patches` runs gate (c) through `api.apply_to` / `api.unapply_from` on `git archive <base tag>`,
+writes the package only after every gate passed, and then commits by name, checks the commit to tag,
+tags the feature repository and last the Isabelle repository (decision 16 point 8; each step can be
+rerun after a failure, `MAKE_PATCHES_FAIL_AFTER=b|c|e` injects one for the toy test).  `run-tree`
+records every `-d` repository's state in the tested record (`dir:` lines) and writes no record when
+one changed during the build (migration plan §0 item 32).
 
 Texts: everything a user can read is a function or constant in `texts.py`, proofread by three
 independent readers from the reader's standpoint (plan decision 9, "文案的写法"): no `level`,
