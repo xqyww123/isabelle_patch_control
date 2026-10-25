@@ -3,42 +3,42 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "my-better-isabelle-prover"
-version = "0.3.0"
-description = "Patch manager for Isabelle installations"
+name = "isabelle-patch-control"
+version = "1.0.0"
+description = "Applies the Isabelle feature packages of a conda environment to its Isabelle, reverses them, and reports their state"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 authors = [
     { name = "Qiyuan Xu", email = "xu@qiyuan.me" },
 ]
-keywords = ["isabelle", "patch", "pide", "lsp", "theorem-proving"]
+keywords = ["isabelle", "patch", "conda", "theorem-proving"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Environment :: Console",
     "Intended Audience :: Developers",
-    "Operating System :: POSIX",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Build Tools",
 ]
+# git >= 2.43 is a conda dependency of the package, not a Python one.  Not published to PyPI:
+# this file serves the conda recipe's `pip install . --no-deps` and editable installs.
 dependencies = []
 
 [project.urls]
-Homepage = "https://github.com/xqyww123/my_better_isabelle_prover"
-Repository = "https://github.com/xqyww123/my_better_isabelle_prover"
-Issues = "https://github.com/xqyww123/my_better_isabelle_prover/issues"
+Homepage = "https://github.com/xqyww123/isabelle_patch_control"
+Repository = "https://github.com/xqyww123/isabelle_patch_control"
+Issues = "https://github.com/xqyww123/isabelle_patch_control/issues"
 
 [project.scripts]
-my-better-isabelle = "my_better_isabelle_prover.cli:main"
 isabelle-patch-control = "isabelle_patch_control.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["my_better_isabelle_prover", "my_better_isabelle_prover.*", "isabelle_patch_control", "isabelle_patch_control.*"]
+include = ["isabelle_patch_control", "isabelle_patch_control.*"]
 
 [tool.setuptools.package-data]
-my_better_isabelle_prover = ["patches/**/*.patch", "patches/categories.toml", "AGENTS.md"]
 isabelle_patch_control = ["hooks/*", "AGENTS.md"]
 
 [tool.pytest.ini_options]

@@ -1,149 +1,139 @@
-# my-better-isabelle-prover
+# isabelle-patch-control
 
-A patch manager for Isabelle installations.
+GitHub: <https://github.com/xqyww123/isabelle_patch_control>
 
-GitHub: <https://github.com/xqyww123/my_better_isabelle_prover>
+`isabelle-patch-control` applies the Isabelle *feature packages* installed in a conda environment
+to that environment's Isabelle, reverses them when they are removed, and reports the state of
+every feature. It is a framework: it carries no patches of its own. Each feature package carries
+its patch files and a provenance file; the tool reads them from
+`$PREFIX/share/isabelle_patch_control/features.d/<feature>/`, links the features into one chain by
+their exact release tags, and moves each file of `$PREFIX/isa` to where the installed chain says it
+should be. The engine is `git apply`, run only on single-file copies inside directories the tool
+creates; Isabelle's tree is changed only by renaming a finished copy into place, one file at a time.
 
-It carries the patches that the surrounding Isabelle/ML research stack needs: the
-SIMD FFI of `Semantic_Embedding`, and — for development —
-[`Isa-REPL`](https://github.com/xqyww123/Isa-REPL) and Isa-Mini, notably an ML
-loader function that Isabelle2025-2 removed. This tool keeps those edits as
-version-keyed unified diffs and applies, reverses, and checks them idempotently,
-then rebuilds the affected Scala when needed.
+The text between the rules below is the text every feature package's README starts with; it lives
+in [`common-readme.md`](common-readme.md) and the release workflow copies it from there.
 
-> [!NOTE]
-> **[Isabelle-MCP](https://github.com/xqyww123/Isabelle-MCP) no longer needs any
-> patch.** It used to: `pide_control` gave `vscode_server` the PIDE requests it
-> lacked, and its ML half gave PIDE a global-cancel command. Isabelle-MCP now
-> ships its own `isabelle mcp_server` Scala component (which carries those
-> requests as its own code) and cancels through an ML prelude injected at prover
-> startup, built from the public `EXECUTION` API alone. `pide_control` and
-> `perspective_eof_clamp` were therefore retired on Isabelle2025-2, and
-> **removed from this repository on 2026-09-08**; the last state carrying them is
-> tagged `last-isabelle2024-support` in both repositories. No remaining feature
-> edits Scala, so `patch` no longer runs `scala_build` at all.
+---
 
-> [!IMPORTANT]
-> **Developing against Isa-REPL or Isa-Mini needs
-> `my-better-isabelle patch --category all`** (see [Categories](#categories)).
->
-> Before using this tool, make sure the `isabelle` command is available — on
-> your `PATH`, or passed explicitly via `--isabelle-bin PATH`. Every command
-> needs it (to detect the version and locate `ISABELLE_HOME`) and aborts with an
-> error if it cannot be found. The system `patch` command must likewise be
-> installed.
+## Isabelle and its feature packages
 
-```bash
-pip install -e .
-my-better-isabelle patch          # apply the `user` patches for the detected version
-my-better-isabelle patch --category all   # ... plus the `dev` ones
-my-better-isabelle status         # show what is applied
-my-better-isabelle unpatch        # reverse them all
+Isabelle is the conda package `isabelle`, the official release unchanged. A *feature package*,
+such as `isabelle-light-locale`, changes Isabelle's sources inside your environment when it is
+installed and puts them back when it is removed. The tool that does this, `isabelle-patch-control`,
+comes in with the feature packages as their dependency.
+
+Install Isabelle with a feature (always name `isabelle` itself, see below):
+
+```
+conda create -n isabelle -c https://conda.qiyuan.me -c conda-forge isabelle isabelle-light-locale
 ```
 
-The Python version constraint is declared in `pyproject.toml`. See
-**[reference.md](reference.md)** for the full list of prerequisites and CLI
-options.
+Update everything in the environment:
 
-## Features
+```
+conda update --all -c https://conda.qiyuan.me -c conda-forge
+```
 
-A *feature* is one self-consistent bundle of patches, stored per Isabelle
-version. Run `my-better-isabelle status` to see which are applied.
+Give both `-c` arguments every time: the Isabelle channel has no `python` and no `git`, which the
+tool needs, and conda-forge has them. (You can leave them out only if both channels are in your
+global `.condarc`; a `.condarc` inside the environment does not apply to `conda ... -n`.)
 
-| Feature | Category | Isabelle2024 | Isabelle2025-2 | What it adds |
-|---------|:---:|:---:|:---:|--------------|
-| [`future_assign_interrupt`](my_better_isabelle_prover/patches/future_assign_interrupt.md) | user | ✓ | ✓ | **Bug fix.** Stop `Future.assign_result` from swallowing an interrupt raised inside `Single_Assignment.assign`, which then surfaced as `exception Option` |
-| [`expose_foreign`](my_better_isabelle_prover/patches/expose_foreign.md) | user | native | ✓ | Stop hiding Poly/ML's `Foreign`/`RunCall`/`CInterface` FFI structures, which 2025-2 forgets during the Pure bootstrap |
-| [`register_thy`](my_better_isabelle_prover/patches/Isabelle2025-2/register_thy.md) | dev | native | ✓ | Restores `Thy_Info.register_thy`, removed in 2025-2 |
-| [`show_types_nv`](my_better_isabelle_prover/patches/show_types_nv.md) | dev | ✓ | ✓ | Custom `show_types_nv` option: suppress type annotations on free/fixed variables only |
-| [`expose_map_syn`](my_better_isabelle_prover/patches/expose_map_syn.md) | dev | ✓ | ✓ | Export the private `Sign.map_syn` so ML can wholesale replace/clear a theory's inner syntax |
+Name `isabelle` in the install command: a feature package depends on one exact build of
+`isabelle`, so conda would install Isabelle anyway, but only as a dependency. Removing the feature
+package later would then remove Isabelle and its user directory with it, because conda removes
+dependencies nobody asked for. Naming `isabelle` makes it a package you asked for, so it stays.
 
-## Categories
+To see what is installed and whether every feature is in place:
 
-Each feature is either `user` or `dev`, and `my-better-isabelle patch` applies
-**only the `user` ones by default**.
+```
+isabelle-patch-control status
+```
 
-- **`user`** — needed by the user-facing systems. On Isabelle2025-2 that is now
-  only the SIMD FFI of `Semantic_Embedding` (`expose_foreign`); the two
-  Isabelle-MCP features are retired there and survive for Isabelle2024 alone.
-- **`dev`** — needed only by developer/experiment infrastructure: **Isa-REPL**,
-  and Isa-Mini's translator and AoA agent injector.
+Each line is one feature: `applied` means its changes are present in Isabelle's sources;
+`not-applied` means they are not; `half-applied` means some of its files have them and some do
+not; `CONFLICT` means a file has content the tool does not recognise, and the message says how to
+fix it. `isabelle-patch-control status -v` lists every changed file.
 
-> [!WARNING]
-> The three `dev` patches are **compile-time** dependencies of that stack —
-> `Thy_Info.register_thy`, `Printer.show_types_nv`, `Sign.map_syn` simply do not
-> exist without them, so the ML fails to compile. If you are building or running
-> Isa-REPL / Isa-Mini, apply everything:
->
-> ```bash
-> my-better-isabelle patch --category all
-> ```
+After a feature is applied or reversed, Isabelle rebuilds every heap that was not built from
+exactly these sources on first use (HOL takes several minutes). To do it right away:
+`isabelle build -b HOL`.
 
-`status` always lists every feature regardless of category; its *exit code*
-reflects only the selected category (`user` by default). Categories live in
-[`patches/categories.toml`](my_better_isabelle_prover/patches/categories.toml).
+---
 
-### `future_assign_interrupt` — don't turn a cancelled future into `exception Option`
+## Removing, re-installing, and what conda does on its own
 
-The one feature here that fixes a defect rather than adding a capability.
-`Future.assign_result` re-raised only `Fail` and dropped every other exception
-from `Single_Assignment.assign`. An asynchronous interrupt — from
-`Timeout.apply`, or from cancelling a racer's future group — could land in that
-call's interruptible window, get swallowed, and leave the result unassigned; the
-`the` on the next line then raised `exception Option` at `General/basics.ML:84`,
-naming neither the interrupt nor its origin. The patch re-raises every exception,
-restoring the invariant that code past that point depends on.
+- `conda remove isabelle-light-locale` reverses the feature's changes and deletes the files it
+  created. conda also removes every package that was installed only as a dependency and that
+  nothing you asked for still needs: the feature packages below it in the chain,
+  `isabelle-patch-control`, and `isabelle` itself if you never named it. `conda remove --force
+  <package>` removes that one package and nothing else; the tool still reverses its changes.
+- Installing a package that is already installed changes nothing and does not make it a package
+  you asked for. `conda install --force-reinstall <package>` does, at the price of reversing and
+  re-applying its changes (and, for `isabelle`, of deleting the environment's Isabelle user
+  directory, as the `isabelle` package always does when it is removed or replaced).
+- Features form a chain, each built on the one below. When a feature reports `CONFLICT`, the
+  features above it are left `not-applied`. Re-installing a feature package below the CONFLICT
+  reverses it and everything above it, then re-applies up to the CONFLICT again: the features above
+  stay `not-applied` until the CONFLICT is fixed. `isabelle-patch-control status -v` names the
+  file; the message of the install says how to fix it.
+- Only conda runs the step that reverses a feature on removal. mamba 2.x, micromamba and pixi do
+  not, so a feature removed with them leaves its changes in Isabelle. To get the original sources
+  back and the remaining features re-applied:
+  `conda install -c https://conda.qiyuan.me -c conda-forge --force-reinstall isabelle`.
+- Every `conda install` / `conda update` of `isabelle` re-applies the installed features by
+  itself; you never run `isabelle-patch-control apply` after one.
 
-Reachable from ordinary proof work, not just from code that touches futures:
-Pure takes the vulnerable path from `Lazy.force`, promise fulfilment and
-proof-term construction. Diagnosed 2026-09-08 — evidence, the exposed call
-paths, and the open upstream question in
-**[future_assign_interrupt.md](my_better_isabelle_prover/patches/future_assign_interrupt.md)**.
+## When something went wrong
 
-### `register_thy` — restore removed theory registration (Isabelle2025-2)
+**A conda command was interrupted (Ctrl-C).** conda rolls the whole command back and deletes
+`conda-meta/history`, after which it no longer treats the directory as an environment; the
+changes the command had already made under `isa/` stay. Until repaired, every `isabelle` command
+may print `### Missing Isabelle component`. `isabelle-patch-control status` prints the repair
+while `history` is missing. Either recreate the environment in place,
 
-`Thy_Info.register_thy` existed in 2024 but was removed by the 2025-2
-theory-loader refactoring. `Isa-REPL` needs it to inject an already-built,
-in-memory `theory` value into Isabelle's global loader database. The patch
-re-adds it, restored from the 2024 source with one node-type adaptation. Pure ML
-change — no `scala_build`. Details in
-**[register_thy.md](my_better_isabelle_prover/patches/Isabelle2025-2/register_thy.md)**.
+```
+conda create -p <prefix> -c https://conda.qiyuan.me -c conda-forge <every package you want to keep, and the one that was being installed>
+```
 
-## Supported versions & verification status
+or restore the file and install again:
 
-Patch targets are keyed by the exact output of `isabelle version`
-(e.g. `Isabelle2024`, `Isabelle2025-2`).
+```
+touch <prefix>/conda-meta/history        # Windows: type nul > "%PREFIX%\conda-meta\history"
+conda install -c https://conda.qiyuan.me -c conda-forge <those same packages>
+```
 
-- **Isabelle2024** — `register_thy` and `expose_foreign` ship natively, so no
-  patch is needed for them.
-- **Isabelle2025-2** — `register_thy` applies and reverse-detects cleanly. The
-  two retired Scala features were reversed from this distribution before removal,
-  verified byte-for-byte against the pristine sources with `isabelle scala_build
-  -f` re-run, so its Scala is stock again.
-- **`future_assign_interrupt`** — authored against pristine source for both
-  versions (the same diff serves both: that region is byte-identical). Applied
-  and runtime-verified on Isabelle2025-2: 15 consecutive corpus passes clean,
-  against a pre-fix baseline that reproduced within 9 minutes.
-- **`show_types_nv`** — recorded for Isabelle2024 (reverse-recorded from the
-  existing hand edit) and ported to Isabelle2025-2. On 2025-2 it is applied, the
-  Pure heap has been rebuilt, and it is runtime-verified (free-variable type
-  annotation suppressed). The end-to-end consumer path
-  (`Isa-Mini/.../print_formats.ML`, `show_markup=false`, HOL terms) is pending
-  the HOL/Isa-Mini rebuild.
+If you do not want that feature after all, repair first, then `conda remove <its package>`: the
+tool then reverses its changes and deletes its files, which a reinstall of `isabelle` alone would
+not do for files the feature created.
+
+**You edited a file under `isa/`.** `isabelle-patch-control status` reports the file as
+`CONFLICT`. Save your edit elsewhere, then
+`conda install -c https://conda.qiyuan.me -c conda-forge --force-reinstall isabelle`: every file of
+the `isabelle` package is replaced and the installed features are re-applied. If the edit was made
+*in place* (an editor that writes into the existing file, such as vim with `backupcopy=auto`), it
+went through the hard link into conda's package cache, and a plain reinstall would bring the edit
+back. The CONFLICT message detects this case and names the cache directory to delete first; conda
+re-creates it from the downloaded archive. Other environments built from the same cache may share
+the edited file without reporting anything; reinstall `isabelle` there too.
+
+**You edited a file a feature created.** Move your copy aside, then `isabelle-patch-control apply`.
+
+## Coming from my-better-isabelle 0.x
+
+See the section of that name in [AGENTS.md](AGENTS.md), which `isabelle-patch-control help` prints:
+the new tool does not see patches applied by the old one, the old `pip install` must be reversed
+and removed before feature packages are installed, and the dev patches are now the package
+`qiyuan-dev-patches`.
 
 ## Documentation
 
-- **[reference.md](reference.md)** — CLI reference: subcommands, flags, examples,
-  exit codes, and runtime prerequisites.
-- **[develop.md](develop.md)** — how the manager works, the patch-repository
-  layout, and how to add a new patch.
-- **[RELEASE.md](RELEASE.md)** — how a version is cut and published to PyPI.
-- Feature docs (rationale / evidence):
-  [`future_assign_interrupt.md`](my_better_isabelle_prover/patches/future_assign_interrupt.md),
-  [`expose_foreign.md`](my_better_isabelle_prover/patches/expose_foreign.md),
-  [`register_thy.md`](my_better_isabelle_prover/patches/Isabelle2025-2/register_thy.md),
-  [`show_types_nv.md`](my_better_isabelle_prover/patches/show_types_nv.md),
-  [`expose_map_syn.md`](my_better_isabelle_prover/patches/expose_map_syn.md).
+- [reference.md](reference.md): every command, option, message and exit code.
+- [develop.md](develop.md): how the tool works inside, the layout of the package, the tests.
+- [RELEASE.md](RELEASE.md): the checklist before releasing a feature, and how the packages are
+  built and published.
+- [AGENTS.md](AGENTS.md): orientation for an AI agent; `isabelle-patch-control help` prints it.
+- Plan and review record: `ai-artifacts/ISABELLE_PATCH_CONTROL_PLAN.md`.
 
 ## Working in the Isabelle source repository
 

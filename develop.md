@@ -1,131 +1,116 @@
-# Developing & extending
+# Developing
 
-This document covers how the patch manager works internally and how to add new
-patches. For end-user CLI usage see [reference.md](reference.md).
+How the tool works inside, where things are, and how to test. The design is the plan
+`ai-artifacts/ISABELLE_PATCH_CONTROL_PLAN.md` (rev 6, with five review rounds next to it); change
+the plan before changing the design. For what the tool does for a user see
+[reference.md](reference.md).
 
-## How it works
+## One path for every command
 
-The manager is a thin, dependency-free wrapper around the system `patch` tool.
-Everything is driven from the patch files on disk — there is no per-patch
-configuration.
+Every command runs the same sequence; `status` and `--dry-run` stop before the last step.
 
-- **Version detection** — `isabelle version` gives the exact version string
-  (e.g. `Isabelle2024`); `isabelle getenv -b ISABELLE_HOME` gives the install
-  root. Patches are looked up under `patches/<version>/`. If the version has no
-  directory, the command stops rather than guessing.
+1. **Resolve** the tree and the `features.d` root (`cli.resolve`, plan decision 2); read
+   `etc/ISABELLE_IDENTIFIER` and `etc/ISABELLE_ID`; refuse a tree with a `.git`.
+2. **Link the chain** (`features.link_chain`, decision 3): every feature directory with a
+   `provenance.txt`, linked by exact tags from the tree's pristine tag upwards.
+3. **Lock** `etc/ISABELLE_ID` (`engine.locked`, decision 5): shared for reads, exclusive for
+   writes; 60 s, then `Busy`.
+4. **Work directory**: the staging directory `<realpath(tree)>.staging` for the exclusive run,
+   a fresh `tempfile.mkdtemp()` for everything else (`engine.staging_dir`, `engine.temp_dir`).
+5. **Read every patch's target** with `git apply --numstat --summary` (`Replayer.read_target`):
+   one path per patch file, and whether it creates or deletes the file and with which mode.
+   Refuse symbolic links among the targets.
+6. **Levels** (`Replayer.levels`, decision 6): for each touched file, for each candidate level L,
+   reverse the patches `≤ L` top-down on one copy and forward-apply the patches `> L` bottom-up on
+   another, each step a real `git apply` on the copy. Every successful candidate yields a table
+   *level → content bytes*; exactly one successful candidate is the file's level, otherwise
+   CONFLICT. The table is kept: it is what gets installed.
+7. **Plan the moves** (`model.plan`, decision 7): each file's own target level, the cap below the
+   lowest feature owning a CONFLICT file for `apply`.
+8. **Install** (`Replayer.install`, decision 5): write the table's bytes for the target level into
+   the work directory, set the permission bits (the tree file's own, or the patch header's for a
+   file that does not exist), one `os.replace` into the tree; or one `os.unlink` and the removal of
+   emptied directories.
 
-- **Idempotent status detection** — for each patch the manager asks `patch`
-  itself, never a heuristic:
-  - `patch -R --dry-run` succeeds → already **applied**.
-  - else `patch --dry-run` (forward) succeeds → **not applied**.
-  - else → **conflict** (target modified incompatibly).
+`git` runs in exactly one place, `engine.Git.run`, with a whitelisted environment (`PATH` and, on
+Windows, `SystemRoot`, `TEMP`, `TMP`), `GIT_CONFIG_NOSYSTEM`, `GIT_CONFIG_GLOBAL=/dev/null`,
+`GIT_ATTR_NOSYSTEM`, `LC_ALL=C`, `GIT_CEILING_DIRECTORIES` at the work directory's parent, and the
+fixed `-c core.autocrlf=false -c core.attributesFile=/dev/null`; umask 022. It never runs in the
+tree or in the caller's directory, so no repository above, no user configuration and no attributes
+file can change the bytes. Exit code 1 of a replay is "does not apply"; any other non-zero code is a
+write failure on the tool's own copy and aborts the run before anything is installed.
 
-  This makes `patch` / `unpatch` safe to re-run, and `status` accurate.
-
-- **Strict, no-fuzz matching** — all `patch` invocations use `-F0` (zero fuzz)
-  and `-p1`. A patch that does not match its expected context exactly is reported
-  as `CONFLICT` rather than being force-fitted at a shifted location. This trades
-  convenience for safety: a diff authored against one Isabelle point release will
-  not silently misapply to another.
-
-- **Read-only handling** — Isabelle distribution files are often read-only.
-  Before applying, the target file is made writable (`chmod u+w`); its original
-  mode is restored afterward, even on failure.
-
-- **Feature ordering** — when a version's features must be applied in a specific
-  order, list them one per line in `patches/<version>/order.txt` (`#` comments
-  and blank lines ignored; earlier = applied earlier). Listed features come
-  first, in that order; any remaining features follow alphabetically. `unpatch`
-  reverses this order. Without an `order.txt`, features are simply alphabetical.
-
-- **Feature categories** — every feature is `user` or `dev`, declared in
-  `patches/categories.toml`. `patch` applies only `user` by default. The table is
-  version-independent, and validation runs in one direction only: a feature
-  *directory* with no entry is a hard error (exit `3`), while an *entry* with no
-  directory is normal — `register_thy` and `expose_foreign` ship natively on
-  Isabelle2024 and have no patch directory there.
-
-- **Scala rebuild** — `patch` / `unpatch` run `isabelle scala_build -f`
-  afterward, but only when the patches they actually touched include a `.scala`
-  target; a pure-ML selection (e.g. `--category dev`, or `--feature
-  register_thy`) skips the rebuild by itself. `--no-build` forces the skip, and
-  the standalone `build` command runs it on its own.
-
-## Patch-repository layout
+## Where things are
 
 ```
-my_better_isabelle_prover/patches/
-├── __init__.py                 # discovery logic (versions, features, categories, ordering)
-├── categories.toml             # feature -> user | dev
-├── future_assign_interrupt.md  # feature doc (cross-version location)
-├── Isabelle2024/
-│   └── future_assign_interrupt/
-│       └── future.ML.patch
-└── Isabelle2025-2/
-    ├── expose_foreign/          # Isabelle2025-2 only: native on 2024
-    │   └── ml_name_space.ML.patch
-    ├── future_assign_interrupt/ # same diff as the 2024 one: the source is identical
-    │   └── future.ML.patch
-    ├── register_thy/
-    │   └── thy_info.ML.patch
-    └── register_thy.md          # version-specific feature doc
+isabelle_patch_control/
+  names.py       feature name <-> conda package name (tools/common.py imports it)
+  errors.py      Error, NotFound (2), Refused (3), ChainBroken, Busy, WriteFailed
+  engine.py      Git.run, the lock, staging/temp directories, PatchFile, Levels, Replayer
+  features.py    Tree, FeatureDir (provenance), read_feature_dirs, link_chain
+  model.py       feature states, Move, plan()
+  api.py         status, apply, unapply, apply_to, unapply_from; Status, Moves  (never exits)
+  texts.py       every user-visible text, word for word from plan §4 and decision 9
+  cli.py         argument parsing, output, exit codes
+  conda_hook.py  conda-hook post-link / pre-unlink; the one reading of conda-meta
+  hooks/         the hook texts the feature packages ship: post-link.sh/.bat (the fragment every
+                 feature package's post-link copies verbatim), pre-unlink.sh/.bat (templates with
+                 <feature>, <package>, <version> for the renderer); the .bat files are CRLF
+  AGENTS.md      symlink to ../AGENTS.md; `help` prints it
+common-readme.md the text every feature package's README starts with; README.md embeds it
+tools/           the Isabelle source repository's scripts (make-patches, run-tree, ...) and their
+                 toy tests, see README.md "Working in the Isabelle source repository"
+tests/           pytest
 ```
 
-A feature exists for a version only if it has a directory there — `expose_foreign`
-and `register_thy` ship natively on Isabelle2024, so they have none. A feature
-that is *retired* looks the same on disk, and both cases are fine. (Two retired
-features, `pide_control` and `perspective_eof_clamp`, were removed outright on
-2026-09-08; the last state carrying them is tagged `last-isabelle2024-support`.)
+Texts: everything a user can read is a function or constant in `texts.py`, proofread by three
+independent readers from the reader's standpoint (plan decision 9, "文案的写法"): no `level`,
+`chain`, `tree`, `hook` words in user messages, the common and safe case first, destructive
+consequences on their own line before the command, only the branch that applies. Do not reword
+them in passing; change the plan's §4 first.
 
-- **`patches/<version>/`** — one directory per Isabelle version. The directory
-  name must equal the `isabelle version` string exactly. Names starting with `_`
-  are ignored by version discovery.
-- **`<version>/<feature>/`** — one directory per feature; every `*.patch` in it
-  belongs to that feature. Patches within a feature are applied in filename
-  (sorted) order. Names starting with `_` or `.` are ignored, so a scratch
-  directory does not become an accidental feature.
-- **`categories.toml`** — the `[features]` table maps every feature name to
-  `user` or `dev`. Shared across versions.
-- **Target path** — each patch's target file is read from its unified-diff
-  `--- a/<path>` header, so the path is relative to `ISABELLE_HOME` and the
-  filename of the `.patch` itself is just for humans.
-- **`order.txt`** (optional, per version) — feature apply order, as above.
-- **Docs** — feature `.md` files live next to the patches (`patches/*.md` for a
-  cross-version feature, or `patches/<version>/*.md` for a version-specific one);
-  they document the rationale, and for a bug fix the evidence behind it.
+## Tests
 
-## Adding a new patch
+```
+python -m pytest            # about two minutes; 14 cases spawn a subprocess that dies mid-run
+```
 
-1. **Author the diff against pristine source.** From a clean `ISABELLE_HOME`,
-   edit the target file, then produce a `-p1` unified diff whose header reads
-   `--- a/<path-relative-to-ISABELLE_HOME>` / `+++ b/<same>`. Keep edits minimal
-   so the surrounding context survives across point releases.
+`tests/conftest.py` builds a toy Isabelle tree and a toy chain of three features the way
+`make-patches` builds real ones: commits in a toy git repository, `git diff-tree -r -p --no-renames`
+split into one patch file per path with flat names, a `provenance.txt` per feature; trees are
+`git archive` extractions (with `tar.umask=022`, so files are 0644/0755 like the conda package's).
+No Isabelle is needed and nothing runs `isabelle` or `isabelle build`.
 
-2. **Drop it in the right place** — `patches/<version>/<feature>/<name>.patch`.
-   Create the `<feature>/` directory if new. If the feature must apply before or
-   after others, add it to `patches/<version>/order.txt`.
+What is covered (plan decision 15, tool layer): the linking rules and every refusal; the derivation
+of the tree and `features.d`; the four states, holes, the scenarios of the first review's C3; the
+two multi-level cases (created then deleted; a hunk whose context occurs twice); stacked hunk
+context on fresh, half and fully applied trees with both dry runs; created files and a simulated
+relink; a run killed after the k-th file (`tests/kill_after.py`) leaving every file old or new and
+the next run converging; a git write failure leaving the tree alone; permission bits under umask
+002 and 077; a hard-linked file keeping its content; five hostile git environments giving the clean
+result; the lock (read-only tree, busy, shared, two exclusive runs, no touching of the staging
+directory without the lock); the directory interface; the hooks against a fake `$PREFIX` (post-link
+idempotence and single report, the CONFLICT diagnostic from the top package only, lock busy, the
+old build, pre-unlink's success texts and residue blocks for three reasons, the in-place edit
+through a hard link selecting the package-cache wording).
 
-3. **Register its category** — add the feature to the `[features]` table in
-   `patches/categories.toml` as `user` or `dev`. This is **not optional**: an
-   unregistered feature directory makes *every* command exit `3`, deliberately,
-   so that a new patch can neither be shipped to users unvetted nor be silently
-   withheld from the stack that needs it. Ask which category it belongs in if it
-   is not obvious — `user` means a *user-facing* system needs it (today:
-   Semantic_Embedding's SIMD FFI), while `dev` means only the
-   developer/experiment stack does (Isa-REPL, Isa-Mini).
+Not covered here: the hook layer against real conda (a toy channel; plan decision 15, §5 step 5),
+`plan_builds` and `check_bytes` of the release workflow, and everything Windows-specific
+(`msvcrt` lock, `.bat` hooks, `core.longpaths`, retries of `os.replace`): those run on the win-64
+leg of the release workflow.
 
-4. **Verify discovery and clean status** — run `my-better-isabelle status
-   --feature <name>`. A correctly authored patch on pristine source reports
-   `not-applied` (and, because you selected it, exit code `1`); after `patch
-   --feature <name>` it reports `applied` and exits `0`; `unpatch --feature
-   <name>` returns it to `not-applied`. Anything reporting `CONFLICT` on pristine
-   source means the context does not match (wrong version, wrong `-p` level, or
-   stale diff).
+A check against the real chain, done once by hand: build `features.d` from the Isabelle source
+repository's branches with `git diff-tree` (read-only), extract the touched files of the official
+tarball, run `status`, `apply`, `status`, `unapply`, and compare every file with
+`git rev-parse <tip>:<path>` / `git hash-object`. All 34 paths of expose_foreign +
+future_assign_interrupt + light_locale round-tripped byte for byte, each command in 0.2 s.
 
-5. **Check the build step.** A `.scala` target triggers `scala_build`
-   automatically; a pure-ML feature skips it on its own. Note in the feature doc
-   whether it instead needs a Pure/HOL **heap** rebuild to take effect — the tool
-   never does that for you.
+## Making feature packages
 
-6. **Document it.** Add or update the feature's `.md` file, and the feature tables
-   in `README.md` and `reference.md`.
+Feature packages are not made here. `tools/make-patches` (run on the owner's order in the Isabelle
+source repository) writes a feature's `patches/<release>/*.patch` and `provenance.txt` into the
+feature's own repository and tags the release; the release workflow of this repository renders a
+conda recipe from them, builds all packages into one channel, runs the acceptance on five
+platforms, and publishes. See [RELEASE.md](RELEASE.md). The conda recipe of the tool itself
+(`conda/recipe.yaml`, noarch python, `run: python >=3.12, git >=2.43`) is built by the same
+workflow.

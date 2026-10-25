@@ -51,10 +51,26 @@
   "文案的写法"写了：链接不上时"installed: none"、两目录同一 base_tag、发行版不配、patch 文件读不出/目标数不是一、符号链接目标、git 写失败、
   只读树上 `apply`、`--dry-run` 与 `-v` 的逐文件行 `  <path>  level a -> b`、`CONFLICT  <path>  no level|levels 0, 2`、§4 "conda install 被 Ctrl-C
   中断后"那段 `status` 在 `conda-meta` 存在而 `history` 不存在时打印的话（`texts.interrupted`）——这些没经 reader 校读。
-- **下一步**：§5 第 2 步（决定 16：门禁 (c) 改 `import` `apply_to/unapply_from`、第 7–8 点写入顺序、第 9 点玩具测试、第 10 点 checklist 进
-  `RELEASE.md`；`tools/common.py` 从 `isabelle_patch_control.names` 导入 `package_name`、加 `plan_builds`；`run-tree` 的 `-d` 行；决定 17 `check-roundtrip`）。
-  旧包、`patches/`、五份 `.md` 的删除与 README/reference/develop/AGENTS/RELEASE 重写、pyproject 改名仍等之后（第 0 步 commit 已存在，可以开始）。
-  提交只在用户说"提交"时做：新增 `isabelle_patch_control/`（15 个文件）与 `tests/`（9 个文件），改动 `pyproject.toml` 与本交接。
+- **提交**：用户 2026-10-25 "批准提交" → 工具仓库 `main` cc0e603（27 个文件）。
+- **外部动作（用户 2026-10-25 "全部下令，请你在合适的时机进行"，已全部做完）**：GitHub 仓库改名 `xqyww123/isabelle_patch_control`（`gh repo rename`，
+  旧名自动跳转；主仓库 `.gitmodules:41` 的 url 与子模块的 origin 已同步）；工具仓库 push 到 cc0e603、CI 仓库 push 到 2c5901d（都只推 origin）；
+  base 与 `.venv` 的旧 editable 安装（0.1.1、0.1.0）已 `pip uninstall`，`my-better-isabelle` 命令随之消失；主仓库 `main` 3bf74ab0 bump 了两个
+  submodule 指针与 `.gitmodules`——**主仓库未 push**（不在四项之内；它领先 origin 的其他 commit 是别的会话的）。以后工具仓库每有用户批准的 commit，
+  就 push 并 bump 主仓库指针（用户的授权是"在合适的时机进行"）。旧 URL 的残留引用只剩 `contrib/Isabelle-MCP/AGENTS.md:14`（别的项目的文档）与
+  CI 仓库 `PACKAGING_DESIGN.md:892,942`（历史记录）——GitHub 跳转能兜住，CI 计划（决定 12 第 4 点）重写时顺手改。
+- **决定 14 已做（2026-10-25，未提交）**：`git rm -r my_better_isabelle_prover/`（旧代码、`patches/` 含 Isabelle2024、`categories.toml`、五份补丁
+  `.md`——最后含有它们的 commit 是 cc0e603，§5 第 3 步从那里复制到决定 13 的仓库）；盘上残留的 `__pycache__` 与 `my_better_isabelle_prover.egg-info`
+  一并删了（`dist/` 里旧轮子留着，被 ignore）。新建 `common-readme.md`（决定 10 的统一文本：每个 feature 包 README 的开头，`README.md` 逐字嵌入，
+  smoke 从它读 `conda create -n isabelle -c … isabelle isabelle-light-locale` 那一行；`tests/test_docs.py` 断言逐字相同与那一行的形状）。重写
+  `README.md`（统一文本、卸载/重装/剪枝/`--force`/CONFLICT 之下重链接/只支持 conda/Ctrl-C 恢复/硬链接原地编辑恢复、指向 AGENTS.md 的 0.x 一节；
+  "Working in the Isabelle source repository"一节原样保留）、`AGENTS.md`（`help` 打印；状态表、退出码、各情形怎么办、规则、命令、"Coming from
+  my-better-isabelle 0.x"）、`reference.md`（§4 的命令、树与 feature 来源、链与层级、退出码、锁与工作目录、文案索引）、`develop.md`（一条路径八步、
+  模块表、测试、真实链核对的做法、feature 包怎么产生）、`RELEASE.md`（conda 发布；决定 16 第 10 点的 checklist 七条带理由；发布步骤；决定 11 的
+  workflow 输入与作业；版本与 build 号；恢复；一次性手续，注明 workflow 在 §5 第 5 步落地、落地前它是规格）。`pyproject.toml` 改名
+  `isabelle-patch-control` 1.0.0、URL 换新仓库名、只剩新入口与新包。pytest 91 例全绿。这些文案都是作者写的、没经 reader 校读。
+- **下一步**：等用户说"提交"后提交决定 14 这批（删 29 个、改 6 个、新增 2 个），push、bump 主仓库指针；然后 §5 第 2 步（决定 16：门禁 (c) 改
+  `import` `apply_to/unapply_from`、第 7–8 点写入顺序、第 9 点玩具测试；`tools/common.py` 从 `isabelle_patch_control.names` 导入 `package_name`、
+  加 `plan_builds`；`run-tree` 的 `-d` 行与 `test_trees.sh` 两例；决定 17 `check-roundtrip`）。
 
 ## compact 之后怎么开工（2026-10-24 深夜写）
 1. **§5 第 0 步已完成**（用户 2026-10-24 "批准提交"）：工具仓库 `main` 上 7336934（`tools/` 与 README 一节，README 的 tested 一条补了第 35 条

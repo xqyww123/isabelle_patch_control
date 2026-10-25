@@ -1,119 +1,110 @@
-# Releasing to PyPI
+# Releasing
 
-The package is published as
-[`my-better-isabelle-prover`](https://pypi.org/project/my-better-isabelle-prover/).
-There is no CI: a release is built and uploaded **by hand** from a clean checkout.
+The tool and the feature packages are conda packages on <https://conda.qiyuan.me>, all `noarch`,
+built, accepted and published **together** by the batch release workflow
+`.github/workflows/release-features.yml` of this repository (plan decision 11). Nothing goes to
+PyPI any more: `my-better-isabelle-prover` 0.3.0 stays there untouched for pip users.
 
-> [!IMPORTANT]
-> A PyPI version number can be used only once. A wrong file uploaded under
-> `X.Y.Z` cannot be replaced — only yanked, and the fix must go out as a new
-> version. Everything below happens *before* `twine upload`, on purpose.
+> The workflow is written in plan §5 step 5; until it lands, this file is the specification it
+> follows, and no feature package can be published.
 
-## Prerequisites
+> **Release freeze.** No `isabelle` build is published until `isabelle-packaging-ci` builds the
+> pristine Isabelle (its `RELEASE.md`). Every feature package pins one exact `isabelle` build
+> (`isabelle 2025.2 <build string>`), so every new `isabelle` build is followed by a re-release of
+> every feature package: same version, build number plus one, new pin.
 
-```bash
-pip install build twine
-```
+## Before releasing a feature (checklist)
 
-Uploading needs a PyPI API token. There is no `~/.pypirc` on the development
-machine — the token lives in `~/secret.sh` (untracked, outside the repository),
-which exports `TWINE_PASSWORD`:
+`make-patches` checks the repository-side gates (base tag, own commits, changed files, signatures,
+tested record, round trip). The points below are about the *content* of the feature and are not
+checked by code: feature packages are trusted, and the person releasing goes through this list
+after `make-patches` and before dispatching the workflow. Each point says why it matters.
 
-```bash
-source ~/secret.sh                    # sets TWINE_PASSWORD (also PYPI_API_KEY, UV_PUBLISH_TOKEN)
-export TWINE_USERNAME=__token__       # NOT set by secret.sh — twine needs it for a token upload
-```
+- [ ] **No file is changed back to exactly what it was at the bottom of the chain or at some lower
+      feature's release** (this includes deleting a file a lower feature created, or renaming it).
+      The tool tells "which features are applied" from the bytes of each file alone; two points of
+      the chain with identical bytes cannot be told apart. Changing a lower feature's file further,
+      or editing lines a lower feature added, is fine.
+- [ ] **Every hunk's context occurs only once in the file it changes.** Otherwise the forward patch
+      can apply a second time at another place, the file then fits two levels, and `status` reads
+      `CONFLICT`. Add a few more lines of context that are unique.
+- [ ] **No empty file is created or deleted.** git's block for an empty file has no `---`/`+++`
+      pair and the tool cannot read its target.
+- [ ] **Only regular files, mode `100644` or `100755`.** No symbolic links, no gitlinks, no file
+      turned into a directory.
+- [ ] **`etc/ISABELLE_ID` is not changed.** The tool locks on it.
+- [ ] **The longest new patch file's path in the package cache stays within 198 characters** on
+      Windows: `<package>-99-Isabelle2025_2_99/share/isabelle_patch_control/features.d/<feature>/<flat name>.patch`
+      (use version 99 and build 99 for the estimate).
+- [ ] **Patch files are not CRLF-converted and every changed path has exactly one patch file.**
+      The feature repository's `.gitattributes` has `*.patch -text`; `make-patches` writes one
+      block per path, so re-check after any hand edit under `patches/`.
 
-Do this in the same shell as the upload. Note the repository's own `./secret.sh`
-is a *different* file (LLM and R2 keys) and holds no PyPI credentials.
+The workflow's `roundtrip`, `accept` and `smoke` jobs run `status` on the whole installed chain, so
+a multi-level file at the chain top shows up there as `CONFLICT` and stops the batch (the version
+number is then spent: release v+1). Intermediate states are protected only by this list.
 
-## Version numbering
+## Releasing a feature
 
-The version lives in **two** files and they must agree:
+1. In the Isabelle source repository, on the owner's order: `run-tree … build …` on the feature's
+   private tree (writes the tested record), then `make-patches <feature> <version>`. It writes the
+   package's `patches/<release>/` and `provenance.txt`, commits them in the feature repository, tags
+   both repositories.
+2. Go through the checklist above.
+3. For every feature above this one in the chain: merge the new release into its branch, build,
+   `make-patches` it with its next version (plan decision 11's example).
+4. Push the feature repositories' branches and tags and the Isabelle source repository's tags.
+5. Dispatch `release-features.yml` with `publish=false`, then, when all five legs are green, with
+   `publish=true` (see below).
 
-| File | What it feeds |
-|------|---------------|
-| `pyproject.toml` (`version = `) | the distribution metadata — what PyPI sees |
-| `my_better_isabelle_prover/__init__.py` (`__version__ = `) | what `import my_better_isabelle_prover` reports |
+## The batch release workflow
 
-Nothing reads `__version__` at runtime, so a mismatch breaks no test and shows up
-only after users have the wrong number — check both. (This is not hypothetical:
-0.3.0's bump landed in a feature commit that touched `pyproject.toml` alone,
-leaving `__init__.py` behind at 0.2.0.)
+Inputs:
 
-While the project is `0.x`, a **breaking change bumps the MINOR** — including
-behavioural breaks, not just API ones. Making `patch` apply only the `user`
-category by default (it used to apply everything) is what made 0.3.0 a minor
-rather than a patch release.
+| Input | Meaning |
+|---|---|
+| `isabelle_build` | the build string of the pristine `isabelle` build to pin (required) |
+| `isabelle_from` | `channel` (the build is on conda.qiyuan.me) or `run:<isabelle-packaging-ci run id>` (rehearsal against that run's `conda-packages` artifact, which must carry `isabelle_build`, not build 0) |
+| `tool_ref` | the tag of this repository to build the tool from (default: the triggering ref) |
+| `features` | the explicit list of feature release tags to publish; no default |
+| `session_build_legs` | legs besides linux-64 that also build the component session |
+| `publish` | default `false`; `publish=true` together with `isabelle_from=run:…` fails at once |
 
-## Procedure
+Jobs, in order: **build** (one `ubuntu-latest` job, `rattler-build` 0.69.1) reads the channel's
+`noarch/repodata.json`, decides for every package of the batch, tool included, whether to reuse the
+file already on the channel or to build a new one and with which build number
+(`tools/common.py: plan_builds`: reuse what is on the channel and is exactly what this batch wants,
+skip served files that are not, build the rest with the next number), checks out the feature
+repositories at their tags, renders each recipe (`tools/render-feature-recipe`: version, base pin,
+`isabelle` pin, build string `Isabelle2025_2_<n>`, hooks, the common README text, the component
+payload if `tools/component_files.txt` exists), builds everything into one local channel, checks
+each `.conda` (hooks present, `.bat` CRLF, `.sh` LF), uploads one artifact `feature-packages`
+containing only `noarch/*.conda`. **roundtrip** (linux-64) installs the batch into a fresh
+environment and runs `tools/check-roundtrip` against the installed tool and `features.d`.
+**accept** (linux-64, linux-aarch64, osx-arm64 with osx-64 under Rosetta, win-64) runs the
+acceptance of plan §6. **publish** (only `publish=true`) calls
+`xqyww123/isabelle-packaging-ci/.github/workflows/publish-conda.yml@main` once with the artifact and
+the two R2 secrets. **smoke** (linux-64, win-64) runs the install command read from the copied
+common README text and installs `qiyuan-dev-patches` on top, then `status`.
 
-```bash
-# 1. Bump both version files, then commit and push. The commit is named after the
-#    release, and the tree must be clean and in sync with origin/main before it.
-git commit -am "Release X.Y.Z"
-git push origin main
+Versions and build numbers: a feature package's version is the version in its release tag; its
+build string is `Isabelle2025_2_<n>`; `n` is never typed by hand. Nothing is published if the same
+(feature, version, `isabelle` build) is already on the channel: to change a README or template,
+release a new version.
 
-# 2. Tag the exact commit that will be built.
-git tag -a vX.Y.Z -m "Release X.Y.Z"
-git push origin vX.Y.Z
+Recovery: a failed publish is resumed by **dispatching the same inputs again**; the files already on
+the channel (indexed or merely uploaded) are reused byte for byte, so the upload guard of
+`publish-conda.yml` does not refuse them. Re-running failed jobs of the same run works only while
+the artifact exists (30 days).
 
-# 3. Build from a clean tree — stale build/ and *.egg-info/ directories are what
-#    make a wheel ship yesterday's files.
-rm -rf dist build my_better_isabelle_prover.egg-info
-python -m build
-twine check dist/*
+Before `publish=true`: the pristine `isabelle` build is published and green on the channel; no
+other publish is running in any repository of `PUBLISH_REPOS`; the repaired `publish-conda.yml` has
+been called across repositories successfully once.
 
-# 4. Inspect the wheel before it becomes permanent (see the checklist below).
-python -m zipfile -l dist/my_better_isabelle_prover-X.Y.Z-py3-none-any.whl
+## One-time setup (done, or on the owner's order)
 
-# 5. Upload ONLY this version. `dist/` also holds every previous release's
-#    artifacts; `twine upload dist/*` would try to re-upload them, PyPI would
-#    reject the duplicates with a 400, and the whole command aborts.
-source ~/secret.sh                    # TWINE_PASSWORD
-export TWINE_USERNAME=__token__
-twine upload dist/my_better_isabelle_prover-X.Y.Z*
-
-# 6. Verify from PyPI, not from the working tree (see the trap below).
-cd /tmp                               # NOT the checkout — see the trap below
-python3 -m venv /tmp/verify && env -u PYTHONPATH /tmp/verify/bin/pip install \
-    "my-better-isabelle-prover==X.Y.Z"
-env -u PYTHONPATH /tmp/verify/bin/python -c \
-    "import my_better_isabelle_prover as m; print(m.__version__, m.__file__)"
-env -u PYTHONPATH /tmp/verify/bin/my-better-isabelle status
-```
-
-## What to check in the wheel
-
-The patches are **package data**, not code, so they are included by the globs in
-`pyproject.toml`'s `[tool.setuptools.package-data]` — and anything the globs miss
-is dropped silently. A wheel that imports fine can still be useless because it
-carries no patches. Before uploading, confirm the listing contains:
-
-- every `patches/<version>/<feature>/*.patch` for the versions being shipped,
-- `patches/categories.toml` — without it *every* command exits `3`,
-- `AGENTS.md` (a symlink in the source tree; the build inlines its content), which
-  the `help` command prints.
-
-When adding a new *kind* of file under `patches/`, extend the `package-data` list
-in the same commit. `order.txt` (documented in [develop.md](develop.md)) is **not
-covered by the current globs** — the day a version needs one, add it there, or the
-feature apply order will be right in git and wrong in the wheel.
-
-## The verification trap
-
-A fresh venv is not enough to guarantee you are testing the wheel. The source tree
-can shadow the installed package **two** ways, and both make a broken wheel look
-fine:
-
-- The development checkout is on `PYTHONPATH` — hence `env -u PYTHONPATH` on every
-  verification command.
-- `python -c` puts the current directory on `sys.path`, so running it from inside
-  the checkout imports `./my_better_isabelle_prover/` regardless. Verify from a
-  neutral `cwd` (step 6 starts with `cd /tmp`).
-
-The console script is immune to the second one (its `sys.path[0]` is the venv's
-`bin/`), which is what makes the trap subtle: the CLI genuinely exercises the
-wheel while an `import` check next to it silently reports on the source tree.
-Always print `m.__file__` alongside the version and confirm the path lands in
-`site-packages`.
+- GitHub repository renamed `xqyww123/isabelle_patch_control` (done 2026-10-25, before any workflow
+  referenced it); the superproject's `.gitmodules` follows.
+- This repository enters `PUBLISH_REPOS` and the channel's `RELEASE_CHECKLIST.md`; two R2 secrets,
+  a read-only token for the private feature repositories, an `actions:read` token for
+  `isabelle-packaging-ci`; `.gitattributes` with `*.sh text eol=lf`, `*.bat -text`, `*.patch -text`.
