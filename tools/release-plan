@@ -1,0 +1,102 @@
+#!/usr/bin/env python3
+"""release-plan --isabelle-build <b> --tool-version <v> --tool-prefix <p> [--channel <url>] <release tag>...
+
+The build job's plan (patch tool plan decisions 10 and 11): for the tool package and for every
+feature release tag of the batch, whether the channel already serves exactly what the batch wants
+(reuse that file) or a new build is needed and with which build number -- tools/common.py's
+plan_builds, the one rule for every package.  The channel's noarch/repodata.json is read; a file
+the channel serves but has not indexed yet is probed by downloading it and reading its
+info/index.json.  Prints one JSON object:
+
+  {"packages": [{"name", "version", "tag" (features only), "action": "reuse" | "build",
+                 "file": <the .conda file name either way>}],
+   "isabelle_old_build": <the highest isabelle build other than <b> that an indexed record of a
+                          (feature, version) of the batch pins, or "">}
+
+isabelle_old_build is where §6 (h) starts from (empty: (h) is skipped).
+"""
+import argparse
+import json
+import re
+import urllib.error
+import urllib.request
+
+from common import Refused, Wanted, conda_archive, isabelle_pin, main, package_name, plan_builds
+
+TOOL = "isabelle-patch-control"
+TAG = re.compile(r"^(Isabelle\d{4}-\d+)/([a-z][a-z0-9_]*)/([1-9][0-9]*)$")
+
+
+def get(url: str) -> bytes | None:
+    """The bytes at url; None when the channel does not serve it."""
+    try:
+        with urllib.request.urlopen(url, timeout=120) as r:
+            return r.read()
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return None
+        raise
+    except urllib.error.URLError as e:
+        if isinstance(e.reason, FileNotFoundError):          # a file:// channel
+            return None
+        raise
+
+
+def pinned_build(record: dict) -> str | None:
+    """The isabelle build a record's depends pin, from `isabelle ==2025.2 <b>` (or `isabelle 2025.2 <b>`)."""
+    for dep in record.get("depends", []):
+        parts = dep.split()
+        if len(parts) == 3 and parts[0] == "isabelle":
+            return parts[2]
+    return None
+
+
+def plan(channel: str, isabelle_build: str, tool_version: str, tool_prefix: str, tags: list[str]) -> dict:
+    features = []
+    for tag in tags:
+        m = TAG.match(tag)
+        if not m:
+            raise Refused(f"{tag!r} is not a release tag <R>/<feature>/<version>")
+        features.append((tag, m[2], m[3], m[1].replace("-", "_")))
+    if len({f[1] for f in features}) != len(features):
+        raise Refused("the batch names a feature twice")
+    raw = get(f"{channel}/noarch/repodata.json")
+    repodata = json.loads(raw) if raw else {}
+    wanted = [Wanted(TOOL, tool_version, tool_prefix, None)]
+    wanted += [Wanted(package_name(f), v, prefix, isabelle_pin(prefix, isabelle_build)) for _, f, v, prefix in features]
+
+    def fetch(filename: str) -> dict | None:
+        data = get(f"{channel}/noarch/{filename}")
+        return None if data is None else conda_archive(data)[0]
+
+    decided = plan_builds(repodata, wanted, fetch)
+    packages = []
+    for w, tag in zip(wanted, [None, *[f[0] for f in features]]):
+        action, what = decided[w.name]
+        entry = {"name": w.name, "version": w.version, "action": action,
+                 "file": what if action == "reuse" else w.filename(what)}
+        if tag:
+            entry["tag"] = tag
+        packages.append(entry)
+
+    records = {**repodata.get("packages", {}), **repodata.get("packages.conda", {})}
+    batch = {(w.name, w.version) for w in wanted[1:]}
+    others = {b for rec in records.values() if (rec.get("name"), rec.get("version")) in batch
+              if (b := pinned_build(rec)) is not None and b != isabelle_build}
+    old = max(others, key=lambda b: (int(b) if b.isdigit() else -1, b), default="")
+    return {"packages": packages, "isabelle_old_build": old}
+
+
+def cli():
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--isabelle-build", required=True, metavar="b")
+    p.add_argument("--tool-version", required=True, metavar="v")
+    p.add_argument("--tool-prefix", required=True, metavar="p", help="the tool's build string without _<n> (rattler-build --render-only)")
+    p.add_argument("--channel", default="https://conda.qiyuan.me")
+    p.add_argument("tags", nargs="+", metavar="release tag")
+    a = p.parse_args()
+    print(json.dumps(plan(a.channel.rstrip("/"), a.isabelle_build, a.tool_version, a.tool_prefix, a.tags), indent=2))
+
+
+if __name__ == "__main__":
+    main(cli)

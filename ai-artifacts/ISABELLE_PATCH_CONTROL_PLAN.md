@@ -674,8 +674,13 @@ README 已有 "Working in the Isabelle source repository" 一节。都未提交�
   `isabelle` 的 build 号。同一 (F, v, `isabelle` 构建) 下只改 README 或模板不重发——要改就发新版本。（rev 5 让工具包"按版本复用"却没有给它
   探 HEAD 也没有推 build 号：发布传了文件、索引没重建时，重新 dispatch 会重建同名工具包、字节不同，`publish-conda.yml:147-191` 的守卫拒掉整批
   ——而重新 dispatch 正是决定 11 的恢复路径；评审五辩护方实测 `defender-C2/guard.out`。）
-- 依赖：`isabelle-patch-control >=1.0,<2`；**`isabelle 2025.2 <isabelle 的 build string>`**（第 22 条；`2025.2` 从 `build_string_prefix` 推出）；
-  基包 `isabelle-<基> ==<版本>=Isabelle2025_2_*`（来历文件的 `base_pin`；基是 `pristine` 时没有）。
+- 依赖：`isabelle-patch-control >=1.0,<2`；**`isabelle ==2025.2 <isabelle 的 build string>`**（第 22 条；`2025.2` 从 `build_string_prefix` 推出）；
+  基包 `isabelle-<基> ==<版本> Isabelle2025_2_*`（基是 `pristine` 时没有）。**2026-10-28 实施时改的写法**（§5 第 5 步，作者自决、未改语义）：
+  rattler-build 0.69.1 的配方解析拒绝不带运算符的版本（`isabelle 2025.2 1`）与 `==1=Isabelle2025_2_*` 的等号写法；本机 conda 25.11.1 的
+  `MatchSpec` 实测把新旧两种写法解析成同一个约束（版本恰为该值、build 恰为/匹配该串），rattler-build 把依赖原样写进 `info/index.json`。
+  两个写法由 `tools/common.py` 的 `isabelle_pin` 与新 `feature_pin` 唯一给出：`make-patches` 写来历文件的 `base_pin` 用 `feature_pin`，渲染器
+  从 `base_tag` 用同一个函数算基包钉死、不读 `base_pin`——`future_assign_interrupt/1` 已发布的来历文件里仍是旧写法（conda 读法相同）。
+  `plan_builds` 的复用键随 `isabelle_pin` 一起变，二者仍不可能走散。
 - 文件：feature 目录（patch 文件与来历文件原样）、`share/doc/<包名>/README.md`、两个钩子（`bin/.<包名>-post-link.sh`、`.pre-unlink.sh`、
   `Scripts/.<包名>-post-link.bat`、`.pre-unlink.bat`，无条件都写）；带组件载荷的包另有 `share/<包名>/`，内容由该仓库的 `tools/component_files.txt`
   列出（light：`ROOT`、`Light_Locale.thy`、`README.md`、`LICENSE`，不含 `patches/`、`tests/`、`tools/`、`private_build_logs/`）。
@@ -778,10 +783,10 @@ README 已有 "Working in the Isabelle source repository" 一节。都未提交�
    并且是 idempotent 的（连跑两次等于跑一次）**——`isabelle` 的 post-link 会重跑它们。发布时检查前者。（rev 5 写的是"在自己的文件没变时重跑
    必须无效果"：读成字面意思，守规矩的组件包会在 `--force-reinstall isabelle` 后丢掉登记；读成"连跑两次结果不变"，又放过 `isabelle-semantic-data`
    的清缓存。第 36 条换掉它。）
-8. 发布说明（新 `isabelle` 包的描述、`isabelle-packaging-ci` 的 `RELEASE.md` 或 `PACKAGING_DESIGN.md`——它没有 README——与 `isabelle-base-features`
-   README 各一句，英文原文）："`Foreign`, `RunCall` and `CInterface` are no longer available in plain `isabelle`. To use them:
-   `conda install -c https://conda.qiyuan.me -c conda-forge isabelle-expose-foreign`."（评审五 C8：用户要敲的命令一律带两个渠道参数；
-   reader 校读：要直说它们从普通 `isabelle` 里没了）；生态自己的包不需要它，因为
+8. 发布说明（新 `isabelle` 包的描述、`isabelle-packaging-ci` 的 `RELEASE.md` 或 `PACKAGING_DESIGN.md`——它没有 README——各一句，英文原文；
+   **不**写进 `isabelle-base-features` 的 README，用户 2026-10-25 裁定"不用加这句"）："`Foreign`, `RunCall` and `CInterface` are no longer
+   available in plain `isabelle`. To use them: `conda install -c https://conda.qiyuan.me -c conda-forge isabelle-expose-foreign`."（评审五 C8：
+   用户要敲的命令一律带两个渠道参数；reader 校读：要直说它们从普通 `isabelle` 里没了）；生态自己的包不需要它，因为
    Performant_Isabelle_ML ≥ 0.2.0 自己重绑 `Foreign`（§0 末的更正）。第一次从 `2025.2-0` 升级时组件登记会被旧构建的 pre-unlink 删掉、由新构建的
    post-link 重建（第 26 条），用户不需要做什么。
 9. 可选：让 `publish-conda.yml` 的审计列 R2 而不是本次运行的快照（`:301-318`）。

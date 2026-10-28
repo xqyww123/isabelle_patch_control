@@ -21,7 +21,7 @@ def tool(version) -> Wanted:
 
 
 def record(name, version, n, isabelle_build=None, tool_prefix=TOOL_PREFIX):
-    depends = [f"isabelle 2025.2 {isabelle_build}", f"{TOOL} >=1.0,<2"] if isabelle_build else ["python >=3.12", "git >=2.43"]
+    depends = [f"isabelle ==2025.2 {isabelle_build}", f"{TOOL} >=1.0,<2"] if isabelle_build else ["python >=3.12", "git >=2.43"]
     build = f"{PREFIX}_{n}" if isabelle_build else f"{tool_prefix}_{n}"
     return f"{name}-{version}-{build}.conda", {"name": name, "version": version, "build": build,
                                               "build_number": n, "depends": depends}
@@ -94,7 +94,7 @@ def test_empty_channel_builds_zero():
 
 
 def test_the_pin_is_the_isabelle_dependency_a_recipe_writes():
-    assert isabelle_pin("Isabelle2025_2", "1") == "isabelle 2025.2 1"
+    assert isabelle_pin("Isabelle2025_2", "1") == "isabelle ==2025.2 1"
     assert feature("isabelle-light-locale", "2", "1").filename(3) == "isabelle-light-locale-2-Isabelle2025_2_3.conda"
 
 

@@ -1,0 +1,105 @@
+#!/usr/bin/env python3
+"""check-packages [--chain <release tag>... --summary <file>] <file.conda>...
+
+The build job's look inside every package of a batch before anything is installed (patch tool plan
+decision 11; isabelle-packaging-ci RELEASE_CHECKLIST.md §4): every file is noarch; a feature package
+has both hook sets, its .sh hooks are LF, its .bat hooks are CRLF throughout, its feature directory
+holds provenance.txt and patch files, its README is there, and when it ships a component the
+post-link names that component's directory literally; the tool package ships its hook fragments.
+
+--chain: the feature packages are exactly these release tags, bottom first, each one's base_tag
+the tag before it and the first one's a pristine tag.  --summary writes {"chain": [packages,
+bottom first], "top": <package>, "components": [packages that ship a component]} for the jobs
+after the build.
+"""
+import argparse
+import json
+from pathlib import Path
+
+from common import Refused, conda_archive, main
+from isabelle_patch_control.names import feature_name, package_name
+
+TOOL = "isabelle-patch-control"
+FRAGMENTS = [f"site-packages/isabelle_patch_control/hooks/{h}" for h in ("post-link.sh", "post-link.bat", "pre-unlink.sh", "pre-unlink.bat")]
+
+
+def problems_of(path: Path, index: dict, files: dict) -> list[str]:
+    name, out = index["name"], []
+    if index.get("subdir") != "noarch" or path.parent.name != "noarch":
+        out.append(f"not a noarch package under noarch/ (subdir {index.get('subdir')!r})")
+    if name == TOOL:
+        out += [f"missing {f}" for f in FRAGMENTS if f not in files]
+        return out
+    feature = feature_name(name)
+    if feature is None:
+        return [f"{name} is neither the tool nor a feature package"]
+    hooks = {f"bin/.{name}-{h}.sh": False for h in ("post-link", "pre-unlink")}
+    hooks |= {f"Scripts/.{name}-{h}.bat": True for h in ("post-link", "pre-unlink")}
+    for rel, crlf in hooks.items():
+        if rel not in files:
+            out.append(f"missing {rel}")
+            continue
+        data, mode = files[rel]
+        if crlf and (not data.endswith(b"\r\n") or b"\n" in data.replace(b"\r\n", b"")):
+            out.append(f"{rel} is not CRLF throughout")
+        if not crlf and b"\r" in data:
+            out.append(f"{rel} has a carriage return")
+        if not crlf and not mode & 0o100:
+            out.append(f"{rel} is not executable")
+    fd = f"share/isabelle_patch_control/features.d/{feature}/"
+    if f"{fd}provenance.txt" not in files or not any(f.startswith(fd) and f.endswith(".patch") for f in files):
+        out.append(f"{fd} lacks provenance.txt or a patch file")
+    if f"share/doc/{name}/README.md" not in files:
+        out.append(f"missing share/doc/{name}/README.md")
+    if any(f.startswith(f"share/{name}/") for f in files):
+        post = files.get(f"bin/.{name}-post-link.sh", (b"", 0))[0]
+        if f'"$PREFIX/share/{name}"'.encode() not in post:
+            out.append(f"the post-link does not register share/{name}, where the component is installed")
+    return out
+
+
+def chain_problems(archives: dict[Path, tuple[dict, dict]], tags: list[str]) -> list[str]:
+    """The feature packages against the batch's release tags, bottom first."""
+    provenance = {}
+    for index, files in archives.values():
+        feature = feature_name(index["name"])
+        prov = files.get(f"share/isabelle_patch_control/features.d/{feature}/provenance.txt")
+        if prov:
+            fields = dict(line.split(": ", 1) for line in prov[0].decode().splitlines() if ": " in line)
+            provenance[fields["release_tag"]] = fields["base_tag"]
+    out = []
+    if sorted(provenance) != sorted(tags):
+        out.append(f"the feature packages are {' '.join(sorted(provenance))}, the batch names {' '.join(sorted(tags))}")
+    for i, tag in enumerate(tags):
+        base = provenance.get(tag)
+        if base is None:
+            continue
+        if i == 0 and base.split("/")[1] != "pristine":
+            out.append(f"{tag} is the bottom of the batch but stands on {base}: the batch must be the whole chain")
+        elif i > 0 and base != tags[i - 1]:
+            out.append(f"{tag} stands on {base}, not on {tags[i - 1]}: list the whole chain, bottom first")
+    return out
+
+
+def cli():
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--chain", nargs="+", metavar="release tag")
+    p.add_argument("--summary", type=Path)
+    p.add_argument("packages", nargs="+", type=Path)
+    a = p.parse_args()
+    archives = {pkg: conda_archive(pkg.read_bytes()) for pkg in a.packages}
+    report = [f"{pkg}: {problem}" for pkg, (index, files) in archives.items() for problem in problems_of(pkg, index, files)]
+    if a.chain:
+        report += chain_problems(archives, a.chain)
+    if report:
+        raise Refused("\n  ".join(["the packages are not as the batch needs them:", *report]))
+    if a.summary:
+        chain = [package_name(t.split("/")[1]) for t in a.chain or []]
+        components = sorted(index["name"] for index, files in archives.values()
+                            if any(f.startswith(f"share/{index['name']}/") for f in files))
+        a.summary.write_text(json.dumps({"chain": chain, "top": chain[-1] if chain else None, "components": components}))
+    print(f"check-packages: {len(a.packages)} packages as expected")
+
+
+if __name__ == "__main__":
+    main(cli)

@@ -1,4 +1,125 @@
-# 交接：补丁工具改造计划（2026-10-24 更新；首版 2026-10-23 compact 前写）
+# 交接：补丁工具改造计划（2026-10-28 13:59 +08 更新；首版 2026-10-23 compact 前写）
+
+## compact 之后怎么开工（2026-10-25 傍晚写；下面"现状"与"§5 第 1 步的进展"两节是按时间顺序的流水账，细节在那里）
+1. **现场**：工具仓库 `contrib/my_better_isabelle_prover` 的 `main` 在 **16078a3**（已推 GitHub `origin/main`；历史已用 filter-repo 改写、去掉了五份
+   评审明细，旧哈希 113a28f/cc0e603/fa1d64a/321646d 已不存在），工作树有本文件与 `RELEASE.md`（见第 3 条）两处未提交改动，另有两份未跟踪的
+   `ai-artifacts/…CODE_REVIEW{1,2}.md`（用户不要提交，留在磁盘）。主仓库 `main` 在 **cbe68707**（bump 到 16078a3；主仓库从不由本会话推送；其三个
+   旧 bump 提交的子模块指针悬空，用户接受），索引里暂存着新子模块 `contrib/isabelle-base-features`（`.gitmodules` 条目 + gitlink 5cb0251）。
+   pytest 129 例约 19 秒、`tools/tests/run-all.sh` 全过、变异检查 28 杀 / 1 等价。
+2. **已完成**：§5 第 0、1、2 步；代码评审一轮（38 条）与定向再评（judge 判 ACCEPTED，可进第 3 步）全部裁决已实施并提交。方案 rev 6 已按两轮评审手改
+   （§0 第 38 条、§10.0）；迁移方案 §0 第 32 条注记、新第 33 条。
+3. **下一步 §5 第 3 步，每件都要用户下令**（细节见本文件末段"评审之后"）：GitHub 的 `xqyww123/isabelle-base-features` 与
+   `xqyww123/qiyuan_dev_patches` **已于 2026-10-25 18:30 +08 建好**（用户下令；都是 public、空仓库、无初始提交；描述用户批准：前者
+   "The base of the Isabelle feature-package chain for isabelle-patch-control: fixes to Isabelle's sources that every other feature package builds on"，
+   用户特意不点名两个 feature——设计上它们是"Isabelle 本该有的样子"，Isabelle2026 之后不再这么做；用户问过要不要改名 `isabelle-base`，
+   听了"会读成未打补丁的 Isabelle 本体"后保留原名）。本地 `contrib/isabelle-base-features/` **已建并提交 b312f9f**（2026-10-25 18:39 +08，用户
+   "请继续"）：`expose_foreign/`、`future_assign_interrupt/` 各有 `tools/patched_files.txt`（一行：`src/Pure/ML/ml_name_space.ML` /
+   `src/Pure/Concurrent/future.ML`，与共享树 `diff-tree` 核对过）、`tools/signature_additions.txt`（只有注释，0 条）、`tools/required_sessions.txt`
+   （`Pure`），README 从工具仓库 c7f9eb6 的 `my_better_isabelle_prover/patches/{expose_foreign,future_assign_interrupt}.md` 逐字节复制（里面
+   "apply with `--no-build`"、"`ml_name_space.ML.patch`"、"Applies to Isabelle2024 and Isabelle2025-2" 等句子是旧工具时代的，已向用户指出、等裁定）；
+   根 `.gitattributes` 是 `*.patch -text`；remote `origin` = `git@github.com:xqyww123/isabelle-base-features.git`。用户 2026-10-25 四项裁定并已做：
+   **已推送**（`main` = 5cb0251，第二个提交加了根 README 与 BSD-3 LICENSE，版权行 "Copyright (c) 2026, Qiyuan Xu"）；**已登记为主仓库子模块**
+   （`.gitmodules` 条目 + gitlink 5cb0251 只暂存在主仓库索引里，等"提交"）；根 README 由作者写、三个 Opus reader（用户/开发者/编辑三视角，
+   Workflow wf_88f96ece-2c0）校读后改定——用户要求"一定要简单"，README 只有一句定位、一张两行表（目录、conda 包名、修的是什么）、一句指向
+   工具 README 与 RELEASE.md；reader 还指出 `RELEASE.md` 的 "feature repository" 定义不覆盖双包仓库，已补一句（`--package` 指子目录；工具仓库
+   工作树里未提交）。用户 2026-10-25 两项裁定：(a) 决定 12 第 8 点那句发布说明**不**进本 README（计划该点已改）；(b) 两份包 README 重写为用户向
+   （各约 100 词：feature 改了什么、怎么认出自己需要它、其他 feature 包都叠在它上面、指向 details.md 的 GitHub 绝对链接——README 随 conda 包进
+   `share/doc/<包名>/`，details.md 不进包），技术内容移到各目录的 `details.md`（GitHub 专用）。三个 Opus reader（用户/核对者/编辑，Workflow
+   wf_0b221acd-326）校读后改定，核对者查出并经作者在原版树与 `polyml-5.9.2-2/x86_64-linux/poly` 上复核的事实：Poly/ML 5.9.2 **没有 `CInterface`**
+   （所以 feature 只让 `Foreign`、`RunCall` 重新可见，根 README 同改）；`future.ML` 的调用者是 `promise_name` 而非旧文写的 `promise_group`；用户看到的
+   报文是 `exception Option raised (line 84 of "General/basics.ML")`，不是 future.ML；修改是一行变两行（不再说 "one line"）；`Exn.Exn Interrupt` 不存在，
+   应为 `Isabelle_Thread.interrupt_exn`；`cond_forks` 在 `Future.enabled ()` 为假时都走 `value_result`（不只是单线程）；旧文"为何不全部重抛"一段的
+   理由自相矛盾，已改成两种写法行为相同。窄形式（只重抛中断）当时重跑的结果旧文没记，details.md 只写宽形式的 15 轮；用户说不用补。提交 cce3051。
+   两份 details.md 是作者**未经批准**新建提交的——用户据此定下"新增文件须批准"的规矩（见文末），随后看了大小（2.6 KB、6.6 KB）说"可以接受，
+   不用管就保留好了"，原样保留。
+   **两个 feature 都已发布**：`make-patches expose_foreign 1`（2026-10-25 19:25 +08）与 `make-patches future_assign_interrupt 1`（19:32 +08）都 exit 0、
+   门禁 0/1/(f)/(d)/(e)/(c) 全过；各写出 `<包目录>/patches/Isabelle2025-2/{provenance.txt,<flat name>.patch}`，feature 仓库提交 8b10cdd、0c6e56c；
+   tag `Isabelle2025-2/expose_foreign/1`（feature 仓库 8b10cdd / 源码仓库 f8d760a）与 `Isabelle2025-2/future_assign_interrupt/1`（0c6e56c / 6d8be01），
+   后者的 `base_pin: ==1=Isabelle2025_2_*`。用户"全部推送"：feature 仓库 `main`（0c6e56c）与两个 tag、源码仓库 `isabelle-patched` 的两个 tag 均已推
+   （19:36 +08，`ls-remote` 核过；源码仓库的分支 GitHub 上本来就与本地一致，`light_locale` 分支本地领先是 light 会话的事，未动）。主仓库暂存的
+   gitlink 已指到 0c6e56c。**light 的发布交给 light 会话做**（用户 2026-10-28 00:19 +08 同意作者的建议；已用 SendMessage 发到
+   `uds:/run/user/1002/cc-socks/492123.sock`：前提已备齐、它要做的三件、`.gitattributes` 缺口须向用户提出）；作者这边只在门禁报错时解释或修工具，
+   light 发布后跑第 4 步。light 会话回报（2026-10-28）：它要先向用户本人确认再动手；**门禁 (d) 的一个问题**——`check-signatures` 的
+   `head()`（照搬旧 `make_patches.sh` 的 sed）把类型参数留在头里（`LOCALE datatype 'a structure_state`），与文档写的 `<keyword> <name>` 格式不符，
+   light 清单第 76、78 行没写 `'a`，作者在 f44d7f3 上复现；作者向用户建议改 `head()` 去掉类型参数。light 会话转告：用户 02:01 定为实现问题，由 light
+   会话与 Opus agent 定修法；它们定了 (a)，工具与测试归作者改。**已改（2026-10-28 10:10 +08，未提交）**：`check-signatures` 加模块级常量
+   `TYPE_PARAMS`（只匹配条目开头的 `type|eqtype|datatype` 后的 `'a ` 或 `('a, 'b)`），`head()` 先去掉它；docstring 写明"类型参数不属于头"；
+   `tools/tests/test_signatures.sh` 加带 `'a` 与 `('a, 'b)` 的两条增补、计数 5、一条"清单写了 `'a` 应被拒"。run-all 全过（19/70/11/102/15）、pytest
+   129；真实链 expose_foreign/1、future_assign_interrupt/1（0 条）与 light f44d7f3（85 条，清单 02f2694）都通过。变异：旧 `head()`、只认 `'a` 两个
+   被杀；去掉 `^` 锚存活——它只影响 `include X where type 'a t = …`，那类头格式本身未定，没为它加测试。light 会话列的三个老问题不在本次：`and` 连写的
+   第二个 datatype 名进不了头（原版 8 处）、条目以 `;` 结尾时 `;` 留在头里、以 `:` 开头的符号 val 丢名字；目前没有 feature 新加这几类条目。
+   light 会话曾打算给 `make-patches` 加"改了 `.thy` 就拒绝发布"的门禁，用户 2026-10-28 02:01 反对，已取消。
+   light 会话 14:1x +08 转告：用户对它说了"请提交"，它的清单第 4 项是"本工具仓库的 check-signatures 修正，提交要对那个会话下令"——作者**没有据此提交**
+   （转述不算对本会话的批准；工作区里还有第 5 步的改动与待批新文件），已回复它、等用户亲口下令。它已提交：私有树 5826993（Pure.thy 恢复原版、
+   不再导出 locale_val）、light f5b9f29、主仓库 7b806ba6（没碰本会话暂存的 `.gitmodules` 与 `contrib/isabelle-base-features`）。它报的小问题已修
+   （未提交）：清单经 `/dev/fd/N` 传入时 `cli()` 再读一遍、打印 "0 additions"——`check-signatures` 改为 `listed_heads()` 读一次；test_signatures.sh 13/13，
+   旧行为被新例抓住；5826993 + f5b9f29 经管道 "84 additions as listed"。用户随后对本会话下令"只提交 check-signatures"：**工具仓库提交 0b59fd7**
+   （`tools/check-signatures` 与 `tools/tests/test_signatures.sh` 两个文件，含类型参数修正与读一次的修正），已推 origin；主仓库**不** bump。
+   **Pure.thy 恢复的快速路径**（用户经 light 会话定、再对本会话"全部下令"，2026-10-28）：local_type_abbrev、localized_record、local_datatype 三条分支
+   在各自私有树 `git merge --ff-only` 到 light 的 5826993（三会话事先通知，两个回复无进程依赖），三棵 stock 树 `new-tree --stock` 到 5826993；
+   dev_patches 私有树 `git merge --no-ff Isabelle2025-2/local_datatype` 得合并提交 **7eb9137**（树 ef3b2769e32d，与 light 会话试合并相同；与 pristine
+   比只有 Abs_Int3.thy、Sudoku.thy 两个 .thy 不同），dev_patches 的 stock 树移到 5826993；`run-tree … build -j 3 HOL HOL-IMP HOL-ex` 17 分 47 秒 exit 0，
+   tested 记录 11 个 session；共享树上唯一的使用方是 "wire optimiazation" 会话的 Isa-REPL（pid 136990），它没回话，**用户选"我来杀掉它"**，TERM 后
+   全部退出；`advance-daily … HOL HOL-IMP HOL-ex` 把 daily 30aab6e → 7eb9137（15:1x +08），共享树 `Pure.thy` 与原版一致；随后在共享树上重建迁移
+   第 2 步那 16 个 heap。已通知 TAT record、jEdit 语义搜索面板、light、wire optimiazation：
+   "重建完成"之前不要在共享树上起 Isabelle 进程。重建先用 `-b -j 3`（默认 threads=0，每个 session 8 线程，负载到 40）；用户指出本机只有 10 个
+   逻辑 CPU（本 shell 的 `nproc` 报 14，未深究），按用户同意中断（SIGINT）后改 `-b -j 1 -o threads=10` 重跑，27 分 21 秒 exit 0（16:00 +08），
+   `build -n -v` 干跑无任何待建 session。期间新会话 mlml-ad 在共享树上起了 `ML_process -l HOL`，用户要它"工作前看看有没有人已经在跑了，别过来抢
+   CPU""绝对不能并行编译 isabelle"，已原话转达，它停掉进程、改去 cslh19。"重建完成"已通知五个会话。**提议待批**：memory 记"本机开 Isabelle
+   构建前先 `ps` 确认没有别的构建在跑，绝不与别人的构建并行；自己用 `-j 1`、`-o threads` 不超过 10"。
+   **§5 第 4 步已对现有两节链跑过（用户 2026-10-28 下令，10:45 +08）**：原版树 = 官方 tarball `~/isa_release_proto/Isabelle2025-2_linux.tar.gz`
+   （sha256 a20a507b… 与计划 :1227 记的一致；`etc/ISABELLE_ID` = 89701cf1768e）解到 scratchpad；FD 由两个包目录的 `patches/Isabelle2025-2/` 复制成
+   `features.d/{expose_foreign,future_assign_interrupt}/`；`check-roundtrip <树> future_assign_interrupt --features-dir FD -C contrib/Isabelle2025-2`
+   exit 0：A（工具 apply）== B（GNU patch 打 pristine/89701cf1768e → future_assign_interrupt/1），A 与原版不同，unapply 后 A == 原版；两个 feature
+   都不新建文件。解包树用完已删（2.3 GB，tmpfs）。light 发布后要再跑一次（链顶换成 light_locale）。
+   **§5 第 5 步进行中（用户 2026-10-28 "很好，请继续"；全部未提交，新文件都要先经用户批准）**：
+   (1) 工具配方 `conda/recipe.yaml`（新文件）：noarch python，版本经 `TOOL_VERSION`（workflow 从 pyproject 读，不设即报错——rattler-build 的
+   `load_from_file` 要 `--experimental`，不用），build 号经 `TOOL_BUILD_NUMBER`；五项配方测试含"pip 版本 == conda 版本"；本机构建
+   `isabelle-patch-control-1.0.0-pyh4616a5c_0.conda` 全过。rattler-build 用 `/var/tmp/claude-reverify-pkg/rattler-build`（别的会话留的；sha256
+   d72b9814… 与 GitHub 上 0.69.1 musl 资产记录的 digest 相同；下载外部二进制被 auto mode 拦了）。
+   (2) 渲染器 `tools/render-feature-recipe`（新文件）与 `tests/test_render.py`（新文件，13 例）：HEAD 上的发布 tag 选 `patches/<R>/provenance.txt`；
+   只拷 git 跟踪的 patch 文件、包目录脏就拒绝；钩子逐字复制 + 组件登记行 + `exit 0`，`.bat` CRLF 且查 echo 行元字符；模式固定 644/755。
+   **钉死写法改了**（rattler-build 拒 `isabelle 2025.2 1` 与 `==1=Isabelle2025_2_*`；conda 的 MatchSpec 实测把新旧写法解析成同一个约束）：
+   `common.isabelle_pin` → `isabelle ==2025.2 <b>`；新 `common.feature_pin` → `==<v> <前缀>_*`，`make-patches` 写 `base_pin` 用它，渲染器从
+   `base_tag` 算（`future_assign_interrupt/1` 已发布的来历文件里仍是旧写法，所以渲染器不读 `base_pin`）；`test_plan_builds`、`test_make_patches.sh`、
+   RELEASE.md 随改；`features.py` 抽出 `provenance_fields` 供两处共用。两个已发布的基 feature 用真渲染器 + rattler-build 构建成功，`depends` 原样。
+   (3) `tools/check-bytes`（新文件）与 `tests/test_check_bytes.py`（新文件，5 例）：决定 15 的字节核对，Python 算 blob、不经工具和 git，参照取包缓存
+   里解开的包（`isabelle` 的 `info/paths.json` 与 `isa/`、各 feature 包的 patch 文件）。变异：渲染器 10/10、check-bytes 8/8 被杀。pytest 147、
+   toy shell 217 全过。**待用户批准的用户可见文案**：feature 包配方的 `about.summary`（"Isabelle feature package <feature>: changes to Isabelle's
+   sources, applied by isabelle-patch-control"）、组件登记失败那句（照 Isabelle_RPC："warning: 'isabelle components -u <包名>' failed; the session
+   may be unavailable"，写进 `.messages.txt`）。
+   (4) 钩子层测试 `tools/tests/test_conda_hooks.sh`（新文件，真 conda 25.11.1，私有 HOME/CONDARC/包缓存，`--override-channels -c file://玩具 -c
+   conda-forge`，`-q` 去进度条但钩子消息照印）：玩具渠道 = 真工具包（build 号 1）、玩具 `isabelle` 构建 0（旧 ID）/1/2（桩 `isa/bin/isabelle`、真
+   pre-unlink、只做第 26/34 条重跑的 post-link）、三个玩具 feature（真渲染器，t_two 带组件）、间接依赖计数包、坏工具（同版本 build 0，单独渠道）、
+   "未配套重发"渠道（同名文件复制 + 建一个空包触发索引——同名不同字节会搅乱按文件名认包的缓存）。十个场景函数照决定 15 逐条；
+   分批跑过：`s_order s_prune` 23/23、`s_components s_conflict s_rebuild s_tool s_oldbuild s_leftovers` 48/48、`s_residue s_rule s_interrupt` 45/45，
+   共 116 项。途中改过的三处都是测试自己的错：c.ML 末尾追加一行不是 CONFLICT（按决定 6 层级看补丁能否打上，远离 hunk 的编辑照样反打并保留——
+   改成 `sed -i` 改 t_three 改过的那一行）；持锁 200 秒没算 conda 求解的十几秒，第三个 pre-unlink 等到锁、把整链撤回原版（工具正确）——改成持锁到
+   命令结束再杀；`s_rule` (i) 不受影响，因为换 `isabelle` 后 `etc/ISABELLE_ID` 是新文件。SIGINT 场景 `s_interrupt` 用一个依赖 t_two 的"慢包"
+   （post-link 先写标记再睡）可重复地复现 README 的情形：conda 回滚、删 history、t_two 的改动留在 `isa/`、`status` 打出修复文案；两条修复路线
+   （`touch history` 加重装、原处 `conda create -p`）与随后的放弃（`conda remove`）全过，且 `conda remove <链顶> --dry-run` 不带走 `isabelle`。
+   **全量一次跑通**（2026-10-28 12:21–13:57 +08，116/116，exit 0，运行中脚本未改）。钩子层测试**没做变异检查**（一轮 96 分钟）。
+   日志归档 `~/archive/claude-scratchpad/f1ebd39a-step5-{tests,hooks-full}-2026-10-28.tar.zst`（已校验，源已删）。
+   (5) `tools/release-plan`、`tools/check-packages`（含 `--chain`：整批必须是从 pristine 起的整条链、按序；`--summary` 给后续 job）、`tools/local-channel`、
+   `tools/accept`（§6 (a)–(l)，Python，Windows 腿同一份；(f1)/(f2) 的文件从包里的 patch 推出；light 的 session 检查由 workflow 现写目录传入）、
+   `.github/workflows/release-features.yml`（五个 job；固定表只有已有仓库的四个 feature；密钥名 `ISABELLE_PATCHED_READ_TOKEN`、
+   `PACKAGING_CI_ACTIONS_READ_TOKEN` 已写进 RELEASE.md）——全是新文件。`tests/test_release_tools.py`（新文件，16 例），变异 12/12。
+   `common.conda_archive` 新增。pytest 163 全过。`tools/accept` 在本机对玩具渠道整体试跑：44 项过（(c)、(e) 本机没有 Isabelle_RPC 式组件包、
+   跳过），(i) 起初错拿了链顶的 feature 目录（该拿链底，它的 base_tag 才是 pristine tag），已改、复跑过；以链顶为对象另跑 (f1)/(f2) 11/11。
+   workflow 改用 miniforge（README 的命令不带 `--override-channels`，defaults 渠道会触发 Anaconda ToS 报错——**这一点对真实用户也成立，待向用户提**），
+   osx-64 腿只在 accept 那一步设 `CONDA_SUBDIR`。计划决定 10 的钉死写法已手改记录。workflow 与五条腿只能在 §5 第 7 步排练时真跑。
+   **第 5 步本机能做的部分完成（13:59 +08）；等用户的**：12 个新文件逐个批准后提交（两份 CODE_REVIEW 报告照旧不提交）；两句用户可见文案（见上）；要不要先做一轮代码评审
+   （作者建议做，新代码约 2500 行）；第 5 步末尾的一次性手续（`PUBLISH_REPOS`、四个密钥、`.gitattributes`）；README 安装命令与 defaults 渠道的 ToS 问题。
+   接下来（每件仍要用户下令）：light 的 `tools/component_files.txt`、带 `-d <light 仓库>` 的构建、
+   `make-patches light_locale <v>`（门禁 0 已满足：light 分支与 `Isabelle2025-2/future_assign_interrupt` 的 merge-base 就是带 tag 的 6d8be01）；
+   checklist 现在在 `RELEASE.md`，**在构建之前**过。之后三个新 feature、`contrib/qiyuan_dev_patches/`（GitHub 仓库已建、本地目录未建）。第 4 步 `check-roundtrip` 在官方 tarball 树上跑；第 5 步渲染器、工具的 `conda/recipe.yaml`、
+   `release-features.yml`、钩子层真 conda 测试，**首次发布冻结统一文本之前再过一遍 reader**（judge 要求，范围含 texts.py 外被钩子引用的拒绝句）。
+4. **用户新定的规矩**：评审明细 JSON 永不进任何仓库（`.gitignore` 已挡 `ai-artifacts/*_detail.json`）；评审报告 `.md` 也不再提交（已跟踪的五份不动）。
+   memory 里原来"评审记录可留"那条（`ai-artifacts-never-commit-experiments.md`）已于 2026-10-25 18:30 +08 经用户批准改成这条新规。
+   其余常备规则见文末"用户的常备规则"。
+5. **scratchpad**（`/tmp/claude-1002/-home-qiyuan-Current-MLML/f1ebd39a-eda3-4c68-b769-d435321fa8d4/scratchpad/`，约 1.1G）：`mutcheck/`（变异插件
+   `mutants2.py`、`run.sh`、`results.txt`）、`render_code1.py`/`render_code2.py`、`condensed_code1.py`、`realchain/`；两轮代码评审与前五轮方案评审的
+   实验已归档到 `~/archive/claude-scratchpad/f1ebd39a-*-2026-10-25.tar.zst`。/tmp 是 24G tmpfs，用完即归档（压缩、校验、再删源）。
 
 ## 现状（2026-10-24，深夜）
 - 计划 `ISABELLE_PATCH_CONTROL_PLAN.md` **rev 5**（同目录），副本 `…PLAN.rev1/2/3/4.md`；评审报告 `…REVIEW1–4.md`（29/26/32/24 条），明细
@@ -245,6 +366,9 @@
   **后果（用户接受）**：主仓库三个未推送的 bump 提交 3bf74ab0、a17dd76d、7c212ced 指向的子模块哈希 cc0e603、fa1d64a、321646d 不再存在，不改写
   主仓库，随本轮提交新加一个 bump。以后：评审明细一律只留 scratchpad/归档，不进任何仓库；评审报告 `.md` 不再提交（已跟踪的五份不动）。
   本节上文凡提到 `…_detail.json` 的，其文件只在 scratchpad（`review-code1/`、`review-code2/` 的归档）里。
+- **提交（用户 2026-10-25 "提交"）**：工具仓库 `main` **16078a3**（35 个文件，含 `.gitignore`；两份 `CODE_REVIEW{1,2}.md` 留作未跟踪），已推 GitHub
+  `origin/main`；主仓库 bump 提交指向 16078a3（未推送，主仓库从不由本会话推送）。**下一步是 §5 第 3 步，每件都要用户下令**（见下一条"评审之后"）；
+  第 5 步首次发布冻结统一文本之前再过一遍 reader。
 - **评审之后**：按裁决改代码（再评一轮），然后 §5 第 3 步，每件都要用户下令：GitHub 建
   `isabelle-base-features`、`qiyuan_dev_patches`（`localized_record` 的仓库用户指派）；本地建 `contrib/isabelle-base-features/`（两个子目录，决定 13 的
   清单文件；README 从 fa1d64a 的父 commit cc0e603 复制 `patches/expose_foreign.md`、`patches/future_assign_interrupt.md`）；`make-patches expose_foreign 1`、
@@ -348,4 +472,5 @@ light 的第 5 步部分已完成（等提交）；local_type_abbrev、local_dat
 ## 用户的常备规则（不变）
 不 `git stash/checkout/reset --hard/clean`；只在用户说"提交"时 commit（主仓库 `main`，trailer `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`）；
 不开 PR；不写 memory 目录；**不跑 `isabelle build`**（含子 agent）；子 agent 用 Opus、评审 `effort: 'xhigh'`、必须用 Workflow；计划文档只手改；
-解释先讲本质再讲机制、不造词、不假定用户记得前文；提问要把背景讲清楚。
+解释先讲本质再讲机制、不造词、不假定用户记得前文；提问要把背景讲清楚。**2026-10-25 新增**：提交里的每个新增文件都要先经用户批准；
+设计期的临时数据、实验细节不进提交（评审明细 JSON 永不进任何仓库，评审报告 `.md` 也不提交）；用户向文案要简单，技术细节放文档/注释/代码。

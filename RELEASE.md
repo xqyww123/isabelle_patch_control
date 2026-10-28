@@ -1,15 +1,16 @@
 # Releasing
 
-**Status today: no feature package can be released.** Two things must land first: this repository's
-batch release workflow `.github/workflows/release-features.yml` (together with the recipe renderer
+**Status today: no feature package can be released.** This repository's batch release workflow
+`.github/workflows/release-features.yml` is written (with the recipe renderer
 `tools/render-feature-recipe` and the tool's own `conda/recipe.yaml`; plan §5 step 5, specified in
-plan decisions 10 and 11, which this file only summarises), and the pristine Isabelle build of
-`isabelle-packaging-ci` (its `RELEASE.md`). Until then `make-patches` can tag releases in the
-repositories, and nothing publishes them.
+plan decisions 10 and 11, which this file only summarises) but has not run yet: its first run is the
+rehearsal of plan §5 step 7. Before that, the pristine Isabelle build of `isabelle-packaging-ci`
+(its `RELEASE.md`) and the one-time setup at the end of this file must land. Until then
+`make-patches` can tag releases in the repositories, and nothing publishes them.
 
 The tool and the feature packages are conda packages on <https://conda.qiyuan.me>, all `noarch`,
 built, accepted and published **together** by the batch release workflow. Every feature package pins
-one exact `isabelle` build (`isabelle 2025.2 <build string>`), so every new `isabelle` build is
+one exact `isabelle` build (`isabelle ==2025.2 <build string>`), so every new `isabelle` build is
 followed by a re-release of every feature package: same version, build number plus one, new pin.
 
 Words used below. The *owner* is the person who owns the Isabelle source repository and the
@@ -21,10 +22,13 @@ source repository*); the commands below run from that checkout's root unless the
 `Isabelle2025-2/light_locale`) is checked out in its *private tree* `contrib/<R>-<feature>`, the
 only place where it is edited and built. Its *base* is the branch it is built on; a *release tag*
 `<R>/<feature>/<version>` marks a released commit (versions are positive integers: 1, 2, 3, …), and
-the *base tag* is the base's release tag at the merge base. A *feature repository* is the feature's
-own git repository, which holds its `tools/` lists and receives `patches/<R>/` (the patch files, one
-per changed path under a *flat name*: the path with `/` replaced by `-`, plus `.patch`; and
-`provenance.txt`). A *level* is the tool's reading of one file on a user's machine: the number of
+the *base tag* is the base's release tag at the merge base. A *feature repository* is the git
+repository that holds the feature's *package directory* (`make-patches --package <dir>`), which
+holds the `tools/` lists and receives `patches/<R>/` (the patch files, one per changed path under a
+*flat name*: the path with `/` replaced by `-`, plus `.patch`; and `provenance.txt`). For light
+locale the package directory is the repository itself, `contrib/light_locale`; `isabelle-base-features`
+holds two, `expose_foreign/` and `future_assign_interrupt/`, so there `--package` names the
+subdirectory. A *level* is the tool's reading of one file on a user's machine: the number of
 the highest feature whose change the file carries (0 for the pristine content); a file that fits two
 levels reads as `CONFLICT`.
 
@@ -51,7 +55,8 @@ Before a feature can be released, its repository holds, committed:
 
 A feature's place in the chain is its branch's base in the Isabelle source repository (`new-tree
 --base`, owner only); its package depends on the base's package at the exact version of the base
-tag, which `make-patches` writes into `provenance.txt` as `base_pin`.
+tag (`==<version> Isabelle2025_2_*`), which `make-patches` writes into `provenance.txt` as
+`base_pin` and the recipe renderer computes from `base_tag` the same way.
 
 ## Before releasing a feature (checklist)
 
@@ -198,6 +203,9 @@ rebuilds the channel index, so two publishes at once would overwrite each other'
 
 ## One-time setup still to do (on the owner's order)
 
-- This repository enters `PUBLISH_REPOS` and the channel's `RELEASE_CHECKLIST.md`; two R2 secrets,
-  a read-only token for the private feature repositories, an `actions:read` token for
-  `isabelle-packaging-ci`; `.gitattributes` with `*.sh text eol=lf`, `*.bat -text`, `*.patch -text`.
+- This repository enters `PUBLISH_REPOS` and the channel's `RELEASE_CHECKLIST.md`; two R2 secrets
+  (`CONDA_R2_ACCESS_KEY_ID`, `CONDA_R2_SECRET_ACCESS_KEY`), a read-only token
+  `ISABELLE_PATCHED_READ_TOKEN` (Contents: read on `isabelle-patched`, which is private, and on any
+  private feature repository), an `actions:read` token `PACKAGING_CI_ACTIONS_READ_TOKEN` on
+  `isabelle-packaging-ci` (rehearsals only); `.gitattributes` with `*.sh text eol=lf`, `*.bat -text`,
+  `*.patch -text`.

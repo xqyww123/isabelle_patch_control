@@ -48,7 +48,7 @@ import tarfile
 import tempfile
 from pathlib import Path
 
-from common import TOOLS_DIR, Refused, Repo, main, patch_blocks, run, split_branch
+from common import TOOLS_DIR, Refused, Repo, feature_pin, main, patch_blocks, run, split_branch
 from isabelle_patch_control.api import apply_to, unapply_from
 
 # paths git tracks that an hg checkout of the release does not have, or has differently; the CI
@@ -237,7 +237,7 @@ def feature_release(repo: Repo, cwd: Path, branch: str, version: str, package: P
         f"base_tag: {base_tag}",
         f"base_commit: {merge_base}",
         f"base_package_version: {'none (the base is pristine)' if base_is_pristine else base_version}",
-        f"base_pin: {'none' if base_is_pristine else f'=={base_version}={build_prefix}_*'}",
+        f"base_pin: {'none' if base_is_pristine else feature_pin(base_version, build_prefix)}",
         f"build_string_prefix: {build_prefix}",
         f"tree_hash: {tree_hash}",
         f"tree_hash_excludes: {' '.join(TREE_HASH_EXCLUDES)}",

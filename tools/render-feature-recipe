@@ -1,0 +1,240 @@
+#!/usr/bin/env python3
+"""render-feature-recipe <package dir> --isabelle-build <b> --build-number <n> -o <dir>
+
+The one recipe of every feature package (patch tool plan decision 10).  <package dir> is a
+feature's package directory in its feature repository, checked out at a release tag; the tag
+picks its patches/<R>/provenance.txt, which gives everything the recipe needs: version, base
+package and pin, build string prefix.  Writes <dir>/recipe.yaml and <dir>/files/, the package's
+files laid out as under the environment's prefix:
+
+  share/isabelle_patch_control/features.d/<feature>/   the patch files and provenance.txt, as committed
+  share/doc/<package>/README.md                         this repository's common-readme.md, then the feature's README.md
+  bin/.<package>-post-link.sh, .<package>-pre-unlink.sh, Scripts/ the same as .bat (CRLF)
+  share/<package>/                                      the files tools/component_files.txt lists, if it exists
+
+The hooks are isabelle_patch_control/hooks/ copied verbatim (decision 9), with <feature>,
+<package>, <version> filled in, the component registration lines when there is a component
+payload, and the closing `exit 0`.  Nothing here is committed anywhere: the release workflow
+renders into its build directory.
+"""
+import argparse
+import json
+import os
+import re
+import shutil
+import sys
+from pathlib import Path
+
+from common import TOOLS_DIR, Refused, feature_pin, isabelle_pin, main, package_name, run
+from isabelle_patch_control.features import provenance_fields
+
+HOOKS = TOOLS_DIR.parent / "isabelle_patch_control" / "hooks"
+COMMON_README = TOOLS_DIR.parent / "common-readme.md"
+TOOL_PIN = "isabelle-patch-control >=1.0,<2"
+NAME = re.compile(r"^[A-Za-z0-9._-]+$")
+BAT_META = re.compile(r"[<>|&^%]")
+
+
+def git(package: Path, *args: str) -> str:
+    return run(["git", *args], cwd=package).stdout
+
+
+def release_of(package: Path) -> tuple[str, dict[str, str]]:
+    """(R, provenance fields) of the release tag HEAD carries."""
+    head_tags = set(git(package, "tag", "--points-at", "HEAD").split())
+    found = []
+    for p in sorted(package.glob("patches/*/provenance.txt")):
+        fields = provenance_fields(p)
+        if fields.get("release_tag") in head_tags:
+            found.append((p.parent.name, fields))
+    if len(found) != 1:
+        listed = " ".join(sorted(head_tags)) or "no tag"
+        raise Refused(f"HEAD of {package}'s repository carries {listed}; exactly one of them must be the "
+                      f"release_tag of a patches/<R>/provenance.txt there (check out the release tag)")
+    return found[0]
+
+
+def tracked(package: Path, rel: str) -> list[str]:
+    return [f for f in git(package, "ls-files", "-z", "--", rel).split("\0") if f]
+
+
+def bat_lines(name: str) -> list[str]:
+    raw = (HOOKS / name).read_bytes().decode("ascii")
+    if not raw.endswith("\r\n") or "\n" in raw.replace("\r\n", ""):
+        raise Refused(f"{HOOKS / name} is not CRLF throughout")
+    return raw[:-2].split("\r\n")
+
+
+def sh_text(name: str) -> str:
+    raw = (HOOKS / name).read_text()
+    if "\r" in raw:
+        raise Refused(f"{HOOKS / name} has a carriage return")
+    return raw
+
+
+def fill(text: str, feature: str, package: str, version: str) -> str:
+    return text.replace("<feature>", feature).replace("<package>", package).replace("<version>", version)
+
+
+def components_sh(package: str, verb: str) -> str:
+    return (f'"$PREFIX/isa/bin/isabelle" components {verb} "$PREFIX/share/{package}" 2>/dev/null \\\n'
+            f'  || echo "warning: \'isabelle components {verb} {package}\' failed; the session may be unavailable"'
+            f' >> "$PREFIX/.messages.txt"\n')
+
+
+def components_bat(package: str, verb: str) -> list[str]:
+    # Isabelle_RPC/conda/recipe.yaml's lines without their `@echo off`: a Cygwin path for
+    # components, and the getenv warm-up without which the first call cannot run a Scala tool.
+    return [f'set "COMP=%PREFIX%\\share\\{package}"',
+            'set "DL=%COMP:~0,1%"',
+            'set "REST=%COMP:~2%"',
+            'set "REST=%REST:\\=/%"',
+            'set "CYG=/cygdrive/%DL%%REST%"',
+            'call "%PREFIX%\\isa\\bin\\isabelle.bat" getenv -b ISABELLE_HOME >nul 2>&1',
+            f'call "%PREFIX%\\isa\\bin\\isabelle.bat" components {verb} "%CYG%" >nul 2>&1']
+
+
+def check_bat_echo(lines: list[str], what: str):
+    """No cmd metacharacter in an echo line, besides the quoted %PREFIX% and the closing >> (decision 9)."""
+    for line in lines:
+        if line.startswith("echo "):
+            body = re.sub(r'>> "%PREFIX%\\\.messages\.txt"$', "", line).replace('"%PREFIX%', '"')
+            if BAT_META.search(body[len("echo "):]):
+                raise Refused(f"{what}: a cmd metacharacter in the echo line {line!r}")
+
+
+def hooks(feature: str, package: str, version: str, component: bool) -> dict[str, bytes]:
+    post_sh = "#!/bin/bash\n" + sh_text("post-link.sh")
+    pre_sh = "#!/bin/bash\n" + fill(sh_text("pre-unlink.sh"), feature, package, version)
+    if not pre_sh.endswith("exit 0\n"):
+        raise Refused("hooks/pre-unlink.sh must end with exit 0")
+    if component:
+        post_sh += components_sh(package, "-u")
+        pre_sh = pre_sh[:-len("exit 0\n")] + components_sh(package, "-x") + "exit 0\n"
+    post_sh += "exit 0\n"
+
+    post_bat = bat_lines("post-link.bat")
+    pre_bat = [fill(line, feature, package, version) for line in bat_lines("pre-unlink.bat")]
+    if post_bat[-1] != ":end" or pre_bat[-2:] != [":end", "exit /b 0"]:
+        raise Refused("hooks/post-link.bat must end with :end, hooks/pre-unlink.bat with :end and exit /b 0")
+    if component:
+        post_bat += components_bat(package, "-u")
+        pre_bat[-1:-1] = components_bat(package, "-x")
+    post_bat.append("exit /b 0")
+    for lines, what in ((post_bat, "post-link.bat"), (pre_bat, "pre-unlink.bat")):
+        check_bat_echo(lines, what)
+    for text, what in ((post_sh, "post-link.sh"), (pre_sh, "pre-unlink.sh"), ("\n".join(pre_bat), "pre-unlink.bat")):
+        if re.search(r"<(feature|package|version)>", text):
+            raise Refused(f"{what}: a placeholder was left unfilled")
+    crlf = lambda lines: ("\r\n".join(lines) + "\r\n").encode("ascii")
+    return {f"bin/.{package}-post-link.sh": post_sh.encode("ascii"),
+            f"bin/.{package}-pre-unlink.sh": pre_sh.encode("ascii"),
+            f"Scripts/.{package}-post-link.bat": crlf(post_bat),
+            f"Scripts/.{package}-pre-unlink.bat": crlf(pre_bat)}
+
+
+def recipe(package: str, version: str, build_string: str, n: int, depends: list[str], feature: str) -> str:
+    q = json.dumps
+    deps = "".join(f"    - {q(d)}\n" for d in depends)
+    return f"""schema_version: 1
+# Rendered by isabelle_patch_control's tools/render-feature-recipe (plan decision 10); not committed.
+package:
+  name: {q(package)}
+  version: {q(version)}
+source:
+  - path: files
+build:
+  number: {n}
+  string: {q(build_string)}
+  noarch: generic
+  script:
+    interpreter: bash
+    content: |
+      set -euo pipefail
+      for d in bin Scripts share; do cp -a "$SRC_DIR/$d" "$PREFIX/"; done
+requirements:
+  run:
+{deps}about:
+  summary: {q(f"Isabelle feature package {feature}: changes to Isabelle's sources, applied by isabelle-patch-control")}
+"""
+
+
+def render(package: Path, isabelle_build: str, n: int, out: Path) -> str:
+    if not (package / "README.md").is_file():
+        raise Refused(f"{package}/README.md is missing (the feature's README, decision 10)")
+    if not NAME.match(isabelle_build):
+        raise Refused(f"--isabelle-build {isabelle_build!r} is not a build string")
+    if out.exists() and any(out.iterdir()):
+        raise Refused(f"{out} is not empty")
+    r, fields = release_of(package)
+    release_tag = fields["release_tag"]
+    _, feature, version = release_tag.split("/")
+    name = package_name(feature)
+    prefix = fields["build_string_prefix"]
+    for v in (feature, version, prefix):
+        if not NAME.match(v):
+            raise Refused(f"{v!r} in {release_tag} is not a plain name")
+
+    cf = package / "tools" / "component_files.txt"
+    components = ([line.strip() for line in cf.read_text().splitlines()
+                   if line.strip() and not line.lstrip().startswith("#")] if cf.is_file() else [])
+    shipped = [f"patches/{r}", "README.md", *(["tools/component_files.txt", *components] if cf.is_file() else [])]
+    dirty = git(package, "status", "--porcelain", "--untracked-files=all", "--", *shipped)
+    if dirty:
+        raise Refused(f"{package} differs from the checked-out release tag {release_tag}:\n{dirty.rstrip()}")
+
+    depends = [TOOL_PIN, isabelle_pin(prefix, isabelle_build)]
+    _, base_feature, base_version = fields["base_tag"].split("/")
+    if base_feature != "pristine":
+        depends.append(f"{package_name(base_feature)} {feature_pin(base_version, prefix)}")
+
+    files = out / "files"
+    fd = files / "share" / "isabelle_patch_control" / "features.d" / feature
+    fd.mkdir(parents=True)
+    patch_dir = package / "patches" / r
+    for rel in tracked(package, f"patches/{r}"):
+        src = package / rel
+        if src.parent != patch_dir or not (src.suffix == ".patch" or src.name == "provenance.txt"):
+            raise Refused(f"{rel}: patches/{r}/ holds only the patch files and provenance.txt")
+        shutil.copyfile(src, fd / src.name)
+    if not list(fd.glob("*.patch")):
+        raise Refused(f"patches/{r}/ has no patch file")
+
+    doc = files / "share" / "doc" / name
+    doc.mkdir(parents=True)
+    (doc / "README.md").write_bytes(COMMON_README.read_bytes() + b"\n" + (package / "README.md").read_bytes())
+
+    for rel in components:
+        if not tracked(package, rel):
+            raise Refused(f"{rel} (tools/component_files.txt) is not a committed file")
+        dest = files / "share" / name / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(package / rel, dest)
+
+    for rel, data in hooks(feature, name, version, bool(components)).items():
+        dest = files / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(data)
+
+    for p in files.rglob("*"):                    # modes do not follow the builder's umask
+        if p.is_file():
+            os.chmod(p, 0o755 if p.suffix == ".sh" or os.access(p, os.X_OK) else 0o644)
+    build_string = f"{prefix}_{n}"
+    (out / "recipe.yaml").write_text(recipe(name, version, build_string, n, depends, feature))
+    return f"{name}-{version}-{build_string}.conda"
+
+
+def cli():
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("package", type=Path, help="the feature's package directory, at its release tag")
+    p.add_argument("--isabelle-build", required=True, metavar="b", help="the build string of the pristine isabelle build")
+    p.add_argument("--build-number", required=True, type=int, metavar="n")
+    p.add_argument("-o", "--output", required=True, type=Path, metavar="dir")
+    a = p.parse_args()
+    if a.build_number < 0:
+        raise Refused("--build-number must not be negative")
+    filename = render(a.package.resolve(), a.isabelle_build, a.build_number, a.output.resolve())
+    print(f"{a.output / 'recipe.yaml'}: builds noarch/{filename}")
+
+
+main(cli)

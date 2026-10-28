@@ -9,6 +9,7 @@ A tree's `etc/ISABELLE_IDENTIFIER` equals its directory name (new-tree is the on
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -331,10 +332,38 @@ class Wanted:
 
 
 def isabelle_pin(build_string_prefix: str, isabelle_build: str) -> str:
-    """The `isabelle` dependency of a feature package, e.g. `isabelle 2025.2 1`.  The renderer of the
-    feature recipes (§5 step 5) must import this: the pin a recipe writes and the pin plan_builds
-    looks for are then one and the same."""
-    return f"isabelle {build_string_prefix.removeprefix('Isabelle').replace('_', '.')} {isabelle_build}"
+    """The `isabelle` dependency of a feature package, e.g. `isabelle ==2025.2 1`.  The renderer of the
+    feature recipes imports this: the pin a recipe writes and the pin plan_builds looks for are then
+    one and the same (rattler-build records it in `depends` as written).  `==`, not a bare version:
+    rattler-build refuses `isabelle 2025.2 1` in a recipe; conda reads both the same."""
+    return f"isabelle =={build_string_prefix.removeprefix('Isabelle').replace('_', '.')} {isabelle_build}"
+
+
+def feature_pin(version: str, build_string_prefix: str) -> str:
+    """A feature package's pin on the package of its base, e.g. `==1 Isabelle2025_2_*`: that version,
+    any build of the release line.  make-patches writes it as base_pin; the renderer computes it from
+    base_tag (base_pin of releases cut before 2026-10-28 reads `==1=Isabelle2025_2_*`, which conda
+    reads the same way and rattler-build refuses)."""
+    return f"=={version} {build_string_prefix}_*"
+
+
+def conda_archive(data: bytes) -> tuple[dict, dict[str, tuple[bytes, int]]]:
+    """(info/index.json, {path: (bytes, mode)} of the payload) of a .conda archive: a zip of two
+    zstd tarballs (needs the zstandard module, which conda itself depends on)."""
+    import io
+    import tarfile
+    import zipfile
+    import zstandard
+
+    z = zipfile.ZipFile(io.BytesIO(data))
+
+    def members(prefix: str) -> dict[str, tuple[bytes, int]]:
+        name = next(n for n in z.namelist() if n.startswith(prefix) and n.endswith(".tar.zst"))
+        raw = zstandard.ZstdDecompressor().stream_reader(io.BytesIO(z.read(name))).read()
+        with tarfile.open(fileobj=io.BytesIO(raw)) as t:
+            return {m.name: (t.extractfile(m).read(), m.mode) for m in t.getmembers() if m.isfile()}
+
+    return json.loads(members("info-")["info/index.json"][0]), members("pkg-")
 
 
 def plan_builds(repodata: dict, wanted: list[Wanted], fetch: Callable[[str], dict | None]) -> dict[str, tuple[str, str | int]]:

@@ -128,7 +128,7 @@ expect ok      "release 1 of R/feat"                             -- "$mp" -C . -
 cat "$work/out"
 check "six patch files, flat names" '[[ $(ls ../pkg/patches/R/*.patch | wc -l) == 6 && -f ../pkg/patches/R/src-Pure-new.ML.patch && -f ../pkg/patches/R/bin-tool.patch ]]'
 check "the CRLF files' patch files keep their CRs" '[[ $(tr -cd "\r" < ../pkg/patches/R/etc-crlf.txt.patch | wc -c) == 3 && $(tr -cd "\r" < ../pkg/patches/R/etc-new_crlf.txt.patch | wc -c) == 1 ]]'
-check "provenance file" '/usr/bin/grep -q "^base_tag: R/base/1$" ../pkg/patches/R/provenance.txt && /usr/bin/grep -q "^base_pin: ==1=R_\*$" ../pkg/patches/R/provenance.txt'
+check "provenance file" '/usr/bin/grep -q "^base_tag: R/base/1$" ../pkg/patches/R/provenance.txt && /usr/bin/grep -q "^base_pin: ==1 R_\*$" ../pkg/patches/R/provenance.txt'
 check "committed in the feature repository, clean" '[[ -z $(git -C ../pkg status --porcelain) && $(git -C ../pkg ls-tree -r --name-only HEAD -- patches/R | wc -l) == 7 ]]'
 check "feature repository tag R/feat/1 at its HEAD" '[[ $(git -C ../pkg rev-parse R/feat/1^{commit}) == $(git -C ../pkg rev-parse HEAD) ]]'
 check "tag R/feat/1 at the tip" '[[ $(git rev-parse R/feat/1^{commit}) == $(git rev-parse R/feat) ]]'
@@ -164,7 +164,7 @@ saw "gate 0 asks for a release of the base" "merge a release of R/base"
 git tag -a -m v2 R/base/2 R/base
 echo unrelated > ../pkg/unrelated.txt; git -C ../pkg add unrelated.txt       # staged, not part of the release
 expect ok      "release 2 after the base released"               -- "$mp" -C . --package ../pkg R/feat 2
-saw "pinned to base 2" "base_pin: ==2=R_\*"
+saw "pinned to base 2" "base_pin: ==2 R_\*"
 check "an unrelated staged file stays out of the release commit" '! git -C ../pkg ls-tree --name-only HEAD unrelated.txt | /usr/bin/grep -q . && git -C ../pkg status --porcelain | /usr/bin/grep -q "^A  unrelated.txt$"'
 git -C ../pkg rm -q --cached unrelated.txt; rm ../pkg/unrelated.txt
 chmod +x src/Pure/b.ML; git commit -q -am "mode change of a base file"; tested HOL; echo src/Pure/b.ML >> ../pkg/tools/patched_files.txt; git -C ../pkg commit -q -am "list b"

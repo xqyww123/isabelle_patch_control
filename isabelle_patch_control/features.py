@@ -36,6 +36,16 @@ class Tree:
         return f"{self.release}/pristine/{self.id}"
 
 
+def provenance_fields(provenance: Path) -> dict[str, str]:
+    """The `key: value` lines of a provenance file (make-patches writes them)."""
+    fields = {}
+    for line in provenance.read_text().splitlines():
+        key, sep, value = line.partition(":")
+        if sep:
+            fields[key.strip()] = value.strip()
+    return fields
+
+
 @dataclass(frozen=True)
 class FeatureDir:
     """A feature package's directory `features.d/<feature>/`: its provenance file and patch files
@@ -50,11 +60,7 @@ class FeatureDir:
         provenance = d / "provenance.txt"
         if not provenance.is_file():
             return None
-        fields = {}
-        for line in provenance.read_text().splitlines():
-            key, sep, value = line.partition(":")
-            if sep:
-                fields[key.strip()] = value.strip()
+        fields = provenance_fields(provenance)
         try:
             release_tag, base_tag = fields["release_tag"], fields["base_tag"]
         except KeyError as e:

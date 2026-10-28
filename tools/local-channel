@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# local-channel <channel dir> <isabelle build> <feature-packages dir> [<conda-packages dir>]
+#
+# The release workflow's local channel (patch tool plan decision 11): the batch's feature-packages
+# artifact (noarch/*.conda) and, in a rehearsal, the CI run's conda-packages artifact
+# (<subdir>/*.conda), indexed with conda-index into the base environment's python.  The rehearsal's
+# isabelle package must carry the build string the batch pins and must not be build 0, which would
+# shadow the channel's 2025.2-0.
+set -euo pipefail
+ch=$1 b=$2 features=$3 ci=${4-}
+conda install -q -y -n base -c conda-forge conda-index
+mkdir -p "$ch/noarch"
+find "$features" -name '*.conda' -exec cp {} "$ch/noarch/" \;
+if [ -n "$ci" ] && [ -d "$ci" ]; then
+  [ "$b" != 0 ] || { echo "::error::isabelle_build 0 in a rehearsal would shadow the channel's 2025.2-0"; exit 1; }
+  for d in "$ci"/*/; do
+    sub=$(basename "$d")
+    compgen -G "$d*.conda" > /dev/null || continue
+    mkdir -p "$ch/$sub"
+    cp "$d"*.conda "$ch/$sub/"
+  done
+  found=$(find "$ch" -name 'isabelle-2025.2-*.conda' | sed 's|.*/isabelle-2025\.2-||; s|\.conda$||' | sort -u)
+  [ "$found" = "$b" ] || { echo "::error::the CI run's isabelle builds are '$found', the batch pins $b"; exit 1; }
+fi
+python -m conda_index "$ch" --no-zst --no-bz2 --channel-name local
+find "$ch" -name '*.conda' | sort

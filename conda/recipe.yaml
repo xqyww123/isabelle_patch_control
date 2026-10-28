@@ -1,0 +1,61 @@
+schema_version: 1
+
+# isabelle-patch-control (plan decision 1): noarch python, so conda relocates site-packages to the
+# environment's python and generates the entry point for the running platform.  Built by
+# .github/workflows/release-features.yml, which passes pyproject.toml's [project].version as
+# TOOL_VERSION (no default: an unset variable fails the build; the last test below checks the two
+# agree) and the build number that tools/common.py's plan_builds chose as TOOL_BUILD_NUMBER (the
+# tool package is reused like every other package of a batch).
+
+context:
+  version: ${{ env.get("TOOL_VERSION") }}
+
+source:
+  - path: ../
+
+package:
+  name: isabelle-patch-control
+  version: ${{ version }}
+
+build:
+  number: ${{ env.get("TOOL_BUILD_NUMBER", default="0") | int }}
+  noarch: python
+  python:
+    entry_points:
+      - isabelle-patch-control = isabelle_patch_control.cli:main
+  script:
+    interpreter: bash
+    content: |
+      set -euo pipefail
+      # --no-deps: conda resolves the dependencies; --no-build-isolation: the host environment
+      # already has setuptools, and the builder needs no network.
+      $PYTHON -m pip install . --no-deps --no-build-isolation -vv
+
+requirements:
+  host:
+    - python >=3.12
+    - pip
+    - setuptools >=77
+  run:
+    - python >=3.12
+    # the tool applies every patch file with `git apply`; engine.py refuses older versions
+    - git >=2.43
+
+tests:
+  - python:
+      imports:
+        - isabelle_patch_control
+      pip_check: true
+  - script:
+      # the call form every feature package's hooks use (decision 9), and the hook fragments
+      # shipped as package data
+      - python -I -X utf8 -m isabelle_patch_control --help
+      - python -I -c "import importlib.resources as r; assert (r.files('isabelle_patch_control') / 'hooks' / 'post-link.sh').is_file()"
+      - python -I -c "import importlib.metadata as m; v = m.version('isabelle-patch-control'); assert v == '${{ version }}', v"
+
+about:
+  homepage: https://github.com/xqyww123/isabelle_patch_control
+  repository: https://github.com/xqyww123/isabelle_patch_control
+  summary: Applies the Isabelle feature packages of a conda environment to its Isabelle, reverses them, and reports their state
+  license: MIT
+  license_file: LICENSE

@@ -67,9 +67,17 @@ common-readme.md the text every feature package's README starts with; README.md 
 tools/           the Isabelle source repository's scripts (make-patches, run-tree, ...) and their
                  toy tests, see README.md "Working in the Isabelle source repository";
                  check-roundtrip (plan decision 17: the tool against GNU patch on a copy of a
-                 pristine tree); common.py also holds plan_builds (decision 10) and imports
-                 package_name from the Python package
-tests/           pytest (the tool; also plan_builds and check-roundtrip)
+                 pristine tree); common.py also holds plan_builds, isabelle_pin, feature_pin
+                 (decision 10) and conda_archive, and imports package_name from the Python package.
+                 The release workflow's pieces (decisions 10, 11, 15, §6): render-feature-recipe
+                 (the one recipe of every feature package), release-plan (reuse or build, which
+                 number), check-packages (inside every .conda; the batch is the whole chain),
+                 local-channel, check-bytes (the byte oracle), accept (§6 on one leg)
+conda/recipe.yaml the tool's own package (noarch python; TOOL_VERSION and TOOL_BUILD_NUMBER from
+                 the workflow)
+.github/workflows/release-features.yml  the batch release (RELEASE.md)
+tests/           pytest (the tool; also plan_builds, check-roundtrip, the renderer, check-bytes,
+                 release-plan and check-packages)
 ```
 
 `make-patches` runs gate (c) through `api.apply_to` / `api.unapply_from` on `git archive <base tag>`,
@@ -95,9 +103,23 @@ passing; change the plan's §4 first.
 ## Tests
 
 ```
-python -m pytest            # about 25 seconds
+python -m pytest            # about 35 seconds; needs the zstandard module (conda's own dependency)
 tools/tests/run-all.sh      # the toy runs of tools/ (make-patches, run-tree, ...), about a minute
+RATTLER_BUILD=<rattler-build 0.69.1> CONDA_EXE=<conda> HOOKS_TEST_CACHE=<dir kept between runs> \
+  tools/tests/test_conda_hooks.sh [<scratch dir>] [<scenario>...]   # the hook layer, real conda
 ```
+
+`test_conda_hooks.sh` (plan decision 15) builds a toy channel: the tool from `conda/recipe.yaml`, a
+toy `isabelle` package in three builds (0 with the old `ISABELLE_ID`, 1 and 2 pristine) whose stub
+`isa/bin/isabelle` answers `getenv` and `components`, whose pre-unlink is the real one and whose
+post-link only re-runs the direct dependents' post-links (plan §0 items 26, 33, 34), three toy
+features cut from a toy source repository and rendered by the real renderer (the middle one ships a
+component), a package that depends on `isabelle` only indirectly, a broken tool in a channel of its
+own, and a channel without the re-release for build 2. Every scenario starts from a new environment
+with a private `HOME`, `CONDARC` and package cache and reads conda's own output; the tree's bytes
+are checked by `tools/check-bytes`. The lock scenarios (`s_residue`, `s_rule`) wait for the tool's
+60-second lock timeout three times each; the whole run (116 checks in eleven scenarios) took 96
+minutes on the author's machine, most of it conda's solving.
 
 `tests/conftest.py` builds a toy Isabelle tree and a toy chain of three features the way
 `make-patches` builds real ones: commits in a toy git repository, `git diff-tree -r -p --no-renames`
@@ -149,5 +171,8 @@ feature's own repository and tags the release; the release workflow of this repo
 conda recipe from them, builds all packages into one channel, runs the acceptance on five
 platforms, and publishes. See [RELEASE.md](RELEASE.md). The workflow, the renderer
 `tools/render-feature-recipe` and the conda recipe of the tool itself (`conda/recipe.yaml`, noarch
-python, `run: python >=3.12, git >=2.43`) are plan §5 step 5 and not written yet; `common.plan_builds`
-and `common.isabelle_pin` are their first pieces.
+python, `run: python >=3.12, git >=2.43`) are plan §5 step 5; the hook layer is tested locally
+against the toy channel, the workflow itself runs for the first time in the rehearsal of plan §5
+step 7. The pins are written the way rattler-build accepts them, `isabelle ==2025.2 <b>` and
+`<base package> ==<version> Isabelle2025_2_*` (`common.isabelle_pin`, `common.feature_pin`); conda
+reads them exactly as the older `isabelle 2025.2 <b>` and `==1=Isabelle2025_2_*`.

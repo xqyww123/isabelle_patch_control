@@ -1,0 +1,140 @@
+#!/usr/bin/env python3
+"""check-bytes <tree> --isabelle <package dir> [--feature <package dir>]... [--applied [F ...]]
+
+The byte check of the patch tool plan (decision 15; §6 (k), the hook-layer tests): an oracle that
+uses neither the tool nor git.  Its reference data are the packages themselves as conda unpacked
+them into the package cache (pkgs/<name>-<version>-<build>/), never the environment's features.d
+or conda-meta, which a removal deletes: the isabelle package's info/paths.json and isa/ files, and
+the patch files of every feature package given.
+
+For every path a patch file touches:
+  - when a feature named in --applied touches it, the file's git blob id (computed here) starts
+    with the post-image (`index <pre>..<post>`) of the highest such feature's patch; an all-zero
+    post-image means the file must not exist;
+  - when none does, the file's sha256 is the one paths.json records for isa/<path>, or the file
+    does not exist when the isabelle package has none (a file a feature creates);
+  - a file whose isabelle-package content is not the pre-image of the lowest patch touching it
+    (the packaging changed it too) is not checked, and is listed.
+--applied defaults to every feature given; `--applied` alone means none.
+"""
+import argparse
+import hashlib
+import json
+import re
+from pathlib import Path
+
+from common import Refused, main
+from isabelle_patch_control.features import provenance_fields
+
+FEATURES_D = Path("share") / "isabelle_patch_control" / "features.d"
+
+
+def blob_id(data: bytes) -> str:
+    return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
+
+
+def header(patch: Path) -> tuple[str, str, str]:
+    """(path, pre-image, post-image) of a patch file's one `git diff` block."""
+    old = new = index = None
+    for line in patch.read_bytes().split(b"\n"):
+        if line.startswith(b"@@"):
+            break
+        if line.startswith(b"--- "):
+            old = line[4:]
+        elif line.startswith(b"+++ "):
+            new = line[4:]
+        elif m := re.match(rb"index ([0-9a-f]+)\.\.([0-9a-f]+)", line):
+            index = (m[1].decode(), m[2].decode())
+    if old is None or new is None or index is None:
+        raise Refused(f"{patch}: no ---, +++ and index lines before the first hunk")
+    path = old if new == b"/dev/null" else new
+    if not path.startswith((b"a/", b"b/")):
+        raise Refused(f"{patch}: the path {path!r} is quoted or has no a/ or b/ prefix")
+    return path[2:].decode(), *index
+
+
+def chain(packages: list[Path]) -> list[tuple[str, list[Path]]]:
+    """(feature, patch files) of every feature package, bottom first, linked by base_tag."""
+    found = {}
+    for pkg in packages:
+        dirs = [d for d in (pkg / FEATURES_D).iterdir() if (d / "provenance.txt").is_file()]
+        if len(dirs) != 1:
+            raise Refused(f"{pkg}: {len(dirs)} feature directories under {FEATURES_D}, not one")
+        f = provenance_fields(dirs[0] / "provenance.txt")
+        found[f["release_tag"]] = (f["base_tag"], dirs[0].name, sorted(dirs[0].glob("*.patch")))
+    order, below = [], None
+    while len(order) < len(found):
+        up = [(tag, v) for tag, v in found.items() if (v[0] == below if below else v[0].split("/")[1] == "pristine")]
+        if len(up) != 1:
+            raise Refused(f"the feature packages do not form one chain (above {below or 'pristine'}: {len(up)})")
+        below = up[0][0]
+        order.append(up[0][1][1:])
+    return order
+
+
+def check(tree: Path, isabelle: Path, packages: list[Path], applied: list[str] | None) -> tuple[list[str], list[str], int]:
+    """(problems, files not checked, files checked)."""
+    features = chain(packages)
+    names = [name for name, _ in features]
+    applied = names if applied is None else applied
+    if unknown := sorted(set(applied) - set(names)):
+        raise Refused(f"--applied names {' '.join(unknown)}, which no --feature package holds")
+    recorded = {p["_path"]: p["sha256"] for p in json.loads((isabelle / "info" / "paths.json").read_text())["paths"]}
+    touching: dict[str, list[tuple[str, str, str]]] = {}
+    for name, patches in features:
+        for patch in patches:
+            path, pre, post = header(patch)
+            touching.setdefault(path, []).append((name, pre, post))
+    problems, skipped = [], []
+    for path, touches in sorted(touching.items()):
+        target = tree / path
+        sha = recorded.get(f"isa/{path}")
+        pre = touches[0][1]
+        if sha is not None:
+            data = (isabelle / "isa" / path).read_bytes()
+            if hashlib.sha256(data).hexdigest() != sha:
+                problems.append(f"{path}: the package cache's copy of isa/{path} is not what paths.json records (edited in place)")
+                continue
+            if not blob_id(data).startswith(pre):
+                skipped.append(path)
+                continue
+        elif set(pre) != {"0"}:
+            problems.append(f"{path}: the isabelle package has no isa/{path}, which {touches[0][0]}'s patch changes")
+            continue
+        on = [t for t in touches if t[0] in applied]
+        if on:
+            name, _, post = on[-1]
+            if set(post) == {"0"}:
+                if target.exists():
+                    problems.append(f"{path}: exists, but {name} (applied) deletes it")
+            elif not target.is_file():
+                problems.append(f"{path}: missing, but {name} (applied) leaves it at {post}")
+            elif not blob_id(target.read_bytes()).startswith(post):
+                problems.append(f"{path}: blob {blob_id(target.read_bytes())[:12]}, but {name} (applied) leaves it at {post}")
+        elif sha is None:
+            if target.exists():
+                problems.append(f"{path}: exists, but no feature that creates it is applied")
+        elif not target.is_file():
+            problems.append(f"{path}: missing, but no feature that changes it is applied")
+        elif hashlib.sha256(target.read_bytes()).hexdigest() != sha:
+            problems.append(f"{path}: not the isabelle package's content, but no feature that changes it is applied")
+    return problems, skipped, len(touching) - len(skipped)
+
+
+def cli():
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("tree", type=Path, help="the environment's isa/")
+    p.add_argument("--isabelle", required=True, type=Path, metavar="dir", help="the isabelle package, unpacked")
+    p.add_argument("--feature", action="append", default=[], type=Path, metavar="dir", help="a feature package, unpacked")
+    p.add_argument("--applied", nargs="*", metavar="F", help="the features expected applied (default: all)")
+    a = p.parse_args()
+    problems, skipped, n = check(a.tree, a.isabelle, a.feature, a.applied)
+    for path in skipped:
+        print(f"not checked: {path} (the isabelle package's content is not the pre-image of the lowest patch)")
+    if problems:
+        raise Refused("\n  ".join(["the bytes are not as expected:", *problems]))
+    print(f"check-bytes: {n} files as expected")
+
+
+if __name__ == "__main__":
+    main(cli)
