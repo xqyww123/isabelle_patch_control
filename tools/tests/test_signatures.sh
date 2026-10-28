@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Toy run of check-signatures: ML files with signature sections, entries kept, added, removed,
-# retyped, commented, continued over lines, in a new file.  Usage: test_signatures.sh [<scratch dir>]
+# retyped, commented, continued over lines, with type parameters, in a new file.
+# Usage: test_signatures.sh [<scratch dir>]
 set -euo pipefail
 tools=$(cd "$(dirname "$0")/.." && pwd)
 work=${1:-$(mktemp -d)}; rm -rf "$work"; mkdir -p "$work"; cd "$work"
@@ -36,12 +37,15 @@ end
 EOF
 git add -A; git commit -q -m base; base=$(git rev-parse HEAD)
 
-# feature: one entry added to LOCALE (continued over two lines), a datatype, a new file
+# feature: one entry added to LOCALE (continued over two lines), datatypes and a type with type
+# parameters, a new file
 cat > src/Pure/locale.ML <<'EOF'
 signature LOCALE =
 sig
   type level
   datatype position_kind = Head | Body
+  datatype 'a structure_state = Inherited | Structure_Of of 'a
+  type ('a, 'b) table
   val register: string -> theory -> theory
   val activate_facts: morphism option -> (* comment moved *)
     string * morphism -> Context.generic -> Context.generic
@@ -64,14 +68,21 @@ git add -A; git commit -q -m feature; feat=$(git rev-parse HEAD)
 cat > additions.txt <<'EOF'
 # heads of the entries the feature adds
 src/Pure/locale.ML LOCALE datatype position_kind
+src/Pure/locale.ML LOCALE datatype structure_state
+src/Pure/locale.ML LOCALE type table
 src/Pure/locale.ML LOCALE val is_light
 src/Pure/new_file.ML NEW_FILE val f
 EOF
 expect ok      "additions exactly as listed"                     -- "$tools/check-signatures" "$base" "$feat" additions.txt
-saw "3 additions counted" "3 additions as listed"
+saw "5 additions counted" "5 additions as listed"
+expect ok      "the list through a pipe (read once)"            -- "$tools/check-signatures" "$base" "$feat" <(cat additions.txt)
+saw "counted from that one reading" "5 additions as listed"
 sed '/is_light/d' additions.txt > short.txt
 expect refused "an addition that is not listed"                  -- "$tools/check-signatures" "$base" "$feat" short.txt
 saw "names the unlisted head" "not listed: src/Pure/locale.ML LOCALE val is_light"
+sed "s/datatype structure_state/datatype 'a structure_state/" additions.txt > params.txt
+expect refused "a head written with its type parameters"         -- "$tools/check-signatures" "$base" "$feat" params.txt
+saw "names the head without them" "not listed: src/Pure/locale.ML LOCALE datatype structure_state"
 echo "src/Pure/other.ML OTHER val y" >> additions.txt
 expect refused "a listed head that was not added"                -- "$tools/check-signatures" "$base" "$feat" additions.txt
 saw "names the missing head" "listed but not added: src/Pure/other.ML OTHER val y"

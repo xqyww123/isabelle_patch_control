@@ -9,7 +9,8 @@ exactly the heads listed in <additions file>.
 A signature section is Isabelle style: `signature NAME =` ... `end` at column 0.  An entry starts
 at a specification keyword (val, type, eqtype, datatype, exception, structure, include, sharing);
 its continuation lines are joined, comments dropped, white space squeezed.  A head is
-`<path> <NAME> <keyword> <name>` (the type is not part of it).  The additions file lists one
+`<path> <NAME> <keyword> <name>` (neither the type nor its type parameters are part of it:
+`datatype 'a state = ...` has the head `... datatype state`).  The additions file lists one
 head per line; `#` lines and blank lines are ignored.
 """
 import argparse
@@ -24,6 +25,7 @@ KEYWORDS = {"val", "type", "eqtype", "datatype", "exception", "structure", "incl
 COMMENT = re.compile(r"\(\*([^*]|\*+[^*)])*\*+\)")
 SECTION = re.compile(r"^signature ([A-Z_0-9]+) *=")
 END = re.compile(r"^end;?\s*$")
+TYPE_PARAMS = re.compile(r"^(type|eqtype|datatype) ('\S+ |\(\s*'[^)]*\) ?)")  # `'a ` or `('a, 'b)`
 
 
 def entries(text: str) -> Counter:
@@ -62,6 +64,7 @@ def entries(text: str) -> Counter:
 
 def head(path: str, entry: str) -> str:
     name, _, body = entry.partition(": ")
+    body = TYPE_PARAMS.sub(r"\1 ", body)
     return f"{path} {name} " + re.sub(r" *(:|=| of ).*", "", body)
 
 
@@ -72,8 +75,14 @@ def show(repo: Repo, rev: str, path: str) -> str:
     return run(["git", "show", f"{rev}:{path}"], cwd=repo.common_dir).stdout
 
 
-def check(repo: Repo, base: str, rev: str, additions_file: Path, files: list[str] | None = None) -> list[str]:
-    """The problems found (empty = the gate passes)."""
+def listed_heads(additions_file: Path) -> list[str]:
+    """The heads an additions file lists, read once (it may be a pipe, such as /dev/fd/N)."""
+    return [line.strip() for line in additions_file.read_text().splitlines()
+            if line.strip() and not line.lstrip().startswith("#")]
+
+
+def check(repo: Repo, base: str, rev: str, listed: list[str], source: str, files: list[str] | None = None) -> list[str]:
+    """The problems found (empty = the gate passes); `listed` are the heads read from `source`."""
     if files is None:
         files = repo.git("diff-tree", "-r", "--name-only", "--no-renames", base, rev).split("\n")
     problems = []
@@ -87,12 +96,10 @@ def check(repo: Repo, base: str, rev: str, additions_file: Path, files: list[str
         if removed:
             problems.append(f"signature entries of {path} changed or disappeared:\n  " + "\n  ".join(sorted(removed.elements())))
         added += [head(path, e) for e in (after - before).elements()]
-    listed = [line.strip() for line in additions_file.read_text().splitlines()
-              if line.strip() and not line.lstrip().startswith("#")]
     if sorted(added) != sorted(listed):
         extra = sorted(Counter(added) - Counter(listed))
         missing = sorted(Counter(listed) - Counter(added))
-        problems.append(f"the signature additions differ from {additions_file}:"
+        problems.append(f"the signature additions differ from {source}:"
                         + "".join(f"\n  not listed: {h}" for h in extra)
                         + "".join(f"\n  listed but not added: {h}" for h in missing))
     return problems
@@ -106,13 +113,13 @@ def cli():
     p.add_argument("additions", type=Path)
     a = p.parse_args()
     repo = Repo(Path(a.C))
-    problems = check(repo, a.base, a.rev, a.additions)
+    listed = listed_heads(a.additions)
+    problems = check(repo, a.base, a.rev, listed, str(a.additions))
     for problem in problems:
         print(f"ERROR: {problem}")
     if problems:
         return 1
-    n = sum(1 for line in a.additions.read_text().splitlines() if line.strip() and not line.lstrip().startswith("#"))
-    print(f"signature sections: every entry of {a.base} unchanged in {a.rev}, {n} additions as listed")
+    print(f"signature sections: every entry of {a.base} unchanged in {a.rev}, {len(listed)} additions as listed")
 
 
 main(cli)
