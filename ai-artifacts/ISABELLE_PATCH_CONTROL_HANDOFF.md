@@ -1,4 +1,4 @@
-# 交接：补丁工具改造计划（2026-10-28 13:59 +08 更新；首版 2026-10-23 compact 前写）
+# 交接：补丁工具改造计划（2026-10-28 20:40 +08 更新；首版 2026-10-23 compact 前写）
 
 ## compact 之后怎么开工（2026-10-25 傍晚写；下面"现状"与"§5 第 1 步的进展"两节是按时间顺序的流水账，细节在那里）
 1. **现场**：工具仓库 `contrib/my_better_isabelle_prover` 的 `main` 在 **16078a3**（已推 GitHub `origin/main`；历史已用 filter-repo 改写、去掉了五份
@@ -110,6 +110,48 @@
    osx-64 腿只在 accept 那一步设 `CONDA_SUBDIR`。计划决定 10 的钉死写法已手改记录。workflow 与五条腿只能在 §5 第 7 步排练时真跑。
    **第 5 步本机能做的部分完成（13:59 +08）；等用户的**：12 个新文件逐个批准后提交（两份 CODE_REVIEW 报告照旧不提交）；两句用户可见文案（见上）；要不要先做一轮代码评审
    （作者建议做，新代码约 2500 行）；第 5 步末尾的一次性手续（`PUBLISH_REPOS`、四个密钥、`.gitattributes`）；README 安装命令与 defaults 渠道的 ToS 问题。
+   **2026-10-28 16:2x +08 用户"批准提交"**：12 个新文件与两句文案批准；工具仓库提交 **9ece624**（21 个文件，按显式路径；两份 CODE_REVIEW 报告未提交）
+   已推 origin；主仓库提交 **7f6432c8**（登记 `contrib/isabelle-base-features` 子模块 + bump 工具仓库到 9ece624），主仓库未推。用户同时要求一轮
+   两回合对抗评审（Workflow `wf_25eb638e-632`：五视角质疑 → 每条一个新 agent 辩护 → judge 裁定验收与"哪些须与用户讨论"；Opus、xhigh、全英文），
+   **评审期间不改代码**，结果用中文向用户报告并给修法、等用户同意再动。评审明细 JSON 永不进仓库，评审报告 `.md` 不提交。
+   **评审结果与修复（2026-10-28 傍晚，全部未提交）**：judge 判 not-accepted，24 条裁定；用户裁决记在计划 §0 第 39 条，逐条去向在计划 §10.0a
+   （"代码已改"/"待做"）。还没做的：钩子层测试的 tests-1、4、5、6、7；GitHub 上跑测试的那一套（新文件，要用户批准）；develop.md:155-158 的
+   Windows 说法；全部验证；复评审（范围是 judge 的 rereview_scope，见 `wf_25eb638e-632` 的 journal 末条）。**20:2x +08 起了两个 Workflow**：
+   `wf_c72ec0c2-cb2`（GitHub 上怎么测：三方案、各一个新 agent 质疑、judge 定方案）与 `wf_339ea5fc-808`（`core.longpaths` 放宽的细查：代码、
+   路径长度、外部行为三路，再一个反驳者、一个 judge）。用户已定持锁上界 30 秒（`tools/accept` 的 (l) 已改）；(l) 的 `--force-reinstall isabelle`
+   量什么，用户问"这和持锁上界有什么关系"，作者在解释，**未定**。
+   **两个 Workflow 都完成（22:3x +08）**，结果在 `/tmp/claude-1002/-home-qiyuan-Current-MLML/f1ebd39a-eda3-4c68-b769-d435321fa8d4/tasks/`
+   `wngplyy06.output`（longpaths：成立附条件，已记计划 §0 第 39 条）与 `wcjef4z1k.output`（GitHub 测试方案；展开的文本在
+   `scratchpad/wf-ghtests/verdict.txt`；已记决定 15 新的"GitHub 上的测试"一条与钩子层玩具描述、§6 (m)(n)、pytest 的 `_retry` 一条）。
+   judge 查出本轮引入的回归：`tools/common.py` 的 `patch_blocks` 先调 `block_header` 再查权限位改动，`test_make_patches.sh` 的
+   "names the mode change" WRONG；已修（拆出 `block_path`，`patch_blocks` 只用它），该测试 102 项全过。**等用户定**：(1) (l) 的
+   `--force-reinstall isabelle` 量什么；(2) `core.longpaths` 的 win-64 探针要不要；(3) macOS 腿换 runner（macos-14 10-29、10-30 UTC 14–24 点
+   brownout、11-02 下线，runner-images #13518 已核实）；(4) `accept` job 挪成可复用 `accept.yml` 加共用的 rattler-build 安装 action；
+   (5) 可选：CI 计划把重跑 post-link 写成单独文件；(6) 先本地全跑钩子层测试还是直接提交推送让 GitHub 跑。另告知用户：`isabelle-packaging-ci`
+   （build.yml Job D、G，release.yml 等）与 `Performant_Isabelle_ML` 也用 macos-14。
+   **23:00–00:30 +08 做了不依赖用户答复的部分（全部未提交）**：新文件 `tools/tests/toy-channel.sh`、`tools/tests/toy_isabelle.py`（都要用户批准）；
+   `test_conda_hooks.sh` 改调它，tests-1/4/5/7 与新 `s_hardlink`；`tools/accept` 的 `--strict`/`--subdir`/环境说明行与 (a)(b)(g)(l)(m)(n) 加固；
+   pytest 加重试四例（变异 6/6 杀死）；`test_trees.sh` 的 `cmp`；`run-all.sh` 保留诊断行；`components_sh`/`_bat` 挪进 `common.py`；develop.md
+   测试一节。验证：pytest 171 过；run-all 219 过；钩子层冒烟（s_order s_components s_conflict s_hardlink，`scratchpad/hooks5.log`）58 过 1 错——
+   那一错是**设计缺口**：重装 isabelle 的事务里 post-link 读不到 isabelle 记录（conda 最后才写），选不了硬链接文案，已记计划 §0 第 39 条交用户定，
+   测试里那条断言已删；**10-29 "net printing" 会话（feature `fast_abbrev_printing`，用户授权它建了 `Isabelle2025-2/fast_abbrev_printing` 分支与
+   两棵树）提议把 light 的 golden 框架抽成本仓库 `tools/golden/`**；作者回复：形状没问题，但 `run-tree` 记的是 `-d` 目录所在的**整个仓库**
+   （每个已跟踪文件的 mtime，`run-tree:82-96,124-132`），作者在本仓库持续改已跟踪文件，它的构建会丢 tested 记录；建议放进一个单独的小仓库
+   （要用户批准），已请它也报用户。它随即放弃本仓库，另提 (d) 放在 `isabelle-base-features` 根目录 `golden/`；作者核过：发布工具（make-patches、渲染器、check-packages、release-features.yml 的表）都只看给定的包目录，根目录 `golden/` 不打包、不检查、不拒绝；只有 base-features 的 README（"Each directory's README.md explains its fix"）与 RELEASE.md:29-30 两处文字描述布局，另提醒该仓库公开、用途是"基础修复"，放测试框架算改用途，由用户定。它随后转告：用户定了放 `isabelle-base-features/golden/`（自己的 ROOT，session `Golden_Harness = Pure`），写之前它先做一轮计划重评；base-features 的 README 它自己改。**留给本会话的一件（等用户下令再做）**：`RELEASE.md:29-30` 那句"holds two, expose_foreign/ and future_assign_interrupt/"在 `golden/`（以及将来的 `fast_abbrev_printing/`）出现后要改写。accept 对玩具渠道 `--strict` 70 过 0 错、无跳过（(c)(e)(f2) 首次在玩具上跑；`scratchpad/accept-run.log`，环境已删）；两个反对照（`scratchpad/negctl/`）都按预期报 WRONG。
+   **10-29 用户答复七件**（记在计划 §0 第 39 条末，原话照录）：2 加 longpaths 探针、3 macOS 用 macos-15 / macos-15-intel、4 可复用 accept.yml
+   与共用安装 action、5 不做、7 选 (b)——都已做（计划决定 4、9、11、15、§6 (a) 已手改；代码：`tools/accept` 的 `longpaths()`，
+   `conda_hook._edited_in_cache` 加无记录一支与 `texts.CACHE_DIR_UNKNOWN`，pytest 2 例（变异：去掉分支、pre-unlink 也推断，都杀；"新建路径也算"
+   是等价变异，原因是只有新建路径时没有第 2 步，过滤层已删），钩子层 `s_hardlink` 断言新文案；新文件 `.github/workflows/tests.yml`、
+   `.github/workflows/accept.yml`、`.github/actions/build-tools/action.yml`，发布 workflow 改调它们；本地 actionlint 被 auto mode 拦（外部二进制），
+   留给 GitHub 的 lint job）。1 (l) 用户授权"与文档、测试相关的，在不改变设计的前提下，你可以自决"，作者定：量占锁那段（先 unapply 再计时 apply）、保留为发布门槛、30 秒（计划决定 15、§6 (l)、§0 第 39 条已改）。**仍待用户**：6 新文件逐个批准与"提交"；7 的新文案与对提案的一处偏离（去掉"共用同一份
+   数据"条件）。
+   **10-29 用户"1. 批准 2. 按你建议来，如有需要 run Opus agent readers for proofread"**：五个新文件批准（提交仍等"提交"）。第 7 件文案经两轮
+   三人校读（`wf_18d6613d-869`、`wf_0d9345be-41e`）定稿：`texts.CacheCopy(directory | None, prefix)`，未知目录时让用户从
+   `conda list -p <prefix> --full-name isabelle` 读版本与 build；计划决定 9、§4 已改。校读查出的范围外问题（修复命令都假定激活的就是出问题的
+   环境；§4 与代码"every other environment …"不一致）记在计划 §0 第 39 条，交用户定。
+   **10-29 范围外问题按用户授权（"你可以自决"+"一定要尽可能简单，一个地方讲清楚了不要到处重复"）只改两处**：`texts.save_line(tree)`（原
+   `SAVE_LINE`，三种提示共用）点名本环境的 `isa/bin/isabelle`（Windows `isabelle.bat`）；第 2 步缓存版写 "every other environment with isabelle
+   …"。第三轮 reader（`wf_6b690b7c-209`）一致指出作者"其余命令在错的环境里不丢东西"的理由对重装那条不成立、只改第 1 步反而更糟；于是加 `texts.reinstall(tree)`（`-p <tree.parent>`，三种提示共用），`CacheCopy` 只剩 `directory`，缓存版第 2 步让其他环境也先做第 1 步，符号链接拒绝调成 conda config → 保存 → 重装。计划 §4 已改（残留块第 1、2 步改为引用）。最后核对 `wf_ae1893a3-3ce` 与真 conda `s_hardlink`（`scratchpad/hooks8`）：真 conda 14/14 过；最后核对查实不丢东西，另删 `save_line` 与 `common-readme.md` 里 "that belongs to this environment alone"（软链接树里为假），三条少见的记进计划 §0 第 39 条不改。pytest 173、run-all 219 过。提交仍等用户说"提交"。
    接下来（每件仍要用户下令）：light 的 `tools/component_files.txt`、带 `-d <light 仓库>` 的构建、
    `make-patches light_locale <v>`（门禁 0 已满足：light 分支与 `Isabelle2025-2/future_assign_interrupt` 的 merge-base 就是带 tag 的 6d8be01）；
    checklist 现在在 `RELEASE.md`，**在构建之前**过。之后三个新 feature、`contrib/qiyuan_dev_patches/`（GitHub 仓库已建、本地目录未建）。第 4 步 `check-roundtrip` 在官方 tarball 树上跑；第 5 步渲染器、工具的 `conda/recipe.yaml`、

@@ -8,12 +8,13 @@ plan_builds, the one rule for every package.  The channel's noarch/repodata.json
 the channel serves but has not indexed yet is probed by downloading it and reading its
 info/index.json.  Prints one JSON object:
 
-  {"packages": [{"name", "version", "tag" (features only), "action": "reuse" | "build",
-                 "file": <the .conda file name either way>}],
-   "isabelle_old_build": <the highest isabelle build other than <b> that an indexed record of a
-                          (feature, version) of the batch pins, or "">}
+  {"packages": [{"name", "version", "tag" and "feature" (features only), "action": "reuse" | "build",
+                 "file": <the .conda file name either way>, "build_number" (to build only)}],
+   "isabelle_old_build": <the highest isabelle build other than <b> that an indexed record of the
+                          chain top's package (any version) pins, or "">}
 
-isabelle_old_build is where §6 (h) starts from (empty: (h) is skipped).
+isabelle_old_build is where §6 (h) starts from (empty: (h) is skipped): an environment with
+isabelle at that build and the chain top, which only the top's own records can make solvable.
 """
 import argparse
 import json
@@ -21,16 +22,19 @@ import re
 import urllib.error
 import urllib.request
 
-from common import Refused, Wanted, conda_archive, isabelle_pin, main, package_name, plan_builds
+from common import (Refused, Wanted, build_string_prefix, conda_archive, isabelle_pin, main, package_name,
+                    pinned_build, plan_builds)
 
 TOOL = "isabelle-patch-control"
+# The channel's Cloudflare front refuses urllib's default User-Agent (error 1010, HTTP 403).
+USER_AGENT = "isabelle-patch-control-release-plan"
 TAG = re.compile(r"^(Isabelle\d{4}-\d+)/([a-z][a-z0-9_]*)/([1-9][0-9]*)$")
 
 
 def get(url: str) -> bytes | None:
     """The bytes at url; None when the channel does not serve it."""
     try:
-        with urllib.request.urlopen(url, timeout=120) as r:
+        with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": USER_AGENT}), timeout=120) as r:
             return r.read()
     except urllib.error.HTTPError as e:
         if e.code == 404:
@@ -42,22 +46,13 @@ def get(url: str) -> bytes | None:
         raise
 
 
-def pinned_build(record: dict) -> str | None:
-    """The isabelle build a record's depends pin, from `isabelle ==2025.2 <b>` (or `isabelle 2025.2 <b>`)."""
-    for dep in record.get("depends", []):
-        parts = dep.split()
-        if len(parts) == 3 and parts[0] == "isabelle":
-            return parts[2]
-    return None
-
-
 def plan(channel: str, isabelle_build: str, tool_version: str, tool_prefix: str, tags: list[str]) -> dict:
     features = []
     for tag in tags:
         m = TAG.match(tag)
         if not m:
             raise Refused(f"{tag!r} is not a release tag <R>/<feature>/<version>")
-        features.append((tag, m[2], m[3], m[1].replace("-", "_")))
+        features.append((tag, m[2], m[3], build_string_prefix(m[1])))
     if len({f[1] for f in features}) != len(features):
         raise Refused("the batch names a feature twice")
     raw = get(f"{channel}/noarch/repodata.json")
@@ -71,18 +66,20 @@ def plan(channel: str, isabelle_build: str, tool_version: str, tool_prefix: str,
 
     decided = plan_builds(repodata, wanted, fetch)
     packages = []
-    for w, tag in zip(wanted, [None, *[f[0] for f in features]]):
+    for w, feature in zip(wanted, [None, *features]):
         action, what = decided[w.name]
         entry = {"name": w.name, "version": w.version, "action": action,
                  "file": what if action == "reuse" else w.filename(what)}
-        if tag:
-            entry["tag"] = tag
+        if action == "build":
+            entry["build_number"] = what
+        if feature:
+            entry["tag"], entry["feature"] = feature[0], feature[1]
         packages.append(entry)
 
     records = {**repodata.get("packages", {}), **repodata.get("packages.conda", {})}
-    batch = {(w.name, w.version) for w in wanted[1:]}
-    others = {b for rec in records.values() if (rec.get("name"), rec.get("version")) in batch
-              if (b := pinned_build(rec)) is not None and b != isabelle_build}
+    top = wanted[-1] if features else None
+    others = {b for rec in records.values() if top and rec.get("name") == top.name
+              if (b := pinned_build(rec, top.build_string_prefix)) is not None and b != isabelle_build}
     old = max(others, key=lambda b: (int(b) if b.isdigit() else -1, b), default="")
     return {"packages": packages, "isabelle_old_build": old}
 

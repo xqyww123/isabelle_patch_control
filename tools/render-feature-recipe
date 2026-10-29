@@ -25,7 +25,8 @@ import shutil
 import sys
 from pathlib import Path
 
-from common import TOOLS_DIR, Refused, feature_pin, isabelle_pin, main, package_name, run
+from common import (TOOLS_DIR, Refused, build_string_prefix, components_bat, components_sh, feature_pin, isabelle_pin,
+                    main, package_name, run, shipped_files)
 from isabelle_patch_control.features import provenance_fields
 
 HOOKS = TOOLS_DIR.parent / "isabelle_patch_control" / "hooks"
@@ -44,12 +45,12 @@ def release_of(package: Path) -> tuple[str, dict[str, str]]:
     head_tags = set(git(package, "tag", "--points-at", "HEAD").split())
     found = []
     for p in sorted(package.glob("patches/*/provenance.txt")):
-        fields = provenance_fields(p)
+        fields = provenance_fields(p.read_text())
         if fields.get("release_tag") in head_tags:
             found.append((p.parent.name, fields))
     if len(found) != 1:
-        listed = " ".join(sorted(head_tags)) or "no tag"
-        raise Refused(f"HEAD of {package}'s repository carries {listed}; exactly one of them must be the "
+        carried = " ".join(sorted(head_tags)) or "no tag"
+        raise Refused(f"HEAD of {package}'s repository carries {carried}; exactly one of them must be the "
                       f"release_tag of a patches/<R>/provenance.txt there (check out the release tag)")
     return found[0]
 
@@ -76,24 +77,6 @@ def fill(text: str, feature: str, package: str, version: str) -> str:
     return text.replace("<feature>", feature).replace("<package>", package).replace("<version>", version)
 
 
-def components_sh(package: str, verb: str) -> str:
-    return (f'"$PREFIX/isa/bin/isabelle" components {verb} "$PREFIX/share/{package}" 2>/dev/null \\\n'
-            f'  || echo "warning: \'isabelle components {verb} {package}\' failed; the session may be unavailable"'
-            f' >> "$PREFIX/.messages.txt"\n')
-
-
-def components_bat(package: str, verb: str) -> list[str]:
-    # Isabelle_RPC/conda/recipe.yaml's lines without their `@echo off`: a Cygwin path for
-    # components, and the getenv warm-up without which the first call cannot run a Scala tool.
-    return [f'set "COMP=%PREFIX%\\share\\{package}"',
-            'set "DL=%COMP:~0,1%"',
-            'set "REST=%COMP:~2%"',
-            'set "REST=%REST:\\=/%"',
-            'set "CYG=/cygdrive/%DL%%REST%"',
-            'call "%PREFIX%\\isa\\bin\\isabelle.bat" getenv -b ISABELLE_HOME >nul 2>&1',
-            f'call "%PREFIX%\\isa\\bin\\isabelle.bat" components {verb} "%CYG%" >nul 2>&1']
-
-
 def check_bat_echo(lines: list[str], what: str):
     """No cmd metacharacter in an echo line, besides the quoted %PREFIX% and the closing >> (decision 9)."""
     for line in lines:
@@ -104,23 +87,13 @@ def check_bat_echo(lines: list[str], what: str):
 
 
 def hooks(feature: str, package: str, version: str, component: bool) -> dict[str, bytes]:
-    post_sh = "#!/bin/bash\n" + sh_text("post-link.sh")
-    pre_sh = "#!/bin/bash\n" + fill(sh_text("pre-unlink.sh"), feature, package, version)
-    if not pre_sh.endswith("exit 0\n"):
-        raise Refused("hooks/pre-unlink.sh must end with exit 0")
-    if component:
-        post_sh += components_sh(package, "-u")
-        pre_sh = pre_sh[:-len("exit 0\n")] + components_sh(package, "-x") + "exit 0\n"
-    post_sh += "exit 0\n"
-
-    post_bat = bat_lines("post-link.bat")
-    pre_bat = [fill(line, feature, package, version) for line in bat_lines("pre-unlink.bat")]
-    if post_bat[-1] != ":end" or pre_bat[-2:] != [":end", "exit /b 0"]:
-        raise Refused("hooks/post-link.bat must end with :end, hooks/pre-unlink.bat with :end and exit /b 0")
-    if component:
-        post_bat += components_bat(package, "-u")
-        pre_bat[-1:-1] = components_bat(package, "-x")
-    post_bat.append("exit /b 0")
+    """Every hook file is its template, then the component registration lines if any, then the exit line."""
+    post_sh = "#!/bin/bash\n" + sh_text("post-link.sh") + (components_sh(package, "-u") if component else "") + "exit 0\n"
+    pre_sh = ("#!/bin/bash\n" + fill(sh_text("pre-unlink.sh"), feature, package, version)
+              + (components_sh(package, "-x") if component else "") + "exit 0\n")
+    post_bat = [*bat_lines("post-link.bat"), *(components_bat(package, "-u") if component else []), "exit /b 0"]
+    pre_bat = [*(fill(line, feature, package, version) for line in bat_lines("pre-unlink.bat")),
+               *(components_bat(package, "-x") if component else []), "exit /b 0"]
     for lines, what in ((post_bat, "post-link.bat"), (pre_bat, "pre-unlink.bat")):
         check_bat_echo(lines, what)
     for text, what in ((post_sh, "post-link.sh"), (pre_sh, "pre-unlink.sh"), ("\n".join(pre_bat), "pre-unlink.bat")):
@@ -170,15 +143,14 @@ def render(package: Path, isabelle_build: str, n: int, out: Path) -> str:
     release_tag = fields["release_tag"]
     _, feature, version = release_tag.split("/")
     name = package_name(feature)
-    prefix = fields["build_string_prefix"]
+    prefix = build_string_prefix(r)
     for v in (feature, version, prefix):
         if not NAME.match(v):
             raise Refused(f"{v!r} in {release_tag} is not a plain name")
 
-    cf = package / "tools" / "component_files.txt"
-    components = ([line.strip() for line in cf.read_text().splitlines()
-                   if line.strip() and not line.lstrip().startswith("#")] if cf.is_file() else [])
-    shipped = [f"patches/{r}", "README.md", *(["tools/component_files.txt", *components] if cf.is_file() else [])]
+    payload = shipped_files(package)                   # the component list and its files, or nothing
+    components = payload[1:]
+    shipped = [f"patches/{r}", "README.md", *payload]
     dirty = git(package, "status", "--porcelain", "--untracked-files=all", "--", *shipped)
     if dirty:
         raise Refused(f"{package} differs from the checked-out release tag {release_tag}:\n{dirty.rstrip()}")

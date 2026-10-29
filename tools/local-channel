@@ -13,11 +13,13 @@ mkdir -p "$ch/noarch"
 find "$features" -name '*.conda' -exec cp {} "$ch/noarch/" \;
 if [ -n "$ci" ] && [ -d "$ci" ]; then
   [ "$b" != 0 ] || { echo "::error::isabelle_build 0 in a rehearsal would shadow the channel's 2025.2-0"; exit 1; }
-  for d in "$ci"/*/; do
-    sub=$(basename "$d")
-    compgen -G "$d*.conda" > /dev/null || continue
+  # one loop over the files, quoted throughout: a Windows RUNNER_TEMP (D:\a\_temp) holds backslashes
+  # that a second glob over the expanded path would read as escapes
+  for f in "$ci"/*/*.conda; do
+    [ -e "$f" ] || continue
+    sub=$(basename "$(dirname "$f")")
     mkdir -p "$ch/$sub"
-    cp "$d"*.conda "$ch/$sub/"
+    cp "$f" "$ch/$sub/"
   done
   found=$(find "$ch" -name 'isabelle-2025.2-*.conda' | sed 's|.*/isabelle-2025\.2-||; s|\.conda$||' | sort -u)
   [ "$found" = "$b" ] || { echo "::error::the CI run's isabelle builds are '$found', the batch pins $b"; exit 1; }

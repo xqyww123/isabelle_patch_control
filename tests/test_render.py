@@ -113,9 +113,9 @@ def test_hooks_are_the_fragments_verbatim(tmp_path):
     p = "isabelle-light-locale"
     fill = lambda b: b.replace(b"<feature>", b"light_locale").replace(b"<package>", p.encode()).replace(b"<version>", b"2")
     assert files[f"bin/.{p}-post-link.sh"][0] == b"#!/bin/bash\n" + (HOOKS / "post-link.sh").read_bytes() + b"exit 0\n"
-    assert files[f"bin/.{p}-pre-unlink.sh"][0] == b"#!/bin/bash\n" + fill((HOOKS / "pre-unlink.sh").read_bytes())
+    assert files[f"bin/.{p}-pre-unlink.sh"][0] == b"#!/bin/bash\n" + fill((HOOKS / "pre-unlink.sh").read_bytes()) + b"exit 0\n"
     assert files[f"Scripts/.{p}-post-link.bat"][0] == (HOOKS / "post-link.bat").read_bytes() + b"exit /b 0\r\n"
-    assert files[f"Scripts/.{p}-pre-unlink.bat"][0] == fill((HOOKS / "pre-unlink.bat").read_bytes())
+    assert files[f"Scripts/.{p}-pre-unlink.bat"][0] == fill((HOOKS / "pre-unlink.bat").read_bytes()) + b"exit /b 0\r\n"
     for rel, (data, _) in files.items():
         if rel.endswith(".bat"):
             assert b"\n" not in data.replace(b"\r\n", b"")

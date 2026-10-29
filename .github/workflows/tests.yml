@@ -1,0 +1,143 @@
+# The tests of this repository on GitHub's runners (patch tool plan decision 15, "GitHub 上的测试").
+# Every job runs a harness that exists anyway: lint, actionlint over the workflows; unit, pytest
+# (Linux at the tool's declared floors, macOS at the latest) and tools/tests/run-all.sh;
+# toy-channel, tools/tests/toy-channel.sh with the release's own rattler-build; hooks, the
+# hook-layer test with real conda; accept, tools/accept on the toy channel on the five legs, through
+# accept.yml, the release's own accept job.
+name: tests
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["ai-artifacts/**"]
+  workflow_dispatch:
+  schedule:
+    - cron: "23 4 * * 1"          # weekly: a retired runner or a new conda shows within a week
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: "actionlint"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: "actionlint over every workflow"
+        run: |
+          set -euo pipefail
+          d=$RUNNER_TEMP/actionlint; mkdir -p "$d"
+          curl -fsSL -o "$d/actionlint.tar.gz" https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
+          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  $d/actionlint.tar.gz" | sha256sum -c -
+          tar -xzf "$d/actionlint.tar.gz" -C "$d" actionlint
+          "$d/actionlint" -shellcheck=
+
+  unit:
+    name: "pytest and the toy runs of tools/ on ${{ matrix.os }}"
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: ubuntu-latest, specs: "python=3.12 git=2.43"}      # the floors conda/recipe.yaml declares
+          - {os: macos-15, specs: "python git"}
+    defaults:
+      run:
+        shell: bash -l {0}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-version: latest
+          activate-environment: unit
+      - name: "The test environment: conda-forge's python and git, which the tool package depends on"
+        env:
+          SPECS: ${{ matrix.specs }}
+        run: |
+          set -euo pipefail
+          read -r -a specs <<< "$SPECS"
+          conda install -q -y -c conda-forge "${specs[@]}" pytest zstandard
+          python --version; git --version
+      - name: "pytest"
+        run: python -m pytest -q
+      - name: "tools/tests/run-all.sh"
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p "$RUNNER_TEMP/t"
+          TMPDIR="$RUNNER_TEMP/t" bash tools/tests/run-all.sh
+      - name: "Keep the toy runs"
+        if: failure() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-all
+          path: ${{ runner.temp }}/t
+          retention-days: 14
+
+  toy-channel:
+    name: "The toy channel (tools/tests/toy-channel.sh)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      top: ${{ steps.summary.outputs.top }}
+      component: ${{ steps.summary.outputs.component }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/build-tools      # rattler-build as $RATTLER_BUILD, and zstandard
+      - name: "Build the toy channels; check-packages on the build-2 batch"
+        run: bash tools/tests/toy-channel.sh "$RUNNER_TEMP/toy"
+      - name: "The chain top and the component, as the release's build job reads them"
+        id: summary
+        run: |
+          set -euo pipefail
+          cat "$RUNNER_TEMP/toy/summary.json"
+          echo "top=$(jq -r .top "$RUNNER_TEMP/toy/summary.json")" >> "$GITHUB_OUTPUT"
+          echo "component=$(jq -r '.components[0] // ""' "$RUNNER_TEMP/toy/summary.json")" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: toy-channel
+          path: ${{ runner.temp }}/toy/channel/noarch/*.conda      # only the main channel: local-channel copies every .conda it finds
+          if-no-files-found: error
+          retention-days: 14
+
+  hooks:
+    name: "The hook layer with real conda (tools/tests/test_conda_hooks.sh)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    defaults:
+      run:
+        shell: bash -l {0}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/build-tools
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-version: latest
+          auto-activate-base: true
+          activate-environment: ""
+      - name: "conda's versions"
+        run: conda list -n base '^(conda|conda-libmamba-solver|libmambapy)$'
+      - name: "test_conda_hooks.sh (it builds its toy channels with toy-channel.sh)"
+        run: bash tools/tests/test_conda_hooks.sh "$RUNNER_TEMP/hooks"
+      - name: "Keep conda's output of every command"
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hooks-output
+          path: ${{ runner.temp }}/hooks/out
+          if-no-files-found: ignore
+          retention-days: 14
+
+  accept:
+    needs: toy-channel
+    uses: ./.github/workflows/accept.yml
+    with:
+      artifact: toy-channel
+      isabelle_build: "2"
+      old_build: "1"
+      top: ${{ needs.toy-channel.outputs.top }}
+      component: ${{ needs.toy-channel.outputs.component }}
+      other_component: toy-component
+      strict: true

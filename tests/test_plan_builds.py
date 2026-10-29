@@ -104,3 +104,11 @@ def test_exactness_of_the_reuse_rule():
     data = repodata(record("isabelle-expose-foreign", "1", 0, "12"), record(TOOL, "1.0.0", 0, tool_prefix="pyh0000000"))
     plan = plan_builds(data, [tool("1.0.0"), feature("isabelle-expose-foreign", "1", "1")], nothing_served)
     assert plan == {TOOL: ("reuse", f"{TOOL}-1.0.0-pyh0000000_0.conda"), "isabelle-expose-foreign": ("build", 1)}
+
+
+def test_pinned_build_reads_what_isabelle_pin_writes():
+    from common import pinned_build
+    for build in ("1", "h1a2b3c_4"):
+        assert pinned_build({"depends": ["python >=3.12", isabelle_pin(PREFIX, build)]}, PREFIX) == build
+    assert pinned_build({"depends": ["isabelle ==2026.1 3"]}, PREFIX) is None
+    assert pinned_build({"depends": []}, PREFIX) is None

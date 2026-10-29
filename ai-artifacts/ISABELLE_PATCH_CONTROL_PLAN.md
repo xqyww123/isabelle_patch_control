@@ -187,6 +187,71 @@
     迁移方案 §7 第 11 条随之改）；CONFLICT 文案改说"直到修好之前工具不打 F 及依赖它的包"（C13）；`--feature` 也接受包名（C19）；来历文件只读
     `release_tag`、`base_tag`（C35）；checklist 删"空文件"一条（C37）并挪到 `make-patches` 之前、每条给手工命令；决定 15 的锁用例改措辞（C38）；
     "`isabelle` 包每次被替换都删用户目录"在 README 说一次；CONFLICT 文案末行的 0.x 指针暂留。
+39. （2026-10-28，代码评审三轮——§5 第 5 步实现的对抗评审——之后；judge 判 not-accepted，三件交用户定，另有六条改规约的提议，§10.0a）用户裁定：
+    - **决定 15 的 Windows 腿检查补进 `tools/accept`，测试在 GitHub 的 runner 上跑**（"请你启动 Github Worker 来跑测试。同意补测试"）：
+      §6 (a) 加 git 位置，加 (m)、(n)，§6 末行随之改。GitHub 上具体怎么测，用户建议先让 Opus agent 组讨论（"你可以考虑写一些测试需要覆盖的
+      内容等，也可以直接测试。建议 run Opus agent team 讨论一下具体如何测试比较好"），结论记在决定 15。
+    - **`isabelle_old_build` 只取链顶包的线上记录**（"赞同"）：决定 11 `build` job、§6 (h)。
+    - **与文档、测试相关、不改变设计的事作者自决**（"与文档、测试相关的，在不改变设计的前提下，你可以自决"）：据此，硬链接原地编辑那例的真 conda
+      部分从 pytest 清单挪进钩子层测试（决定 15）；accept 显式用 flexible channel priority 记进决定 11。
+    - **持锁上界从 10 秒放宽到 30 秒**（"建议把超时宽松为 持锁不超过 30 秒"）：决定 5、决定 15、§6 (l)；评审四 C24 的合并读目标随之只在超过
+      30 秒时才做。`--force-reinstall isabelle` 那一项量什么（judge 提议量它的 post-link 在锁里做的那次整链 apply，不量 conda 命令的墙钟），
+      用户问它与"持锁上界"的关系；2026-10-29 作者定了（本条末第 1 件）。
+    - **`core.longpaths` 不做超过 260 字符的测试，改为"工具在 Windows 上每次调用 git 都带 `-c core.longpaths=true`"**——用户同意，
+      条件是 Opus agent 详细验证（"同意，但必须邀请 Opus agents 详细验证这部分"）。**验证结果（2026-10-28，五个 Opus agent：代码、路径长度、
+      外部行为三路核对，一个反驳者未能推翻，judge 判"成立，附条件"；全部出自读源码，没人在 Windows 上跑过）**：那句话属实（`engine.py:58` 是
+      工具包里唯一起进程的地方；conda-forge 的 win-64 `git` 是 Git for Windows，`core.longpaths` 是它处理 260 字符以上路径的唯一开关，注册表的
+      `LongPathsEnabled` 对 git 不起作用）。记录的理由要换：环境里 git 或工具碰到的最长路径是 conda 自己链接进来的补丁文件
+      （`<前缀>\share\isabelle_patch_control\features.d\<feature>\<扁平名>`，目标路径加 feature 名长度加 48），比工具的暂存副本（目标路径加 13）
+      长，所以默认机器上 conda 先失败；开关只在 `LongPathsEnabled=1` 且前缀至少 159 字符时才起作用，这时工具带着它。评审的"要人为造很深的 conda
+      前缀"不对（约 200 字符深的普通目录里直接调 `Git.run` 就能造出），"每个 win-64 场景都在用这个开关"只说明 git 接受它、不说明它生效（git 对
+      不认识的键静默忽略）。成立的条件：conda-forge 的 git 仍是 Git for Windows；补丁文件仍以目标路径命名、放在 `features.d/<feature>/` 下；
+      工具仍只经 `Git.run` 起 git。judge 另提一个不到一秒的 win-64 探针（带 `-c core.longpaths=false` 的对照必须失败），与用户同意的
+      "不做长路径测试"相反，交用户定；用户 2026-10-29 赞同加（本条末），已做于决定 4、决定 15、§6 (a)。
+    - **（2026-10-29 本地冒烟查出；用户选 (b)，本条末）重装 `isabelle` 的事务里，决定 9 选不了硬链接文案**：conda 在全部 post-link 之后才写包记录，
+      被卸包的记录先删（`link.py:961-978`），所以 `--force-reinstall isabelle` 里 post-link 读不到 `isabelle` 的记录（换构建时文件来自另一个
+      解开的目录，改动随之消失，不受影响）。
+      用户若在经硬链接原地改了文件之后第一次跑的正好是 `--force-reinstall isabelle`，或没照第一次的硬链接文案做、直接重装，就只看到普通文案，
+      而它的第 2 步（普通重装）修不好这处改动——照做之后又得到同一句话。决定 15 钩子层清单里"普通重装后仍选硬链接文案"那半句是作者
+      写计划时自己加的，rev 6 没有，已改回。作者给了三种修法：(a) 不修；(b) 补一条推理——记录不在时这条命令刚从包缓存链接了 isabelle 的全部
+      文件，被改过的跟踪文件内容不对就说明包缓存那份已被改，照样给包缓存文案、只是说不出确切目录；(c) 工具自己到 conda 可能放包缓存的地方找那个
+      目录（多依赖一处 conda 内部布局）。
+    - **2026-10-29 用户对七件待定事的答复**（原话："1. 我丢失了上下文了，请补充 2. 赞同 3. 按你建议来 4. 赞同 5. 按你建议来 6. 请列出新文件
+      7. 按你的建议来"）：
+      1. §6 (l) 的 `--force-reinstall isabelle` 量什么：作者从头重讲之后，用户又问"如果超时了会怎样？为什么需要这个计时检查？这是测试代码
+         还是产品代码？"，作者答：是测试代码（`tools/accept`），超了挡住这一批的发布；它核的是决定 5 的前提"每次持锁远短于 60 秒的等待
+         上限"，这个数在 Windows 上没量过，而 Windows 上每次 git 调用起两个进程、一次 `status` 调 git 一百二十多次。用户答："与文档、测试相关的，
+         在不改变设计的前提下，你可以自决"。作者据此定：量 post-link 在锁里做的那段（先 `unapply` 再计时整链 `apply`），保留为发布门槛，
+         上界 30 秒（30 秒上界本身是用户定的）。已做于决定 15、§6 (l)；`tools/accept` 本来就这样量；
+      2. 加 `core.longpaths` 的 win-64 探针：已做于决定 4、决定 15、§6 (a)；
+      3. macOS 两条腿换 runner：osx-arm64 用 `macos-15`，osx-64 用原生 Intel 的 `macos-15-intel`、不再经 Rosetta（macos-14 在 10-29、10-30
+         UTC 14–24 点 brownout，11-02 下线，runner-images #13518 作者已核原文；Rosetta 下 Isabelle 的 `isabelle-platform:24-30` 看 `uname -a`
+         里的 arm64 仍选 arm64 程序）：已做于决定 11；
+      4. 发布的 `accept` job 挪成两个 workflow 共用的可复用 workflow `.github/workflows/accept.yml`，rattler-build 的安装挪成共用的 composite
+         action `.github/actions/build-tools`：已做于决定 11、决定 15；
+      5. CI 计划把 `isabelle` 包的重跑 post-link 写成单独文件、玩具渠道原样带上：现在不做（作者建议）；
+      6. 提交前作者列出每个新文件，用户逐个批准（第 38 条之后的规矩照旧）；
+      7. 选 (b)：已做于决定 9；**新的一句文案待用户批准**。作者实现时去掉了提案里"而且还和别处共用同一份数据"那个条件——刚链接进来的文件
+         不论是硬链接还是复制（包缓存在另一个盘上时），内容都等于包缓存那份，复制的情形加上那个条件反而又落回普通文案。此为对提案的**偏离**，
+         随文案一起请用户批准。
+      用户随后（2026-10-29）："1. 批准 2. 按你建议来，如有需要 run Opus agent readers for proofread"——五个新文件（`tools/tests/toy-channel.sh`、
+      `tools/tests/toy_isabelle.py`、`.github/workflows/tests.yml`、`.github/workflows/accept.yml`、`.github/actions/build-tools/action.yml`）
+      批准；第 7 件的文案与偏离批准，文案先经三个 Opus reader 校读（目标读者、事实核对、编辑）。提交仍等用户说"提交"。
+      校读两轮（2026-10-29）：第一轮三人都查出只给 `isabelle-<version>-<build>` 的形式会删错目录（包缓存里常有同版本的几个构建），改为从
+      `conda list -p <本环境> --full-name isabelle` 读版本与 build；第二轮确认修好，另几处措辞照改（§4）。**校读顺带查出、超出这次范围、交用户定**：
+      修复步骤里的命令都假定出问题的环境就是当前激活的环境——第 1 步的 `isabelle getenv -b ISABELLE_HOME_USER` 跑的是 PATH 上的 isabelle，
+      另一个环境激活着时打印的是别的环境的用户目录，用户会从错的目录里抢救自己的东西，而第 2 步随即删掉本环境的用户目录（reader 判 major）；
+      第 2 步的 `conda install … --force-reinstall isabelle` 不带 `-p`，会装进激活的环境；"every other environment built from the same package
+      cache" 字面上包括没装 isabelle 的环境（reader 建议 "every other environment with isabelle …"，正好也能合上 §4 与代码那处旧的不一致）。
+      用户答："与文档、测试相关的，在不改变设计的前提下，你可以自决。建议 run Opus agent readers to proofread"，又补一句："一定要尽可能简单，
+      一个地方讲清楚了不要到处重复！要在正确的地方讲技术细节"。作者据此先只改第 1 步那一句（`texts.save_line`），第三轮三个 reader 一致指出
+      作者"其余命令在错的环境里不丢东西"的理由对重装那条不成立、只改第 1 步反而更糟（存的是本环境、删的是激活的那个），于是重装那条
+      （`texts.reinstall`）也带 `-p <本环境>`，缓存版第 2 步让其他环境也先做第 1 步，符号链接拒绝的步骤调序。结论与理由只写在 §4。
+      最后一轮（两个 reader）核实：每种能构造出的情形里改过的步骤都作用在出问题的环境上、照做不丢东西；照它们的意见删掉第 1 步与共用 README
+      文本里 "that belongs to this environment alone"（软链接装的树里，用户目录按包缓存命名、几个环境共用，这半句为假）。**记下、这次不改**
+      （都少见、都不丢数据）：从 Isabelle 自己开的终端（VSCode 集成终端等）里跑，继承的 `ISABELLE_SETTINGS_PRESENT` 让 `getenv` 给出别的环境的
+      用户目录，isabelle 包的 pre-unlink 也删那个——该在 `isabelle-packaging-ci` 的 pre-unlink 里去掉这个变量（CI 计划的事）；Windows 上
+      `getenv` 给的是 `/cygdrive/c/…` 形式；两个环境不经包缓存共用同一 inode（缓存被重新解开过）时普通版第 2 步不提另一个环境。
 
 作者 2026-10-24 对用户的更正（第二轮评审 C16、C22 与第三轮 C4 查出）：
 - 作者 2026-10-23 04:46 对用户说"问题 10 后半（内置 feature 出新版）消失了"是错的；该问题以问题 3 重新提出，由第 22 条解决。
@@ -428,7 +493,8 @@ README 已有 "Working in the Isabelle source repository" 一节。都未提交�
   `GIT_CONFIG_GLOBAL=<os.devnull>`、`GIT_ATTR_NOSYSTEM=1`、`LC_ALL=C`、`GIT_CEILING_DIRECTORIES=<workdir 的父目录（已 realpath）>`。命令行
   固定前缀 `git -c core.autocrlf=false -c core.attributesFile=<os.devnull>`。于是任何现在或将来的 `GIT_*` 变量、XDG 路径、系统/全局配置、
   attributes 文件都进不来，工作目录之上的仓库也找不到（§2.4）。POSIX 上子进程 umask 022。`HOME` 不需要（实测无 `HOME` 也能正确往返）。
-  Windows 另试 `-c core.longpaths=true`，在 Windows 腿上核。
+  Windows 上固定前缀另加 `-c core.longpaths=true`（`engine.py:56-57`），让 Git for Windows 接受 260 字符及以上的路径——在 Git for Windows
+  里这是唯一的开关，注册表的 `LongPathsEnabled` 对 git 不起作用；§6 (a) 在 win-64 上用一个探针核它真的生效（决定 15，第 39 条）。
 - 不传 `--directory`、不传 `--unsafe-paths`。没有 `--check`：层级计算（决定 6）是在副本上真的打，不需要预检。
 - 退出码的解读按阶段：读目标那一步非零 = patch 文件解析不了（exit 3，决定 3）；重放时 1 = 这个补丁对这份副本不匹配（喂给层级计算）；重放时
   其他任何值（含负的信号码）= `git` 没能在副本上完成写入（磁盘满、只读、超限）——**不装任何东西**，原样打印 `git` 的输出、副本路径、正在重放的
@@ -461,7 +527,8 @@ README 已有 "Working in the Isabelle source repository" 一节。都未提交�
   在 Windows 腿上核。不锁目录（NFS 上排他锁坏、Windows 锁不了目录句柄）。等待上限 60 秒，超时 exit 1 报忙；`conda-hook post-link` 把忙和重试
   命令写进 `.messages.txt`、exit 0，`conda-hook pre-unlink` 的处理见决定 9。这个文件的 inode 经包缓存与同机其他环境共享，所以锁也跨环境串行
   ——接受（Linux 上一次运行持锁 0.17–0.43 秒，§2.4；Windows 的数字由决定 15 实测后写进 §8，§6 (l) 要求 win-64 上整链 `status` 与
-  `--force-reinstall isabelle` 各持锁不超过 10 秒，远低于 60 秒的等待上限），忙的报文点名被锁的文件并说明可能是别的环境在用。
+  `--force-reinstall isabelle` 各持锁不超过 30 秒，是 60 秒等待上限的一半——第 39 条从 10 秒放宽），忙的报文点名被锁的文件并说明可能是别的
+  环境在用。
 - `status`、`--dry-run`、`apply`、`unapply`、`apply-to`、`unapply-from` 共用这一条路径：先重放，`status`/`--dry-run` 到此为止，其余接着装。
   所以 `status` 预测的字节就是会装进去的字节，权限位对每个调用者相同。
 
@@ -640,7 +707,13 @@ README 已有 "Working in the Isabelle source repository" 一节。都未提交�
     （`check_bytes` 读的是包归档里的 `info/paths.json`，不是 `conda-meta`；评审五 C7）。这时报文改成：保存改动；删掉该记录
     `extracted_package_dir` 指的目录（报文打印这个真实路径，conda 会从 `.conda` 归档重新解开）；在本环境和每个报同样 CONFLICT 的环境里各
     `--force-reinstall isabelle`（评审四 C8 实测可恢复）；并提醒：同一包缓存建出的其他环境可能共享这份被改的文件而自己什么都不报，重装也要
-    在那里做。
+    在那里做。**post-link 时 `conda-meta` 里没有 `isabelle` 的记录**，说明这条命令正在链接 `isabelle`（重装、首次装、换构建）：conda 先删
+    被卸包的记录、全部 post-link 之后才写新记录（`link.py:961-978`）。这时 `isabelle` 的每个文件都是这条命令刚从包缓存链接或复制进来的，
+    于是一个被改过的跟踪文件（不是 feature 新建的路径）内容不对，就说明包缓存里那份已被改——照样给包缓存措辞，只是说不出确切目录，改为让用户
+    从 `conda list -p <本环境> --full-name isabelle` 读版本与 build、拼出 `isabelle-<version>-<build>`，到 `conda info` 列的包缓存里找（用户
+    2026-10-29 选的 (b)，第 39 条；没有这一支时普通重装之后只给普通措辞，而普通重装修不好，用户照做又得到同一句话）。用户读到这段话时这条
+    conda 命令已经结束、记录已写，所以 `conda list` 给的正是刚链接的那个构建；只给形式不给版本会删错目录——包缓存里常有同版本的几个构建
+    （两轮 Opus reader 校读查出）。这条推断只在 post-link 里做：pre-unlink 时记录都还在。文字在 §4。
     新建文件内容不同 → 挪开后 `isabelle-patch-control apply`。链接不上 → 装点名的包的匹配版本。锁超时或工具起不来留下的残留 → 让工具能跑
     （`conda install -c … --force-reinstall isabelle-patch-control`），`conda install <残留块点名的包>`，再 `conda remove` 它（评审三 C23 实测能把
     残留连新建文件一起反打干净）。
@@ -686,7 +759,9 @@ README 已有 "Working in the Isabelle source repository" 一节。都未提交�
   列出（light：`ROOT`、`Light_Locale.thy`、`README.md`、`LICENSE`，不含 `patches/`、`tests/`、`tools/`、`private_build_logs/`）。
   `share/doc/<包名>/README.md` 以工具仓库拥有的**一段统一文本**开头（逐字复制，决定 14 的 README 也嵌同一段），后接该 feature 自己的 README。
 - **一个模板、一个渲染器**，放工具仓库 `tools/render-feature-recipe`：输入包目录、`--isabelle-build <isabelle 的 build string>`、
-  `--build-number <n>`、输出目录；从 `patches/<R>/provenance.txt` 算出版本、基包名、钉死、build string，复制钩子片段与统一 README 文本，有
+  `--build-number <n>`、输出目录；从 `patches/<R>/provenance.txt` 的 `release_tag`、`base_tag` 算出版本、基包名、钉死，build string 的前缀
+  由 `<R>` 经 `tools/common.py` 的 `build_string_prefix` 算出（`make-patches` 写来历文件、`release-plan` 找线上记录用的是同一个函数，
+  代码评审三轮 elegance-3），复制钩子片段与统一 README 文本，有
   `tools/component_files.txt` 就加组件载荷与登记行，写出 `recipe.yaml`——**没有任何钉死是手抄的**；`provenance.txt` 的 `release_tag` 与检出的
   tag 不同时拒绝。**生成的 recipe 只写进构建的临时目录，不提交**到任何仓库。
 - Windows 路径长度（迁移方案 §9 的问题）：pkgs 缓存里 feature 文件的路径是
@@ -713,17 +788,26 @@ README 已有 "Working in the Isabelle source repository" 一节。都未提交�
      生成 recipe；构建进**一个**本地渠道；解开每个 `.conda` 检查钩子齐全、`.bat` 是 CRLF、`.sh` 是 LF、`share/<包名>` 字面路径对
      （`RELEASE_CHECKLIST.md:630-642`，`Isabelle_RPC/release-conda.yml:115-171`）；上传**一个** artifact `feature-packages`，**只含 `noarch/*.conda`**，
      并断言每个文件都在 `noarch/` 下——这是唯一交给 `publish-conda.yml` 的 artifact，第 27 条"一次发布整批、全是 noarch"由此成立；artifact
-     保留 30 天；输出 `isabelle_old_build`：线上某个要发的 (F, v) 的记录钉着的、不等于 `isabelle_build` 的最高 `isabelle` build string，没有就为空
-     （§6 (h) 从它建起始环境，为空就跳过 (h)；评审五 C9，取代 rev 5 的布尔 `isabelle_rebuild`）。不下载 `isabelle` 包、不核对它的
+     保留 30 天；输出 `isabelle_old_build`：**链顶包**线上记录（任何版本）钉着的、不等于 `isabelle_build` 的最高 `isabelle` build string，没有
+     就为空（§6 (h) 从它建起始环境，为空就跳过 (h)；评审五 C9，取代 rev 5 的布尔 `isabelle_rebuild`）。只看链顶，是因为 (h) 的起始环境装的就是
+     链顶：rev 6 取"任何要发的 (F, v)"，链顶第一次发布在某次重建之后时，下层记录给出的旧构建上根本没有链顶，(h) 的起始环境解不出来（代码评审
+     三轮 plan-4 在玩具渠道上复现；第 39 条）。钉死只按 `isabelle_pin` 的写法读（`tools/common.py` 的 `pinned_build` 是它的逆）。不下载 `isabelle` 包、不核对它的
      post-link（第 33 条后它里面没有工具的东西）。理由：验收过的字节就是发布的字节，和 `build.yml` Job F/G/H 一样（§2.3）。rev 3 把构建放进五条腿
      是错的：五份不同的字节，Windows 腿的 checkout 还会把 `.patch` 变成 CRLF。
   2. **`roundtrip`**（linux-64，`needs: build`）：用 `accept` 的渠道列表建一个环境，装 `isabelle 2025.2 <b>` 与 `isabelle-patch-control`；
      `cp -a` 它的 `isa/` 作原版树；再往同一环境装链顶 feature 包（精确钉死把整条链拉进来）；跑决定 17 的 `check-roundtrip`，
      `--features-dir $ENV/share/isabelle_patch_control/features.d`、`--tool $ENV/bin/isabelle-patch-control`——测的就是发出去的字节和发出去的工具；
-     `git diff-tree` 的两个 tag 从树的 `etc/ISABELLE_ID` 与链顶来历文件推出，`isabelle-patched` 用同一个只读 token 做深度 1 的两 tag fetch。
+     `git diff-tree` 的两个 tag 从树的 `etc/ISABELLE_ID` 与链顶来历文件推出，`isabelle-patched` 用同一个只读 token 做深度 1 的两 tag fetch
+     （由 `check-roundtrip --fetch <remote>` 自己做：两个 tag 它本来就要推出，workflow 不再另推一遍；代码评审三轮 elegance-6）。
   3. **`accept`**（matrix 五条腿，各自下载同一份 `feature-packages`，run 模式下再加那份 `conda-packages`，并进 `file://` 本地渠道，跑 §6：
-     `ubuntu-latest` linux-64、`ubuntu-24.04-arm` linux-aarch64、`macos-14` osx-arm64 原生加 osx-64 经 Rosetta、`windows-latest` win-64）。所有环境用
-     `--override-channels -c file://<本地渠道> -c https://conda.qiyuan.me -c conda-forge`（线上渠道没有 python 和 git）。批次里有带组件载荷的
+     `ubuntu-latest` linux-64、`ubuntu-24.04-arm` linux-aarch64、`macos-15` osx-arm64、`macos-15-intel` osx-64（原生 Intel；rev 6 的
+     `macos-14` 已退役，osx-64 经 Rosetta 时 Isabelle 仍选 arm64 程序，第 39 条）、`windows-latest` win-64）。这个 job 的定义在可复用 workflow
+     `.github/workflows/accept.yml` 里，发布 workflow 与测试 workflow（决定 15）都调它，于是玩具渠道上跑通的就是发布门禁本身那份定义；
+     rattler-build 的安装是共用的 composite action `.github/actions/build-tools`，版本只写在那一处（第 39 条）。每条腿把 `CONDA_PKGS_DIRS`
+     放在 `RUNNER_TEMP` 下、与环境同一个盘，conda 才像用户的单盘机器那样硬链接（§6 (a) 核它）。所有环境用
+     `--override-channels -c file://<本地渠道> -c https://conda.qiyuan.me -c conda-forge`（线上渠道没有 python 和 git），channel priority
+     **显式设为 flexible**（setup-miniconda 的 `channel-priority: flexible`，不依赖 Miniforge 的默认）：rehearsal 里本地渠道有 `isabelle` 包，
+     (e)、(i) 的 `isabelle=2025.2=0` 要越过它拿到线上的 build 0，strict 下是 LibMambaUnsatisfiableError（代码评审三轮实测；第 39 条）。批次里有带组件载荷的
      feature 时，**linux-64 总是**跑 §6 (a) 的 session 构建（超时照 `build.yml:498`），`session_build_legs` 只加别的腿（它们的超时照
      `build.yml:583,677`）。
   4. **`publish`**（`needs: [build, roundtrip, accept]`，仅 `publish=true`）：对 `feature-packages` **调一次**
@@ -860,6 +944,8 @@ Performant_Isabelle_ML `release-conda.yml:423-425,527-529` 与 auto_sledgehammer
     **不碰暂存目录**（哨兵文件用例；代码评审一轮 C38 改写 rev 6 的"持锁者装入的文件完好"一句：那半句从代码形状推出——只有持排他锁的运行在暂存目录里
     重放，不持排他锁的运行没有任何写树的路径，持锁者的内容在内存里、副本写完立即 `os.replace`——不另写并发用例）；`apply` 后 `unapply`，树的
     文件集合等于包的文件集合；EROFS、ENOSPC 之类的 `OSError` 一律变成 exit 1 加 `status` 重印，不是 traceback（代码评审一轮 C17）；
+  - Windows 上对"被占用"的重试（决定 5）：monkeypatch `engine.WINDOWS` 与 `time.sleep`，`PermissionError` 六次之后成功、七次之后抛出、别的
+    `OSError` 立即抛出、不重试（§6 (n) 的被占用一例只测失败那一支，第 39 条）；
   - 决定 10 的 `plan_builds`：HOL 侧单版本重发、新 `isabelle` 构建、重复 dispatch、已上传未索引的文件四种输入；最后一种覆盖三个形状——被搁置的
     工具包（同版本，复用）、钉着本批 `isabelle` 构建的 feature 文件（复用）、钉着别的构建的 feature 文件（跳过，n + 1）（评审五 C2）；
   - 目录接口；`--isabelle-home`/`--features-dir` 的推导与拒绝（别的环境的工具加 `--isabelle-home X/isa` 读 X 的 features.d；conda 环境里传
@@ -869,13 +955,18 @@ Performant_Isabelle_ML `release-conda.yml:423-425,527-529` 与 auto_sledgehammer
     打着的 feature 有哪些。断言：打完后每个被碰文件的 git blob id（Python 算）以碰它的最高补丁的 `index` 行后像开头，打之前 blob 与最低补丁前像
     不同的文件（打包也改过的，今天是 `etc/options`）除外；卸完后每个被碰文件等于 `paths.json` 里记的 sha256、新建文件不存在；win-64 上目标清单
     同样来自归档的 patch 文件；
-  - 经硬链接原地编辑（两个环境共享 inode）：同大小原地改写后普通 `--force-reinstall isabelle` 留下改动、rc 0；`conda clean -p` 不删解开的目录；
-    删掉缓存里解开的目录再在两个环境各重装都恢复；缓存已重新解开的形状下选普通文案且有效（决定 9）；残留块那例的编辑写成新 inode。
+  - 经硬链接原地编辑的文案选择（决定 9 对 `conda-meta` 的唯一读取）：对测试自己写的 `isabelle` 记录（`extracted_package_dir`、`paths_data`），
+    同一 inode 上的原地改写选硬链接文案、经新 inode 的改写选普通文案；残留块那例的编辑写成新 inode。真 conda 的那一半在钩子层测试里（下面）。
 - **钩子层测试**（`tools/tests/test_conda_hooks.sh`，真 conda，私有 `HOME`、`CONDARC`、`CONDA_PKGS_DIRS`，渠道 `--override-channels
   -c file://<玩具> -c conda-forge`，否则空 `CONDARC` 会落到 `defaults` 报 CondaToSNonInteractiveError）：**feature 包用真渲染器加
-  `rattler-build --no-test` 构建**（不用小生成器），只有玩具 `isabelle` 包、一个只间接依赖 `isabelle` 的玩具包和"坏工具"包由小生成器造。
-  玩具 `isabelle` 包带一个桩 `isa/bin/isabelle`（答 `getenv -b ISABELLE_HOME_USER`、做 `components -u/-x`）、`recipe.yaml:223-231` 的真实
-  pre-unlink、**只有**第 26、34 条的重跑（没有钩子片段，第 33 条）；`ISABELLE_ID` 用真键（原版 `89701cf1768e`、旧构建 `5533cd83156e`），
+  `rattler-build --no-test` 构建**（不用小生成器），工具包照发布那样带它 recipe 里的测试构建；只有玩具 `isabelle` 包、一个只间接依赖
+  `isabelle` 的玩具包、一个玩具组件包和"坏工具"包由小生成器造。玩具渠道由 `tools/tests/toy-channel.sh` 一处造出，钩子层测试与 GitHub 上的
+  测试（下面）都调它。玩具 `isabelle` 包**全是 noarch**、五个平台都装得上：`isa/bin/isabelle`（bash）与 `isa/bin/isabelle.bat`（CRLF）两个入口
+  都起同一个 Python 桩（答 `getenv -b ISABELLE_HOME_USER`/`ISABELLE_HOME`——Windows 上照真 `isabelle.bat` 印 `/cygdrive/` 形式——、`version`、
+  `version -i`，做 `components -u/-x`），**只有**第 26、34 条的重跑（没有钩子片段，第 33 条），重跑也在这个桩里（`.sh` 用 bash、`.bat` 用
+  cmd）；两个 pre-unlink 是真文本：`isabelle-packaging-ci` `conda/recipe.yaml:223-231` 的 `.sh` 与 `:153-169` 的 `.bat`；依赖 python
+  （决定 12 第 2 点要求原版包也依赖 python）。每个玩具 feature 都新建一个文件（SIGINT 那例放弃的 feature 要有新建文件可查，代码评审三轮
+  tests-5）；玩具组件包供 §6 (c)、(e) 在玩具渠道上跑。`ISABELLE_ID` 用真键（原版 `89701cf1768e`、旧构建 `5533cd83156e`），
   feature 包按决定 10 钉死玩具 `isabelle` 的构建。"坏工具"包是一个声明同一入口点、`import` 即抛异常的模块。断言看 conda 的 stdout
   （`.messages.txt` 被 conda 删掉）：
   - post-link 顺序等于链序且幂等；一个事务里恰一条 applied 行、一次 heap 提示；
@@ -903,12 +994,42 @@ Performant_Isabelle_ML `release-conda.yml:423-425,527-529` 与 auto_sledgehammer
     `etc/components` 不再列它、`conda remove <链顶> --dry-run` 保留 `isabelle`；
   - 文案核对：`update --all` 升到新 `isabelle` 构建、以及重发内容相同的补丁，两种事务的 conda 输出里 heap 提示的措辞正确；
   - 在旧构建（`5533cd83156e`）的环境里 `conda install <feature>`：solver 把玩具 `isabelle` 升到原版构建，链打好，组件登记由新 post-link 重建；
-  - 重链接后不修直接 `conda remove isabelle`：没有 `isa/` 残留；post-link 期间 feature 目录里有 `*.c~`：被忽略。
+  - 重链接后不修直接 `conda remove isabelle`：没有 `isa/` 残留；post-link 期间 feature 目录里有 `*.c~`：被忽略；
+  - 经硬链接原地编辑（两个环境共享 inode；这一例用**自己的** `CONDA_PKGS_DIRS`，失败时也弄脏不了别的例共用的包缓存，§6 (f2) 的要求）：同大小
+    原地改写后装链顶，诊断选硬链接文案；普通 `--force-reinstall isabelle` 留下改动、rc 0；`conda clean -p` 不删解开的目录；按决定 9 的修法删掉
+    缓存里解开的目录、再在两个环境各重装，都恢复；缓存已重新解开的形状下选普通文案且有效。工具对 conda 记录格式的唯一读取于是对着真 conda 写的
+    记录测到（rev 6 把这一例列在 pytest 清单里，pytest 跑不了真 conda；代码评审三轮 tests-6，第 39 条）。本地冒烟（2026-10-29）查出普通
+    `--force-reinstall isabelle` 那次只给普通文案（post-link 读不到 `isabelle` 的记录）；按决定 9 新加的那一支，这一步改断言：诊断给包缓存文案
+    的"说不出确切目录"那一种（第 39 条）。pytest 另测这一支：没有 `isabelle` 记录的 post-link，改过的跟踪文件给这种文案，新建路径上的
+    CONFLICT 不给；pre-unlink 不做这条推断。
 - 验收（§6）在五个平台腿上跑（决定 11），用工具的 conda 包解析到的 `git`（今天 conda-forge 2.56，不是本机的 2.43）；Windows 腿核 `git.exe` 的位置、
-  `GIT_CEILING_DIRECTORIES` 与 `core.longpaths`、锁（一个进程持锁时第二个 `status` 在上限内报忙，同时 `type etc\ISABELLE_ID` 与
+  `GIT_CEILING_DIRECTORIES`、`core.longpaths` 真的生效（一个探针，不建很深的 conda 环境：约 200 字符深的目录里，补丁文件与它的目标都超过
+  260 字符，`Git.run` 照常打上；把开关换成 `-c core.longpaths=false` 的对照必须失败——git 对不认识的键静默忽略，所以只看"接受这个开关"
+  说明不了生效。真实安装里不需要长路径测试的理由：环境里 git 或工具碰到的最长路径是 conda 自己链接进来的补丁文件，比工具的暂存副本长，默认
+  机器上 conda 先失败；开关只在 `LongPathsEnabled=1` 且前缀至少 159 字符时才起作用。Opus agent 2026-10-28 验证，第 39 条）、锁（一个进程持锁时第二个 `status` 在上限内报忙，同时 `type etc\ISABELLE_ID` 与
   `isabelle version -i` 都成功）、只读与被占用目标文件的 `os.replace`、`.bat` 钩子；并**测量**整链 `status` 一次和 `--force-reinstall isabelle`
-  一次的墙钟时间，写进 §8（§6 (l) 要求两者各不超过 10 秒，远低于 60 秒的等待上限；高于 10 秒才按评审四 C24 的办法把读目标合成一次
-  `git apply --numstat --summary` 调用、失败时逐文件回退点名）。
+  一次的**持锁时间**，写进 §8（§6 (l) 要求两者各不超过 30 秒，是 60 秒等待上限的一半；高于 30 秒才按评审四 C24 的办法把读目标合成一次
+  `git apply --numstat --summary` 调用、失败时逐文件回退点名；第 39 条从 10 秒放宽）。`--force-reinstall isabelle` 那一项不量 conda 命令的墙钟
+  （大半是 conda 自己解依赖、链接文件的时间，那时没人持锁），而量它的 post-link 在锁里做的事：先 `unapply` 把树退回原版（即 conda 重装后的
+  样子），再给整链 `apply` 计时；多算进的只有 python 启动，偏保守。rev 6 此处写"墙钟时间"、§6 (l) 写"持锁"，两处不一致，以 §6 为准（作者按
+  第 39 条的授权定，2026-10-29）。这项检查是测试代码（`tools/accept`），超了就挡住这一批的发布。
+- **GitHub 上的测试**（第 39 条；2026-10-28 Opus agent 组：三个角度各出方案、各一个新 agent 质疑、judge 定）：工具仓库新 workflow
+  `.github/workflows/tests.yml`，推到 `main`（只改 `ai-artifacts/**` 时不触发）、手动、每周一次触发。每个 job 跑一个**已有的**测试，不另造第二套：
+  - `lint`：actionlint 查所有 workflow 文件。发布 workflow 的 build、roundtrip、publish、smoke 在 §5 第 7 步排练之前只有这一道检查；
+  - `unit`：pytest，ubuntu 上用工具声明的下限（python 3.12、git 2.43），macOS 上用最新；ubuntu 上另跑 `tools/tests/run-all.sh`。pytest 不在
+    Windows 上跑（`test_hooks.py`、`test_lock.py` 导入 `fcntl`）；`test_roundtrip.py` 在非 GNU 的 `find` 上跳过（`check-roundtrip` 只在 ubuntu
+    的 `roundtrip` job 里跑）；
+  - `toy-channel`：ubuntu 上用发布同一个 rattler-build 版本跑 `toy-channel.sh`，再对它跑 `check-packages`（发布 `build` job 的同一步），
+    产物交给 `accept`；
+  - `hooks`：ubuntu 上跑钩子层测试。它自己调 `toy-channel.sh`，本地与 CI 是同一个入口；输出目录无论成败都上传；
+  - `accept`：调发布用的同一个可复用 workflow `accept.yml`（决定 11），五条腿对玩具渠道跑 `tools/accept`（`--isabelle-build 2`、旧构建 1、
+    只有本地渠道加 conda-forge），带 `--strict`：任何"跳过"都算 WRONG。`toy-channel` 与 `hooks` 用发布 `build` job 的同一个 rattler-build 安装
+    action。
+  玩具渠道上跑不到、只在 §5 第 7 步排练与第 8 步发布里跑的：要真 `isabelle` 包或线上渠道的部分——(a) 的 session 构建、(l) 作数的数字、
+  经 Cygwin 的 `isabelle.bat version -i`、(g) 的 `contrib/cygwin` 残留、(e)/(i) 对线上 build 0、真组件、真重跑 post-link、`build`/`roundtrip`/
+  `publish`/`smoke` 本身（玩具渠道不得与线上渠道混用：它的 `isabelle-2025.2-0` 与线上的同名）。留在本地、一次性、不提交的：新 pytest 测试的
+  变异检查；钩子层分段规则在归档输出与一个改坏的输出上的验证；`accept` 的两个反对照（"坏工具"渠道下 (a) 必须报 WRONG；去掉 `||` 那句的钩子
+  片段重渲染后 (m) 必须报 WRONG；本地 2026-10-29 已做，都报了）。macOS 两条腿的 runner 与可复用 workflow 用户 2026-10-29 已定（第 39 条）。
 
 ### 决定 16：`make-patches` 的配套改动
 
@@ -964,7 +1085,8 @@ Performant_Isabelle_ML `release-conda.yml:423-425,527-529` 与 auto_sledgehammer
 
 ### 决定 17：(b2) 脚本
 
-`tools/check-roundtrip <原版树> <链顶 feature> [-C <isabelle-patched 仓库>] --features-dir FD [--tool <命令>]`：**`--features-dir` 是唯一的 feature
+`tools/check-roundtrip <原版树> <链顶 feature> [-C <isabelle-patched 仓库>] [--fetch <remote>] --features-dir FD [--tool <命令>]`
+（`--fetch`：先从 `<remote>` 深度 1 只 fetch 下面推出的两个 tag，CI 用；本地的克隆里已有）：**`--features-dir` 是唯一的 feature
 输入**（CI 里给装好的环境的 `features.d`；本地由一个小装配步骤把各**包目录**——`isabelle-base-features` 是它的两个子目录——的 `patches/<R>/`
 复制成 `FD/<feature>/`）；`--tool` 默认是 checkout 里的 `python -m isabelle_patch_control`，CI 里给 `$ENV/bin/isabelle-patch-control`：
 - 在 umask 022 下；
@@ -1035,8 +1157,9 @@ installed: isabelle-future-assign-interrupt 2. Install matching versions of thes
 isabelle-light-locale.`；pre-unlink 遇到其他拒绝：`light_locale could not be undone: <原因>` 换行更新支 换行 `If you are removing light_locale: when
 this is fixed, run conda install -c … isabelle-light-locale; then conda remove isabelle-light-locale.`
 符号链接的拒绝（决定 2）：`<文件> is or lies under a symbolic link; isabelle-patch-control replaces files in place and does not follow links` 换行
-`(conda's always_softlink / allow_softlinks settings create such trees). To fix:` 然后 1. 保存那句（同下）、2. `conda config --set always_softlink
-false; conda config --set allow_softlinks false`、3. `conda install -c … --force-reinstall isabelle`。
+`(conda's always_softlink / allow_softlinks settings create such trees). To fix:` 然后 1. `conda config --set always_softlink false; conda
+config --set allow_softlinks false`、2. 保存那句（同下）、3. 重装那条命令（同下）。（2026-10-29 第三轮 reader：保存那句说"下一步会删掉用户
+目录"，原来的顺序里下一步却是 `conda config`；`conda config` 只改 `~/.condarc`，挪到最前，作者按第 39 条授权定。）
 CONFLICT（完整诊断，链顶 feature 的 post-link 写，决定 9；代码评审一轮 C13 与 reader 意见改写：第二句只说工具保证的事——它不打 F 及依赖它的包，
 不说"它们没打上"，因为编辑之前打上的上层 feature 还在；先给最简单的路；按文件是不是 feature 新建的只印适用的修法；末尾加"然后跑 status"）：
 ```
@@ -1044,12 +1167,13 @@ light_locale was NOT applied: src/Pure/Isar/locale.ML under $PREFIX/isa has cont
 (did you edit it?). The feature packages light_locale depends on are applied; until this is fixed, the tool applies
 neither light_locale nor the packages that depend on it.
 If you remember exactly what you changed: undo it, then run isabelle-patch-control apply. Otherwise:
-  1. Copy anything of your own out of $PREFIX/isa and out of this environment's Isabelle user directory (isabelle getenv -b
-     ISABELLE_HOME_USER prints it; it is a directory under ~/.isabelle that belongs to this environment alone). The next step
-     replaces every file of the isabelle package and deletes this environment's Isabelle user directory: the heaps built there,
-     its etc/settings and preferences, and every component you registered by hand. Installed packages register their
-     components again; your own settings do not come back.
-  2. conda install -c … --force-reinstall isabelle   (your other feature packages are re-applied automatically)
+  1. Copy anything of your own out of $PREFIX/isa and out of this environment's Isabelle user directory
+     ($PREFIX/isa/bin/isabelle getenv -b ISABELLE_HOME_USER prints it; it is a directory under ~/.isabelle).
+     The next step replaces every file of the isabelle package and deletes this environment's Isabelle user directory:
+     the heaps built there, its etc/settings and preferences, and every component you registered by hand. Installed
+     packages register their components again; your own settings do not come back.
+  2. conda install -p $PREFIX -c … --force-reinstall isabelle
+     (your other feature packages are re-applied automatically)
 Then run isabelle-patch-control status; Isabelle rebuilds the heaps on first use.
 A personal edit of a file that a feature also changes reads CONFLICT again every time; make such experiments in a separate
 Isabelle installation (for example the official release), not under $PREFIX/isa.
@@ -1059,15 +1183,33 @@ Details: isabelle-patch-control status -v.  Upgrading from my-better-isabelle 0.
 judge 建议的措辞用户 2026-10-25 "按你建议来"；不加显示差异的功能。）
 不认识的文件是 feature 自己新建的（`status -v` 的 `(created by the feature)` 标记）时，第 1、2 步换成一步：`<文件> is a file the feature itself
 creates (created by the feature): move it aside, then run isabelle-patch-control apply.`；两种文件都有时第 1、2 步之后加它作第 3 步。
-第 1 步"保存"那句（`texts.SAVE_LINE`）在残留块、符号链接拒绝里逐字复用。
+第 1 步"保存"那句（`texts.save_line`）与重装那条命令（`texts.reinstall`）在残留块、符号链接拒绝里逐字复用，两者都点名**本环境**：保存那句写
+本环境自己的 isabelle（Windows 上 `isabelle.bat`），重装写 `-p <本环境>`。理由：另一个环境激活着时，裸的 `isabelle getenv` 给出那个环境的用户
+目录，裸的 `--force-reinstall isabelle` 删的也是那个环境的用户目录（isabelle 包的 pre-unlink `rm -rf` 它）；两步必须指向同一个环境，用户存下的
+才是重装删掉的（第二、三轮 reader 判 major，作者按第 39 条授权改，2026-10-29）。只这两处带路径：其余命令（`isabelle-patch-control …`、
+`conda config`、`conda list`/`info`）在错的环境里不删用户的东西；heap 提示里的 `isabelle getenv -b ISABELLE_HOME_USER` 也照旧不带路径——照着它在
+错的环境里删 `heaps/`，只让那个环境首次使用时重建 heap。
 （`status` 里仍显示 CONFLICT；"matches no level, or several levels" 这种内部说法只留给 `status -v`。）
 文件是经硬链接原地改写的（决定 9 的判据）时，第 2 步换成：
 ```
-  2. Your edit went into conda's shared package cache, so a plain reinstall would keep it. Delete <extracted_package_dir> (conda re-creates
-     it from the .conda archive), then run conda install -c … --force-reinstall isabelle in this environment and in every other
-     environment that has isabelle installed (conda env list names them; they may share the edited file without reporting anything).
+  2. Your edit went into conda's shared package cache, so a plain reinstall would keep it. Delete
+     <extracted_package_dir> (conda re-creates it from the .conda archive), then run
+     conda install -p $PREFIX -c … --force-reinstall isabelle.
+     Every other environment that has isabelle installed from the same package cache may share the edited file without
+     reporting anything (conda env list names the environments): do step 1 and this reinstall there too, with its own path.
 ```
-（`<extracted_package_dir>` 打印 conda-meta 里 `isabelle` 记录的真实路径；"其他环境"给出 `conda env list` 让人找得到，reader 意见。）
+（`<extracted_package_dir>` 打印 conda-meta 里 `isabelle` 记录的真实路径；"其他环境"给出 `conda env list` 让人找得到，reader 意见。rev 6 此处
+写 "every other environment that has isabelle installed"，代码在 16078a3 写成 "built from the same package cache"，两处一直不一致；
+2026-10-29 合成 "that has isabelle installed from the same package cache"。那些环境的重装同样删它们的用户目录，所以要它们也先做第 1 步
+（第二、三轮 reader；作者按第 39 条授权定）；换行照第一轮 reader 的排版。）
+这条命令正在链接 `isabelle`、记录还没写（决定 9）时，第 2 步的前两行换成（用户 2026-10-29 选 (b)，两轮 Opus reader 校读后定稿）：
+```
+  2. Your edit went into conda's shared package cache, so a plain reinstall would keep it. Delete the
+     isabelle-<version>-<build> directory in one of the package caches that conda info lists, with the version and
+     build that conda list -p <PREFIX> --full-name isabelle shows
+     (conda re-creates it from the .conda archive), then run
+```
+（`<PREFIX>` 是本环境的真实路径：另一个环境激活着时，不带 `-p` 的 `conda list` 会给出别的环境的构建。）
 其他钩子的一行提示：`light_locale was not applied (src/Pure/Isar/locale.ML has unexpected content); see isabelle-patch-control status -v`
 pre-unlink 的残留块（任何原因；点名的包是此刻 features.d 里最高的 feature 包，同一条命令的每块点名的包相同，各块列的文件只是自己 feature 的；
 两个标签分支按决定 9 的卸载/替换规则；"工具起不来"的情形由钩子文本的 `||` 分支兜住，不在这里）：
@@ -1078,15 +1220,11 @@ still carry its changes:
   src/Pure/Isar/light_locale_axiom_facts.ML   (created by the feature)
 If you are updating or reinstalling, for example conda update --all: when it finishes, run isabelle-patch-control status.
 If you are removing light_locale, clean up now (nothing will remind you later):
-  1. Copy anything of your own out of $PREFIX/isa and out of this environment's Isabelle user directory (isabelle getenv -b
-     ISABELLE_HOME_USER prints it; it is a directory under ~/.isabelle that belongs to this environment alone). The next step
-     replaces every file of the isabelle package and deletes this environment's Isabelle user directory: the heaps built there,
-     its etc/settings and preferences, and every component you registered by hand. Installed packages register their
-     components again; your own settings do not come back.
-  2. conda install -c … --force-reinstall isabelle   (your other feature packages are re-applied automatically)
+  1. <CONFLICT 诊断的第 1 步，逐字>
+  2. <CONFLICT 诊断的第 2 步，逐字>
   3. Delete every file marked "(created by the feature)" in these messages.
 ```
-第 1 步"保存"那句与 CONFLICT 诊断的第 1 步相同（`texts.SAVE_LINE`，点明用户目录里会丢的东西；rev 6 的短句"the next step deletes both"由
+第 1 步"保存"那句与 CONFLICT 诊断的第 1 步相同（`texts.save_line`，点明用户目录里会丢的东西；rev 6 的短句"the next step deletes both"由
 代码评审一轮 C5/reader 意见换掉）。原因三选一打印：`a file has unexpected content`（CONFLICT）、`another isabelle-patch-control was running`
 （锁超时）、`a file could not be written`（写失败）；链接不上不是残留块，见上（第 38 条/C34）。锁超时时第 1–3 步换成一行：
 `conda install -c … isabelle-light-locale=<版本>; then conda remove isabelle-light-locale`。清单里有经硬链接原地改写的文件时，第 2 步换成
@@ -1138,7 +1276,8 @@ feature，先这样恢复、再 `conda remove <它的包名>`——由工具反�
   所有该留下的包都显式要求过：
   (a) `conda create -n t isabelle=2025.2=<b> isabelle-light-locale` → `status` 全 applied；conda 输出恰一条 applied 行、一次 heap 提示；
   `etc/components` 列出 `share/isabelle-light-locale`；linux-64 上（以及 `session_build_legs` 里的腿上）一个 `imports Light_Locale.Light_Locale`
-  并使用 `light_locale` 命令的 theory 能通过检查；
+  并使用 `light_locale` 命令的 theory 能通过检查；工具用的 `git` 是本环境自己的（win-64 上 `Library\bin\git.exe`，其他腿 `bin/git`；决定 15
+  的 Windows 腿检查，第 39 条）；win-64 上 `core.longpaths` 的探针（决定 15）；
   (b) `conda remove isabelle-light-locale` → light 反打干净、新建文件消失、下层 feature 不动、`etc/components` 不再列它；剪枝三例（决定 15）；
   每例之后跑 (k)；
   (c) `conda install --force-reinstall isabelle` → 重跑直接依赖者的 post-link：`status` 不变，`etc/components` 仍列出 light 与一个
@@ -1155,7 +1294,7 @@ feature，先这样恢复、再 `conda remove <它的包名>`——由工具反�
   (g) 全部 pre-unlink 成功的前提下 `conda remove isabelle` → 四条 POSIX 腿 `test ! -e "$PREFIX/isa"`；win-64 上断言没有任何 feature 补丁的目标
   路径存在、没有 `isa.staging`、`isa/` 下剩下的都在 `contrib/cygwin/` 之下（这是 `isabelle` 包自己的残留，§2.3）；装与不装 feature 包各一次；
   用户目录不存在；
-  (h) 只在 `build` job 的 `isabelle_old_build` 非空时执行（线上有钉着别的 `isabelle` 构建的 feature 包；评审五 C9）。起始状态：从**线上渠道加
+  (h) 只在 `build` job 的 `isabelle_old_build` 非空时执行（线上有钉着别的 `isabelle` 构建的链顶包；评审五 C9，第 39 条）。起始状态：从**线上渠道加
   conda-forge**（这是决定 11 渠道规则的唯一例外，因为旧构建只在线上）建环境，装 `isabelle=2025.2=<isabelle_old_build>`、本批的链顶 feature 包、
   工具；然后用 `accept` 的三个渠道跑 `conda update --all -c …`；断言 `isabelle` 已是 `isabelle_build`、每个 feature 包都钉着它、`status` 全 applied
   （"未配套重发时原地不动"那一半在钩子层测试里）；
@@ -1164,9 +1303,20 @@ feature，先这样恢复、再 `conda remove <它的包名>`——由工具反�
   (j) 在一个 git 工作树之下建环境（`conda create -p <仓库>/env …`）→ 结果与 (a) 相同；
   (k) `check_bytes`（决定 15，参照数据取自包归档）在 (a) 之后、(b) 的每一例之后各跑一次，五条腿都跑；(g) 不跑它——那里期望的是"不存在"，(g) 自己
   的断言已覆盖（第三轮 C21 判决排除了 `paths_data` 比对；第三轮 C20 判决写的 "(a), (b) and (g)" 在此有意偏离，§10）；
-  (l) win-64 上整链 `status` 一次与 `--force-reinstall isabelle` 一次**各持锁不超过 10 秒**（决定 5 的等待上限是 60 秒；决定 15 测量并把数字写进
-  §8；超过 10 秒才做评审四 C24 的合并读目标）。
-  中断、锁、权限位、敌对环境、`.c~`、SIGINT 在 pytest 与钩子层测试里覆盖（决定 15），不在真实渠道上重复。
+  (l) win-64 上整链 `status` 一次与 `--force-reinstall isabelle` 一次**各持锁不超过 30 秒**（第 39 条从 10 秒放宽；决定 5 的等待上限是 60 秒；
+  决定 15 测量并把数字写进 §8，后者按决定 15 的办法量：先 `unapply` 再计时整链 `apply`；超过 30 秒才做评审四 C24 的合并读目标）；
+  (m) 工具不装、工具启动即崩（决定 15 钩子层清单里"两例也在 win-64 上跑"的那两例，五条腿都跑）：从 (a) 的规格建环境，前者 `conda remove --force`
+  工具、后者把工具包的 `__init__.py` 换成一个 `import` 即抛异常的文件，再 `--no-deps --force-reinstall` 链底的包 → 安装成功、history 在、
+  决定 9 对应的 post-link 报文与 pre-unlink 的 `||` 报文各恰出现一次；win-64 上另加一例：`__init__.py` 换成以负的 NTSTATUS 退出码
+  （`os._exit(-1073741819)`）退出的文件，两句报文仍各一次——决定 9 两行 `if errorlevel` 的判法第一次在真 cmd 上测（此前只在 wine 下测过）；
+  (n) win-64 上，在 (a) 的环境里（决定 15 的 Windows 腿检查）：一个进程持排他锁时，`cmd /c type etc\ISABELLE_ID` 与 `isabelle.bat version -i`
+  都成功，第二个 `status` 在等待上限之后报忙（exit 1）；一个链底补丁改的目标文件设成只读 → `unapply` exit 1、有报文、没有 traceback，清掉只读
+  属性后 `apply` 收敛到全 applied；同一文件被另一个进程一直打开着 → 先核 `os.replace` 到它确实被 Windows 拒绝（前提，不成立就报 WRONG），
+  `unapply` exit 1、有报文、没有 traceback；放开之后 `unapply` 成功、字节等于原版，再 `apply` 全 applied。重试本身（决定 5，约 7 次共约 6 秒）
+  在 pytest 里测：只打开约 2 秒的写法，在工具恰好放开之后才走到 `os.replace` 时，根本没用上重试也通过。
+  中断、权限位、敌对环境、`.c~`、SIGINT 在 pytest 与钩子层测试里覆盖（决定 15），不在真实渠道上重复；锁、只读与被占用的目标、两例钩子失败
+  在 (m)、(n) 里上真实腿，因为 pytest 与钩子层测试都不在 Windows 上跑（rev 6 这一行把锁也算进"不重复"，与决定 15 的 Windows 腿检查矛盾，
+  代码评审三轮 plan-3，第 39 条）。
 
 ## 7. light 计划 D4 清单逐条
 
@@ -1261,6 +1411,37 @@ feature，先这样恢复、再 `conda remove <它的包名>`——由工具反�
 - `isabelle-ai` 元包要不要依赖 `isabelle-future-assign-interrupt`（它是每个人都该有的修复，原版构建不带它）。
 
 ## 10. 对照表（**与裁决不同之处明说**）
+
+### 10.0a 代码评审三轮（2026-10-28；§5 第 5 步的实现：渲染器、批量发布 workflow、byte check、钩子层测试；24 条裁定，judge 判 not-accepted；用户裁决见 §0 第 39 条）
+
+"代码已改"指工作树里未提交的改动，复评审之前都不算完成。
+| judge 裁定 | 本版 |
+|---|---|
+| correctness-1、ci-1 `release-plan` 被 Cloudflare 拒（403，error 1010） | 代码已改：固定 User-Agent；方案无对应文字（决定 11 本来就要读线上 repodata） |
+| plan-1、correctness-2、ci-2 (e)、(i) 只用线上渠道，找不到本批的工具 | 代码已改；方案原文本来如此（决定 11 `accept` 的渠道规则，(h) 是唯一例外） |
+| correctness-3 `local-channel` 在 Windows 的 `RUNNER_TEMP` 下找不到包 | 代码已改 |
+| plan-3、tests-3 决定 15 的 Windows 腿检查没有任何测试在跑 | 用户定（第 39 条）；代码已改（(a) 的 git 位置、(m)、(n)）；已做于 §6 (a)、(m)、(n) 与末行 |
+| tests-2 `check-bytes` 对打包也改过的文件在所有状态下都跳过 | 代码已改；方案原文本来如此（决定 15 `check_bytes` 一条只在打着时除外） |
+| tests-1 钩子层测试的分段规则看不见 `||` 分支的文本 | 代码已改：按三种开头切分，另查第一段之前与"一段两个卸载标签"；每次运行先对一段固定的坏文本做正对照。在 67 个归档输出上全过、对改坏的那份报错 |
+| tests-4 CONFLICT 放在链顶，"它与其上的不动"与决定 7 的封顶后果都没断言 | 代码已改：`c.ML` 原样；链中间的 CONFLICT 加重链下层包（本地冒烟已过） |
+| tests-5 SIGINT 后放弃的 feature 不建文件，"新建文件不存在"不可能失败 | 代码已改：每个玩具 feature 都新建文件（`toy-channel.sh`），已做于决定 15 钩子层玩具描述 |
+| plan-4 `isabelle_old_build` 取自任何 (F, v)，(h) 的起始环境可能解不出 | 用户定（第 39 条）；代码已改；已做于决定 11 `build` job、§6 (h) |
+| tests-6 硬链接原地编辑的真 conda 那一半哪里都不跑 | 作者定（第 39 条授权）；已做于决定 15 两个清单；代码已改：`s_hardlink`，自己的包缓存 |
+| correctness-5、tests-8、elegance-1 `check-bytes` 另有一套补丁头解析，拒空文件、读错带空格的路径 | 代码已改：`tools/common.py` 一个 `block_header` |
+| correctness-6、7 `accept` 的 `states()` 把拒绝与"没有 feature"读成状态；b1 剪掉工具 | 代码已改 |
+| tests-7 几处检查在依赖的事没发生时也通过 | 代码已改：用户目录先放 `heaps/HOL` 再断言被删；dry-run 的正对照；显式装 build 2 要求 LibMambaUnsatisfiableError（三者都在归档输出上核过） |
+| GitHub 测试方案的 judge 另查出的（2026-10-28，第 39 条） | 已修：本轮引入的回归——`patch_blocks` 先解析 index 行再查权限位改动，`test_make_patches.sh` 报 WRONG（拆出 `block_path`）；`test_trees.sh` 没有 `xxd` 时空过（改 `cmp`）；`run-all.sh` 滤掉了 WRONG 的诊断行。代码已改：`accept` 的 `--strict`、`--subdir`、环境说明行，(a) 无失败报文与硬链接、(b) 用户目录仍在、(g) 用户目录先放 heap、(l) 查退出码、(m) 查 pre-unlink 报文并在 win-64 加负退出码一例、(n) 被占用改成一直占着；pytest 加重试四例（变异六个全杀） |
+| elegance-2、3、4、5 列表文件读取、组件文件集合、build string 前缀、`pinned_build`、来历文件解析各有两份 | 代码已改：都在 `tools/common.py` 或 `features.py` 一份；已做于决定 10 渲染器一条、决定 11 `build` job |
+| elegance-6 workflow 的 bash 重推工具已有的值 | 代码已改：`release-plan` 给 build 号、`check-packages --summary` 给链顶、`check-roundtrip --fetch`；已做于决定 11 `roundtrip`、决定 17 |
+| elegance-7 `accept` 为找链另建两个环境 | 代码已改：链取自 (a) 的环境 |
+| elegance-10 两个 pre-unlink 模板自带 exit 行，渲染器为此另有一种拼法 | 代码已改：四个钩子文件一条规则，渲染出的字节不变；方案无对应文字（决定 9 说的是钩子文件，仍以 exit 行结尾） |
+| ci-4 `ref: inputs.tool_ref \|\| github.ref` 让各 job 取开始时的分支顶 | 代码已改 |
+| 驳回：CRLF 一族（Git for Windows 的 bash 丢 CR）、elegance-8、elegance-9 | 不做 |
+| 改规约提议：`isabelle_old_build` 只看链顶；§6 末行；硬链接一例挪进钩子层；显式 flexible priority | 已做于上面各处（第 39 条） |
+| 改规约提议：`core.longpaths` 不做长路径测试；(l) 量 post-link 在锁里做的整链 apply | 前者用户同意、Opus agent 验证成立（附条件，理由改记），用户 2026-10-29 另加探针，已做于决定 4、15、§6 (a)；后者作者按授权采纳，已做于决定 15、§6 (l)；持锁上界改 30 秒（第 39 条） |
+| 本地冒烟查出：重装 `isabelle` 的事务里选不了硬链接文案 | 用户选 (b)，已做于决定 9；新文案与对提案的一处偏离待用户批准（第 39 条） |
+| GitHub 测试方案 judge 的两件设计事：macOS runner；可复用 `accept.yml` 与共用安装 action | 用户 2026-10-29 都同意，已做于决定 11、15（第 39 条） |
+| 改规约提议（可选）：`check-roundtrip` 去掉位置参数 `<链顶 feature>` | 不采纳：改接口，属设计；位置参数照旧 |
 
 ### 10.0 rev 6 → 代码评审第一轮（2026-10-25；38 条 challenge，报告 `ISABELLE_PATCH_CONTROL_CODE_REVIEW1.md`；用户裁决见 §0 第 38 条）
 

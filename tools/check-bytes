@@ -13,17 +13,17 @@ For every path a patch file touches:
     post-image means the file must not exist;
   - when none does, the file's sha256 is the one paths.json records for isa/<path>, or the file
     does not exist when the isabelle package has none (a file a feature creates);
-  - a file whose isabelle-package content is not the pre-image of the lowest patch touching it
-    (the packaging changed it too) is not checked, and is listed.
+  - while a feature touching it is applied, a file whose isabelle-package content is not the
+    pre-image of the lowest patch touching it (the packaging changed it too) is not checked, and is
+    listed; once none is applied it must be the package's again, like every other file.
 --applied defaults to every feature given; `--applied` alone means none.
 """
 import argparse
 import hashlib
 import json
-import re
 from pathlib import Path
 
-from common import Refused, main
+from common import Refused, block_header, main
 from isabelle_patch_control.features import provenance_fields
 
 FEATURES_D = Path("share") / "isabelle_patch_control" / "features.d"
@@ -34,34 +34,22 @@ def blob_id(data: bytes) -> str:
 
 
 def header(patch: Path) -> tuple[str, str, str]:
-    """(path, pre-image, post-image) of a patch file's one `git diff` block."""
-    old = new = index = None
-    for line in patch.read_bytes().split(b"\n"):
-        if line.startswith(b"@@"):
-            break
-        if line.startswith(b"--- "):
-            old = line[4:]
-        elif line.startswith(b"+++ "):
-            new = line[4:]
-        elif m := re.match(rb"index ([0-9a-f]+)\.\.([0-9a-f]+)", line):
-            index = (m[1].decode(), m[2].decode())
-    if old is None or new is None or index is None:
-        raise Refused(f"{patch}: no ---, +++ and index lines before the first hunk")
-    path = old if new == b"/dev/null" else new
-    if not path.startswith((b"a/", b"b/")):
-        raise Refused(f"{patch}: the path {path!r} is quoted or has no a/ or b/ prefix")
-    return path[2:].decode(), *index
+    """(path, pre-image, post-image) of a patch file (common.block_header)."""
+    try:
+        return block_header(patch.read_bytes())
+    except Refused as e:
+        raise Refused(f"{patch}: {e}") from None
 
 
-def chain(packages: list[Path]) -> list[tuple[str, list[Path]]]:
-    """(feature, patch files) of every feature package, bottom first, linked by base_tag."""
+def chain(packages: list[Path]) -> list[tuple[str, Path, list[Path]]]:
+    """(feature, package dir, patch files) of every feature package, bottom first, linked by base_tag."""
     found = {}
     for pkg in packages:
         dirs = [d for d in (pkg / FEATURES_D).iterdir() if (d / "provenance.txt").is_file()]
         if len(dirs) != 1:
             raise Refused(f"{pkg}: {len(dirs)} feature directories under {FEATURES_D}, not one")
-        f = provenance_fields(dirs[0] / "provenance.txt")
-        found[f["release_tag"]] = (f["base_tag"], dirs[0].name, sorted(dirs[0].glob("*.patch")))
+        f = provenance_fields((dirs[0] / "provenance.txt").read_text())
+        found[f["release_tag"]] = (f["base_tag"], dirs[0].name, pkg, sorted(dirs[0].glob("*.patch")))
     order, below = [], None
     while len(order) < len(found):
         up = [(tag, v) for tag, v in found.items() if (v[0] == below if below else v[0].split("/")[1] == "pristine")]
@@ -75,13 +63,13 @@ def chain(packages: list[Path]) -> list[tuple[str, list[Path]]]:
 def check(tree: Path, isabelle: Path, packages: list[Path], applied: list[str] | None) -> tuple[list[str], list[str], int]:
     """(problems, files not checked, files checked)."""
     features = chain(packages)
-    names = [name for name, _ in features]
+    names = [name for name, _, _ in features]
     applied = names if applied is None else applied
     if unknown := sorted(set(applied) - set(names)):
         raise Refused(f"--applied names {' '.join(unknown)}, which no --feature package holds")
     recorded = {p["_path"]: p["sha256"] for p in json.loads((isabelle / "info" / "paths.json").read_text())["paths"]}
     touching: dict[str, list[tuple[str, str, str]]] = {}
-    for name, patches in features:
+    for name, _, patches in features:
         for patch in patches:
             path, pre, post = header(patch)
             touching.setdefault(path, []).append((name, pre, post))
@@ -90,18 +78,18 @@ def check(tree: Path, isabelle: Path, packages: list[Path], applied: list[str] |
         target = tree / path
         sha = recorded.get(f"isa/{path}")
         pre = touches[0][1]
+        on = [t for t in touches if t[0] in applied]
         if sha is not None:
             data = (isabelle / "isa" / path).read_bytes()
             if hashlib.sha256(data).hexdigest() != sha:
                 problems.append(f"{path}: the package cache's copy of isa/{path} is not what paths.json records (edited in place)")
                 continue
-            if not blob_id(data).startswith(pre):
+            if on and not blob_id(data).startswith(pre):
                 skipped.append(path)
                 continue
         elif set(pre) != {"0"}:
             problems.append(f"{path}: the isabelle package has no isa/{path}, which {touches[0][0]}'s patch changes")
             continue
-        on = [t for t in touches if t[0] in applied]
         if on:
             name, _, post = on[-1]
             if set(post) == {"0"}:

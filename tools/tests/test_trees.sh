@@ -38,7 +38,7 @@ echo "--- new-tree: private tree"
 expect ok      "new-tree R/light_locale creates the private tree"     -- "$tools/new-tree" -C "$shared" R/light_locale
 t=$work/contrib/R-light_locale
 check "locked worktree on R/light_locale" '[[ $(git -C "$t" symbolic-ref --short HEAD) == R/light_locale ]] && git worktree list --porcelain | /usr/bin/grep -A3 "^worktree $t$" | /usr/bin/grep -q "^locked"'
-check "identifier = directory name, no newline" '[[ $(xxd -p "$t/etc/ISABELLE_IDENTIFIER") == $(printf R-light_locale | xxd -p) ]]'
+check "identifier = directory name, no newline" 'cmp -s "$t/etc/ISABELLE_IDENTIFIER" <(printf R-light_locale)'
 check "contrib is a relative link into the shared tree" '[[ $(readlink "$t/contrib") == ../R/contrib && -f $t/contrib/comp/x ]]'
 check "lib/classes copied (real directory, new inode)" '[[ -d $t/lib/classes && ! -L $t/lib/classes && $(stat -c %i "$t/lib/classes/isabelle.jar") != $(stat -c %i "$shared/lib/classes/isabelle.jar") ]]'
 check "src/Tools/Demo/lib copied" '[[ -d $t/src/Tools/Demo/lib && ! -L $t/src/Tools/Demo/lib ]]'

@@ -19,7 +19,7 @@ import re
 from collections import Counter
 from pathlib import Path
 
-from common import Repo, main, run
+from common import Repo, listed, main, run
 
 KEYWORDS = {"val", "type", "eqtype", "datatype", "exception", "structure", "include", "sharing"}
 COMMENT = re.compile(r"\(\*([^*]|\*+[^*)])*\*+\)")
@@ -75,14 +75,8 @@ def show(repo: Repo, rev: str, path: str) -> str:
     return run(["git", "show", f"{rev}:{path}"], cwd=repo.common_dir).stdout
 
 
-def listed_heads(additions_file: Path) -> list[str]:
-    """The heads an additions file lists, read once (it may be a pipe, such as /dev/fd/N)."""
-    return [line.strip() for line in additions_file.read_text().splitlines()
-            if line.strip() and not line.lstrip().startswith("#")]
-
-
-def check(repo: Repo, base: str, rev: str, listed: list[str], source: str, files: list[str] | None = None) -> list[str]:
-    """The problems found (empty = the gate passes); `listed` are the heads read from `source`."""
+def check(repo: Repo, base: str, rev: str, heads: list[str], source: str, files: list[str] | None = None) -> list[str]:
+    """The problems found (empty = the gate passes); `heads` are the heads read from `source`."""
     if files is None:
         files = repo.git("diff-tree", "-r", "--name-only", "--no-renames", base, rev).split("\n")
     problems = []
@@ -96,9 +90,9 @@ def check(repo: Repo, base: str, rev: str, listed: list[str], source: str, files
         if removed:
             problems.append(f"signature entries of {path} changed or disappeared:\n  " + "\n  ".join(sorted(removed.elements())))
         added += [head(path, e) for e in (after - before).elements()]
-    if sorted(added) != sorted(listed):
-        extra = sorted(Counter(added) - Counter(listed))
-        missing = sorted(Counter(listed) - Counter(added))
+    if sorted(added) != sorted(heads):
+        extra = sorted(Counter(added) - Counter(heads))
+        missing = sorted(Counter(heads) - Counter(added))
         problems.append(f"the signature additions differ from {source}:"
                         + "".join(f"\n  not listed: {h}" for h in extra)
                         + "".join(f"\n  listed but not added: {h}" for h in missing))
@@ -113,13 +107,13 @@ def cli():
     p.add_argument("additions", type=Path)
     a = p.parse_args()
     repo = Repo(Path(a.C))
-    listed = listed_heads(a.additions)
-    problems = check(repo, a.base, a.rev, listed, str(a.additions))
+    heads = listed(a.additions)
+    problems = check(repo, a.base, a.rev, heads, str(a.additions))
     for problem in problems:
         print(f"ERROR: {problem}")
     if problems:
         return 1
-    print(f"signature sections: every entry of {a.base} unchanged in {a.rev}, {len(listed)} additions as listed")
+    print(f"signature sections: every entry of {a.base} unchanged in {a.rev}, {len(heads)} additions as listed")
 
 
 main(cli)

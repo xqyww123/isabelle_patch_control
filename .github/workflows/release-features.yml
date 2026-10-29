@@ -6,8 +6,9 @@
 # wants, build the rest with the next number), renders and builds the rest, looks inside every
 # package and uploads ONE artifact, feature-packages, with noarch/*.conda only.  `roundtrip` runs
 # tools/check-roundtrip against the installed packages and tool; `accept` runs tools/accept (§6) on
-# five legs; `publish` calls publish-conda.yml once for the whole batch; `smoke` installs from the
-# channel what the README tells users to install.
+# five legs through accept.yml, the reusable workflow tests.yml also runs on the toy channel;
+# `publish` calls publish-conda.yml once for the whole batch; `smoke` installs from the channel what
+# the README tells users to install.
 #
 # Secrets (set on this repository, never `secrets: inherit`): CONDA_R2_ACCESS_KEY_ID and
 # CONDA_R2_SECRET_ACCESS_KEY (publish-conda.yml); ISABELLE_PATCHED_READ_TOKEN, Contents: read on
@@ -51,9 +52,6 @@ concurrency:
 
 env:
   CHANNEL: https://conda.qiyuan.me
-  RATTLER_BUILD_URL: https://github.com/prefix-dev/rattler-build/releases/download/v0.69.1/rattler-build-x86_64-unknown-linux-musl
-  # an Isabelle_RPC-style component package on the channel, for §6 (c) and (e)
-  OTHER_COMPONENT: isabelle-performant-ml
 
 jobs:
   build:
@@ -91,23 +89,17 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tool_ref || github.ref }}
+          ref: ${{ inputs.tool_ref }}           # empty: the dispatched commit (github.sha), in every job
           path: tool
 
-      - name: "Install rattler-build and zstandard"
-        run: |
-          set -euo pipefail
-          curl -fsSL -o /tmp/rattler-build "$RATTLER_BUILD_URL"
-          chmod +x /tmp/rattler-build
-          /tmp/rattler-build --version
-          python3 -m pip install --quiet zstandard
+      - uses: ./tool/.github/actions/build-tools      # rattler-build as $RATTLER_BUILD, and zstandard
 
       - name: "The tool's version and build string prefix"
         id: tool
         run: |
           set -euo pipefail
           v=$(python3 -c "import tomllib; print(tomllib.load(open('tool/pyproject.toml', 'rb'))['project']['version'])")
-          prefix=$(TOOL_VERSION=$v TOOL_BUILD_NUMBER=0 /tmp/rattler-build build --recipe tool/conda/recipe.yaml --render-only 2>/dev/null \
+          prefix=$(TOOL_VERSION=$v TOOL_BUILD_NUMBER=0 "$RATTLER_BUILD" build --recipe tool/conda/recipe.yaml --render-only 2>/dev/null \
             | python3 -c "import json, sys; print(json.load(sys.stdin)[0]['recipe']['build']['string'].rsplit('_', 1)[0])")
           echo "version=$v" >> "$GITHUB_OUTPUT"
           echo "prefix=$prefix" >> "$GITHUB_OUTPUT"
@@ -139,11 +131,10 @@ jobs:
       - name: "Build the tool package (when the plan says so)"
         run: |
           set -euo pipefail
-          file=$(jq -r '.packages[] | select(.name == "isabelle-patch-control" and .action == "build") | .file' plan.json)
+          read -r file n <<< "$(jq -r '.packages[] | select(.name == "isabelle-patch-control" and .action == "build") | "\(.file) \(.build_number)"' plan.json)"
           [ -n "$file" ] || { echo "the tool is reused"; exit 0; }
-          n=${file##*_}; n=${n%.conda}
           TOOL_VERSION="${{ steps.tool.outputs.version }}" TOOL_BUILD_NUMBER="$n" \
-            /tmp/rattler-build build --recipe tool/conda/recipe.yaml --output-dir out -c conda-forge
+            "$RATTLER_BUILD" build --recipe tool/conda/recipe.yaml --output-dir out -c conda-forge
           [ -f "out/noarch/$file" ] || { echo "::error::the tool package is not the planned out/noarch/$file"; ls out/noarch; exit 1; }
 
       # The fixed table feature -> (GitHub repository, package directory in it).  local_type_abbrev,
@@ -160,16 +151,15 @@ jobs:
             [light_locale]="xqyww123/Light_Locale ."
             [dev_patches]="xqyww123/qiyuan_dev_patches ."
           )
-          jq -r '.packages[] | select(.tag and .action == "build") | "\(.tag) \(.file)"' plan.json | while read -r tag file; do
-            feature=$(cut -d/ -f2 <<< "$tag")
+          jq -r '.packages[] | select(.tag and .action == "build") | "\(.tag) \(.feature) \(.file) \(.build_number)"' plan.json \
+          | while read -r tag feature file n; do
             [ -n "${REPO[$feature]-}" ] || { echo "::error::no repository for $feature in the table"; exit 1; }
             read -r repo dir <<< "${REPO[$feature]}"
             url="https://github.com/$repo.git"
             [ -z "$TOKEN" ] || url="https://x-access-token:$TOKEN@github.com/$repo.git"
             git -c advice.detachedHead=false clone -q --depth 1 --branch "$tag" "$url" "src/$feature"
-            n=${file##*_}; n=${n%.conda}
             python3 tool/tools/render-feature-recipe "src/$feature/$dir" --isabelle-build "$B" --build-number "$n" -o "recipes/$feature"
-            /tmp/rattler-build build --recipe "recipes/$feature/recipe.yaml" --output-dir out --no-test
+            "$RATTLER_BUILD" build --recipe "recipes/$feature/recipe.yaml" --output-dir out --no-test
             [ -f "out/noarch/$file" ] || { echo "::error::$tag did not build the planned out/noarch/$file"; ls out/noarch; exit 1; }
           done
 
@@ -188,7 +178,7 @@ jobs:
           cat summary.json
           top=$(jq -r .top summary.json)
           echo "top=$top" >> "$GITHUB_OUTPUT"
-          echo "top_feature=$(cut -d/ -f2 <<< "${tags[-1]}")" >> "$GITHUB_OUTPUT"
+          echo "top_feature=$(jq -r .top_feature summary.json)" >> "$GITHUB_OUTPUT"
           echo "component=$(jq -r '.components[0] // ""' summary.json)" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v4
@@ -210,7 +200,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tool_ref || github.ref }}
+          ref: ${{ inputs.tool_ref }}           # empty: the dispatched commit (github.sha), in every job
           path: tool
       - uses: actions/download-artifact@v4
         with:
@@ -244,99 +234,36 @@ jobs:
           conda create -q -y -p "$RUNNER_TEMP/env" "${ch[@]}" "isabelle=2025.2=$B" isabelle-patch-control
           cp -a "$RUNNER_TEMP/env/isa" "$RUNNER_TEMP/pristine"
           conda install -q -y -p "$RUNNER_TEMP/env" "${ch[@]}" "$TOP"
-      - name: "Fetch the two tags from isabelle-patched"
+      - name: "check-roundtrip with the installed tool and features.d (it fetches the two tags it compares)"
         env:
           TOKEN: ${{ secrets.ISABELLE_PATCHED_READ_TOKEN }}
           TOP_FEATURE: ${{ needs.build.outputs.top_feature }}
         run: |
           set -euo pipefail
           env=$RUNNER_TEMP/env
-          bottom="$(cat "$env/isa/etc/ISABELLE_IDENTIFIER")/pristine/$(tr -d '[:space:]' < "$env/isa/etc/ISABELLE_ID")"
-          top=$(sed -n 's/^release_tag: //p' "$env/share/isabelle_patch_control/features.d/$TOP_FEATURE/provenance.txt")
           git init -q "$RUNNER_TEMP/patched"
-          git -C "$RUNNER_TEMP/patched" fetch -q --depth 1 "https://x-access-token:$TOKEN@github.com/xqyww123/isabelle-patched.git" \
-            "refs/tags/$bottom:refs/tags/$bottom" "refs/tags/$top:refs/tags/$top"
-          echo "fetched $bottom and $top"
-      - name: "check-roundtrip with the installed tool and features.d"
-        env:
-          TOP_FEATURE: ${{ needs.build.outputs.top_feature }}
-        run: |
-          set -euo pipefail
-          env=$RUNNER_TEMP/env
+          # the token stays in the remote's configuration, out of every command line a tool might print
+          git -C "$RUNNER_TEMP/patched" remote add origin "https://x-access-token:$TOKEN@github.com/xqyww123/isabelle-patched.git"
           python3 tool/tools/check-roundtrip "$RUNNER_TEMP/pristine" "$TOP_FEATURE" \
             --features-dir "$env/share/isabelle_patch_control/features.d" --tool "$env/bin/isabelle-patch-control" \
-            -C "$RUNNER_TEMP/patched"
+            -C "$RUNNER_TEMP/patched" --fetch origin
 
   accept:
-    name: "Accept (§6) on ${{ matrix.leg }}"
     needs: build
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 240
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - {leg: linux-64, os: ubuntu-latest}
-          - {leg: linux-aarch64, os: ubuntu-24.04-arm}
-          - {leg: osx-arm64, os: macos-14}
-          - {leg: osx-64, os: macos-14, subdir: osx-64}      # under Rosetta
-          - {leg: win-64, os: windows-latest}
-    defaults:
-      run:
-        shell: bash -l {0}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.tool_ref || github.ref }}
-          path: tool
-      - uses: actions/download-artifact@v4
-        with:
-          name: feature-packages
-          path: ${{ runner.temp }}/pkgs
-      - name: "The rehearsal's isabelle package"
-        if: needs.build.outputs.run_id != ''
-        uses: actions/download-artifact@v4
-        with:
-          name: conda-packages
-          path: ${{ runner.temp }}/pkgs-ci
-          repository: xqyww123/isabelle-packaging-ci
-          run-id: ${{ needs.build.outputs.run_id }}
-          github-token: ${{ secrets.PACKAGING_CI_ACTIONS_READ_TOKEN }}
-      - uses: conda-incubator/setup-miniconda@v3
-        with:
-          miniforge-version: latest      # conda-forge only: no defaults channel, no Terms of Service prompt
-          auto-activate-base: true
-          activate-environment: ""
-      - name: "Index the local channel"
-        env:
-          B: ${{ inputs.isabelle_build }}
-        run: bash tool/tools/local-channel "$RUNNER_TEMP/local" "$B" "$RUNNER_TEMP/pkgs" "$RUNNER_TEMP/pkgs-ci"
-      - name: "The component session (linux-64 and session_build_legs)"
-        if: needs.build.outputs.component == 'isabelle-light-locale' && (matrix.leg == 'linux-64' || contains(inputs.session_build_legs, matrix.leg))
-        run: |
-          set -euo pipefail
-          d="$RUNNER_TEMP/session"; mkdir -p "$d"
-          printf '%s\n' 'session Accept_Light_Locale = Light_Locale +' '  theories Accept_Light_Locale' > "$d/ROOT"
-          printf '%s\n' 'theory Accept_Light_Locale' '  imports Light_Locale.Light_Locale' 'begin' \
-            'light_locale Accept = fixes S :: "nat set" assumes "finite S"' 'end' > "$d/Accept_Light_Locale.thy"
-          echo "SESSION_DIR=$d" >> "$GITHUB_ENV"
-      - name: "tools/accept"
-        env:
-          B: ${{ inputs.isabelle_build }}
-          TOP: ${{ needs.build.outputs.top }}
-          COMPONENT: ${{ needs.build.outputs.component }}
-          OLD: ${{ needs.build.outputs.isabelle_old_build }}
-        run: |
-          set -euo pipefail
-          local_url=$(python -c "import pathlib, sys; print(pathlib.Path(sys.argv[1]).resolve().as_uri())" "$RUNNER_TEMP/local")
-          args=(--isabelle-build "$B" --top "$TOP" --other-component "$OTHER_COMPONENT" --old-build "$OLD"
-                --channel "$local_url" --channel "$CHANNEL" --channel conda-forge
-                --start-channel "$CHANNEL" --start-channel conda-forge --work "$RUNNER_TEMP/accept")
-          [ -z "$COMPONENT" ] || args+=(--component "$COMPONENT")
-          [ -z "${SESSION_DIR-}" ] || args+=(--session-dir "$SESSION_DIR")
-          # osx-64 under Rosetta: only the test environments, not the base environment's own packages
-          [ -z "${{ matrix.subdir }}" ] || export CONDA_SUBDIR="${{ matrix.subdir }}"
-          python -u tool/tools/accept "${args[@]}"
+    uses: ./.github/workflows/accept.yml
+    with:
+      artifact: feature-packages
+      ci_run_id: ${{ needs.build.outputs.run_id }}
+      tool_ref: ${{ inputs.tool_ref }}
+      isabelle_build: ${{ inputs.isabelle_build }}
+      old_build: ${{ needs.build.outputs.isabelle_old_build }}
+      top: ${{ needs.build.outputs.top }}
+      component: ${{ needs.build.outputs.component }}
+      other_component: isabelle-performant-ml      # an Isabelle_RPC-style component package on the channel
+      online_channel: https://conda.qiyuan.me
+      session_build_legs: ${{ inputs.session_build_legs }}
+    secrets:
+      PACKAGING_CI_ACTIONS_READ_TOKEN: ${{ secrets.PACKAGING_CI_ACTIONS_READ_TOKEN }}
 
   publish:
     needs: [build, roundtrip, accept]
@@ -370,7 +297,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tool_ref || github.ref }}
+          ref: ${{ inputs.tool_ref }}           # empty: the dispatched commit (github.sha), in every job
           path: tool
       - uses: conda-incubator/setup-miniconda@v3
         with:

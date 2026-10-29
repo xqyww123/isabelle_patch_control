@@ -82,15 +82,48 @@ def test_the_package_cache_is_checked_too(chain3, pkgs):
     assert problems == ["src/Pure/a.ML: the package cache's copy of isa/src/Pure/a.ML is not what paths.json records (edited in place)"]
 
 
-def test_a_file_the_packaging_changed_is_listed_not_checked(chain3, pkgs):
-    isabelle = pkgs[0]
-    (isabelle / "isa/etc/options").write_text("option packaged : bool = true\n")
+def test_a_file_the_packaging_changed(chain3, pkgs):
+    """Not checked while a feature touching it is applied (listed instead); once none is, it must be
+    the package's content again (plan decision 15)."""
+    isabelle, packaged = pkgs[0], b"option packaged : bool = true\n"
+    (isabelle / "isa/etc/options").write_bytes(packaged)
     paths = json.loads((isabelle / "info/paths.json").read_text())
     for p in paths["paths"]:
         if p["_path"] == "isa/etc/options":
-            p["sha256"] = hashlib.sha256(b"option packaged : bool = true\n").hexdigest()
+            p["sha256"] = hashlib.sha256(packaged).hexdigest()
     (isabelle / "info/paths.json").write_text(json.dumps(paths))
-    assert check(chain3.tree(), pkgs, []) == ([], ["etc/options"], 6)
+    t = chain3.tree()
+    api.apply(t, chain3.features_d)
+    assert check(t, pkgs) == ([], ["etc/options"], 6)
+    api.unapply(t, chain3.features_d)                    # the toy tree's etc/options is not the packaged one
+    assert check(t, pkgs, []) == (
+        ["etc/options: not the isabelle package's content, but no feature that changes it is applied"], [], 7)
+    (t / "etc/options").write_bytes(packaged)
+    assert check(t, pkgs, []) == ([], [], 7)
+
+
+def test_empty_files_and_a_path_with_a_space(toy, tmp_path):
+    """git writes no ---/+++ lines for an empty file and a TAB after a path with a space; the block
+    header is read from the diff --git and index lines (common.block_header)."""
+    toy.feature("f1", lambda: (toy.write("src/Pure/empty.ML", ""), toy.write("src/Pure/with space.ML", "one\ntwo\n")))
+    toy.feature("f2", lambda: (toy.write("src/Pure/new.ML", ""),
+                               toy.edit("src/Pure/with space.ML", lambda s: s.replace("two", "TWO"))))
+    assert cb.header(toy.features_d / "f1" / "src-Pure-empty.ML.patch")[1:] == ("0000000", "e69de29")
+    assert cb.header(toy.features_d / "f1" / "src-Pure-with space.ML.patch")[0] == "src/Pure/with space.ML"
+    deletion = b"diff --git a/src/Pure/e.ML b/src/Pure/e.ML\ndeleted file mode 100644\nindex e69de29..0000000\n"
+    assert cb.block_header(deletion) == ("src/Pure/e.ML", "e69de29", "0000000")
+    pk = unpacked(toy, tmp_path / "pkgs")
+    t = toy.tree()
+    assert check(t, pk, []) == ([], [], 3)
+    api.apply(t, toy.features_d, feature="f1")
+    assert check(t, pk, ["f1"])[0] == []
+    api.apply(t, toy.features_d)
+    assert check(t, pk)[0] == []
+    (t / "src/Pure/new.ML").write_text("not empty\n")
+    assert check(t, pk)[0] == [f"src/Pure/new.ML: blob {cb.blob_id(b'not empty' + bytes([10]))[:12]}, but f2 (applied) leaves it at e69de29"]
+    (t / "src/Pure/new.ML").write_text("")
+    api.unapply(t, toy.features_d)
+    assert check(t, pk, [])[0] == []
 
 
 def test_refusals(chain3, pkgs):

@@ -6,7 +6,7 @@ base=${TMPDIR:-/tmp}/isabelle-tools-tests-$$
 status=0
 for t in test_hook test_trees test_signatures test_make_patches test_advance_daily; do
   echo "=== $t"
-  "$here/$t.sh" "$base/$t" 2>&1 | /usr/bin/grep -E '^(WRONG|---)'
+  "$here/$t.sh" "$base/$t" 2>&1 | /usr/bin/grep -E '^(WRONG|---|           )'   # WRONG lines and their indented diagnostics
   rc=${PIPESTATUS[0]}
   (( rc == 0 )) || { echo "WRONG    $t exited with status $rc"; status=1; }
 done

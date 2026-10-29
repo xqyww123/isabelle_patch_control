@@ -1,5 +1,6 @@
 """tools/check-roundtrip (plan decision 17) on the toy chain: the tool against GNU patch."""
 import os
+import shutil
 import subprocess
 import sys
 
@@ -8,6 +9,14 @@ import pytest
 from conftest import ROOT, snapshot
 
 SCRIPT = ROOT / "tools" / "check-roundtrip"
+
+
+def gnu(command: str) -> bool:
+    return bool(shutil.which(command)) and "GNU" in subprocess.run([command, "--version"], capture_output=True, text=True).stdout
+
+
+pytestmark = pytest.mark.skipif(not all(map(gnu, ("find", "diff", "patch"))),
+                                reason="check-roundtrip needs GNU find, diff and patch; it runs only in the release's ubuntu job")
 
 
 def roundtrip(toy, tree, top, *extra):
@@ -23,6 +32,21 @@ def test_roundtrip_passes_on_the_toy_chain(chain3):
     assert "check-roundtrip: ok" in r.stdout and "shows the 2 created files" in r.stdout
     assert snapshot(tree) == before                                    # the pristine tree is not touched
     assert not [p for p in tree.parent.iterdir() if p.name.startswith("check-roundtrip-")]
+
+
+def test_fetch_takes_exactly_the_two_tags_from_a_remote(chain3, tmp_path):
+    """The release workflow's form: an empty repository whose remote holds the tags (--fetch)."""
+    empty = tmp_path / "fetched"
+    subprocess.run(["git", "init", "-q", str(empty)], check=True)
+    subprocess.run(["git", "-C", str(empty), "remote", "add", "origin", str(chain3.repo)], check=True)
+    r = subprocess.run([sys.executable, str(SCRIPT), str(chain3.tree()), "f3", "-C", str(empty), "--fetch", "origin",
+                        "--features-dir", str(chain3.features_d)], capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    tags = subprocess.run(["git", "-C", str(empty), "tag"], capture_output=True, text=True).stdout.split()
+    assert sorted(tags) == sorted([chain3.tags[0], chain3.tag_of("f3")])
+    r = subprocess.run([sys.executable, str(SCRIPT), str(chain3.tree()), "f3", "-C", str(tmp_path / "fetched"),
+                        "--features-dir", str(chain3.features_d)], capture_output=True, text=True)
+    assert r.returncode == 0                              # fetched once, the tags stay
 
 
 def test_roundtrip_fails_when_the_tool_and_the_repository_disagree(chain3):

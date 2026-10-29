@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""check-roundtrip <pristine tree> <top feature> --features-dir FD [-C <Isabelle repository>] [--tool <command>] [--keep]
+"""check-roundtrip <pristine tree> <top feature> --features-dir FD [-C <Isabelle repository>] [--fetch <remote>] [--tool <command>] [--keep]
 
 Check (b2) of the migration plan (patch tool plan decision 17): the chain of feature directories in
 FD, applied by the patch tool, gives the same tree as GNU patch applying the Isabelle repository's
@@ -14,7 +14,8 @@ diff from the pristine tag to the top feature's release tag; and the tool takes 
 
 The bottom tag is the tree's own pristine tag, the top tag the `release_tag` of
 FD/<top feature>/provenance.txt, both read by the tool's own readers.  The repository must hold
-both tags (-C defaults to the current directory); the created files are its
+both tags (-C defaults to the current directory; --fetch <remote> first fetches exactly these two
+tags from that remote of it, depth 1, as the release workflow does); the created files are its
 `git diff-tree --diff-filter=A`.  --tool defaults to this checkout's `python -m isabelle_patch_control`; in the release
 workflow it is the installed `isabelle-patch-control`.  Runs under umask 022; the copies live in a
 temporary directory next to the tree and are removed unless --keep.
@@ -51,6 +52,7 @@ def cli():
     p.add_argument("top", help="the chain's top feature (a directory name under FD)")
     p.add_argument("--features-dir", required=True, type=Path, metavar="FD")
     p.add_argument("-C", metavar="dir", default=os.getcwd(), help="a directory inside the Isabelle repository")
+    p.add_argument("--fetch", metavar="remote", help="fetch the two tags from this remote of the repository first (depth 1)")
     p.add_argument("--tool", default=None, help="the patch tool command (default: this checkout's)")
     p.add_argument("--keep", action="store_true", help="keep the two copies")
     a = p.parse_args()
@@ -61,6 +63,8 @@ def cli():
     if top is None:
         raise Refused(f"{fd / a.top / 'provenance.txt'} is missing")
     top_tag = top.release_tag
+    if a.fetch:
+        run(["git", "fetch", "-q", "--depth", "1", a.fetch, *(f"refs/tags/{t}:refs/tags/{t}" for t in (bottom, top_tag))], cwd=a.C)
     created = run(["git", "diff-tree", "-r", "--no-renames", "--name-only", "--diff-filter=A", bottom, top_tag],
                   cwd=a.C).stdout.split()
     tool = shlex.split(a.tool) if a.tool else [sys.executable, "-m", "isabelle_patch_control"]

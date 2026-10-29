@@ -149,3 +149,54 @@ def test_apply_unapply_leaves_the_pristine_file_set(applied):
     toy, t = applied
     assert tool(t, toy.features_d, "unapply").code == 0
     assert snapshot(t).keys() == toy.expected(None).keys()
+
+
+# --- Windows: a target held open (decision 5's retry; accept (n) tests only the refusal)
+
+def held_open(times: int):
+    """A write that fails with PermissionError `times` times, then succeeds; and its calls."""
+    calls = []
+
+    def write(path):
+        calls.append(path)
+        if len(calls) <= times:
+            raise PermissionError(13, "The process cannot access the file", path)
+        return "written"
+    return write, calls
+
+
+@pytest.fixture
+def on_windows(monkeypatch):
+    slept = []
+    monkeypatch.setattr(engine, "WINDOWS", True)
+    monkeypatch.setattr(engine.time, "sleep", slept.append)
+    return slept
+
+
+def test_retry_waits_out_a_target_held_open(on_windows):
+    write, calls = held_open(6)
+    assert engine._retry(write, "t") == "written"
+    assert on_windows == [0.1, 0.2, 0.4, 0.8, 1.6, 3.2] and len(calls) == 7
+
+
+def test_retry_gives_up_after_about_six_seconds(on_windows):
+    write, calls = held_open(7)
+    with pytest.raises(PermissionError):
+        engine._retry(write, "t")
+    assert len(calls) == 7 and sum(on_windows) == pytest.approx(6.3)
+
+
+def test_retry_raises_any_other_error_at_once(on_windows):
+    def full(path):
+        raise OSError(28, "No space left on device", path)
+    with pytest.raises(OSError) as e:
+        engine._retry(full, "t")
+    assert e.value.errno == 28 and on_windows == []
+
+
+def test_no_retry_off_windows(monkeypatch):
+    monkeypatch.setattr(engine, "WINDOWS", False)
+    write, calls = held_open(1)
+    with pytest.raises(PermissionError):
+        engine._retry(write, "t")
+    assert len(calls) == 1

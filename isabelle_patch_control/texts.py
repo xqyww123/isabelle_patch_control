@@ -7,6 +7,8 @@ its first line from the writer in conda_hook.run (decision 9); the texts here ca
 `interrupted`, which the command line prints."""
 from __future__ import annotations
 
+import os
+from dataclasses import dataclass
 from pathlib import Path
 
 CHANNELS = "-c https://conda.qiyuan.me -c conda-forge"
@@ -15,11 +17,23 @@ NO_FEATURES = "no feature packages installed"
 CREATED = "(created by the feature)"
 UPDATE_LINE = ("If you are updating or reinstalling, for example conda update --all: "
                "when it finishes, run isabelle-patch-control status.")
-SAVE_LINE = ("Copy anything of your own out of {tree} and out of this environment's Isabelle user directory (isabelle getenv -b\n"
-             "     ISABELLE_HOME_USER prints it; it is a directory under ~/.isabelle that belongs to this environment alone). The next step\n"
-             "     replaces every file of the isabelle package and deletes this environment's Isabelle user directory: the heaps built there,\n"
-             "     its etc/settings and preferences, and every component you registered by hand. Installed packages register their\n"
-             "     components again; your own settings do not come back.")
+
+
+def save_line(tree: Path) -> str:
+    """Step 1 of every repair that reinstalls isabelle.  It and reinstall() name this environment, so
+    that what the user saves is what the reinstall deletes, whichever environment is active."""
+    isabelle = tree / "bin" / ("isabelle.bat" if os.name == "nt" else "isabelle")
+    return (f"Copy anything of your own out of {tree} and out of this environment's Isabelle user directory\n"
+            f"     ({isabelle} getenv -b ISABELLE_HOME_USER prints it; it is a directory under ~/.isabelle).\n"
+            "     The next step replaces every file of the isabelle package and deletes this environment's Isabelle user directory:\n"
+            "     the heaps built there, its etc/settings and preferences, and every component you registered by hand. Installed\n"
+            "     packages register their components again; your own settings do not come back.")
+
+
+def reinstall(tree: Path) -> str:
+    """The reinstall of every repair (the tree of an environment is <prefix>/isa, decision 2): run in
+    another environment, it would delete that one's Isabelle user directory."""
+    return f"conda install -p {tree.parent} {CHANNELS} --force-reinstall isabelle"
 
 
 def _names(names) -> str:
@@ -104,17 +118,16 @@ def pre_unlink_failed(feature: str, package: str, detail: str) -> str:
 def symlink(path: Path, tree: Path) -> str:
     return (f"{path} is or lies under a symbolic link; isabelle-patch-control replaces files in place and does not follow links\n"
             "(conda's always_softlink / allow_softlinks settings create such trees). To fix:\n"
-            f"  1. {SAVE_LINE.format(tree=tree)}\n"
-            "  2. conda config --set always_softlink false; conda config --set allow_softlinks false\n"
-            f"  3. conda install {CHANNELS} --force-reinstall isabelle")
+            "  1. conda config --set always_softlink false; conda config --set allow_softlinks false\n"
+            f"  2. {save_line(tree)}\n"
+            f"  3. {reinstall(tree)}")
 
 
 # --- CONFLICT (§4)
 
-def conflict_full(feature: str, files, tree: Path, cache_dir: Path | None = None) -> str:
+def conflict_full(feature: str, files, tree: Path, cache: CacheCopy | None = None) -> str:
     """The complete diagnostic, written by the chain top's post-link.  `files` are (path, created)
-    pairs; `cache_dir` is the extracted_package_dir when a file was edited in place through its
-    hard link."""
+    pairs; `cache` when a file was edited in the package cache too."""
     files = list(files)
     paths = [p for p, _ in files]
     created = [p for p, c in files if c]
@@ -125,7 +138,7 @@ def conflict_full(feature: str, files, tree: Path, cache_dir: Path | None = None
              f"neither {feature} nor the packages that depend on it.",
              "If you remember exactly what you changed: undo it, then run isabelle-patch-control apply. Otherwise:"]
     if edited:
-        lines += [f"  1. {SAVE_LINE.format(tree=tree)}", step2(cache_dir)]
+        lines += [f"  1. {save_line(tree)}", step2(tree, cache)]
     if created:
         lines.append((f"  {'3' if edited else '1'}. {_names(created)} {'is a file' if len(created) == 1 else 'are files'} the feature "
                       f"itself creates {CREATED}: move {'it' if len(created) == 1 else 'them'} aside, then run isabelle-patch-control apply."))
@@ -136,13 +149,27 @@ def conflict_full(feature: str, files, tree: Path, cache_dir: Path | None = None
     return "\n".join(lines)
 
 
-def step2(cache_dir: Path | None) -> str:
-    if cache_dir is None:
-        return f"  2. conda install {CHANNELS} --force-reinstall isabelle   (your other feature packages are re-applied automatically)"
-    return (f"  2. Your edit went into conda's shared package cache, so a plain reinstall would keep it. Delete {cache_dir} (conda re-creates\n"
-            f"     it from the .conda archive), then run conda install {CHANNELS} --force-reinstall isabelle in this environment and in every other\n"
-            "     environment built from the same package cache (conda env list names the environments; they may share the edited file\n"
-            "     without reporting anything).")
+@dataclass(frozen=True)
+class CacheCopy:
+    """The isabelle package's copy in conda's package cache, edited too (decision 9): its directory,
+    or None while the command that prints the diagnostic is linking isabelle (conda writes the
+    record that names the directory last)."""
+    directory: Path | None
+
+
+def step2(tree: Path, cache: CacheCopy | None) -> str:
+    if cache is None:
+        return f"  2. {reinstall(tree)}\n     (your other feature packages are re-applied automatically)"
+    if cache.directory is not None:
+        where = f"Delete\n     {cache.directory} (conda re-creates it from the .conda archive), then run\n"
+    else:
+        where = ("Delete the\n     isabelle-<version>-<build> directory in one of the package caches that conda info lists, with the version and\n"
+                 f"     build that conda list -p {tree.parent} --full-name isabelle shows\n"
+                 "     (conda re-creates it from the .conda archive), then run\n")
+    return (f"  2. Your edit went into conda's shared package cache, so a plain reinstall would keep it. {where}"
+            f"     {reinstall(tree)}.\n"
+            "     Every other environment that has isabelle installed from the same package cache may share the edited file without\n"
+            "     reporting anything (conda env list names the environments): do step 1 and this reinstall there too, with its own path.")
 
 
 def conflict_line(feature: str, files) -> str:
@@ -159,10 +186,10 @@ REASON_WRITE = "a file could not be written"
 
 
 def residue(feature: str, reason: str, files, tree: Path, *, lock_package: tuple[str, str] | None = None,
-            cache_dir: Path | None = None) -> str:
+            cache: CacheCopy | None = None) -> str:
     """`files` are (path, created) pairs of this feature's files that still carry its changes.
     `lock_package` = (package, version) of the highest feature package replaces steps 1-3 after a
-    lock timeout; `cache_dir` selects the package-cache wording of step 2."""
+    lock timeout; `cache` selects the package-cache wording of step 2."""
     lines = [f"{feature} could not be fully undone (reason: {reason}). These files under {tree}",
              "still carry its changes:"]
     lines += [f"  {path}" + (f"   {CREATED}" if created else "") for path, created in files]
@@ -171,7 +198,7 @@ def residue(feature: str, reason: str, files, tree: Path, *, lock_package: tuple
         package, version = lock_package
         lines.append(f"  conda install {CHANNELS} {package}={version}; then conda remove {package}")
     else:
-        lines += [f"  1. {SAVE_LINE.format(tree=tree)}", step2(cache_dir),
+        lines += [f"  1. {save_line(tree)}", step2(tree, cache),
                   f"  3. Delete every file marked \"{CREATED}\" in these messages."]
     return "\n".join(lines)
 

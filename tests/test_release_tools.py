@@ -1,9 +1,12 @@
 """tools/release-plan and tools/check-packages (plan decision 11): the build job's plan against a
 file:// channel, and its look inside the packages; the archives are made here."""
+import functools
+import http.server
 import importlib.machinery
 import importlib.util
 import io
 import json
+import threading
 import tarfile
 import zipfile
 
@@ -58,23 +61,55 @@ def channel(tmp_path, indexed, served=()):
     return f"file://{ch}"
 
 
+@pytest.fixture
+def over_http():
+    """over_http(file URL) -> the same directory served on 127.0.0.1 by a server that, like the
+    channel's Cloudflare front, refuses urllib's default User-Agent with 403."""
+    class Handler(http.server.SimpleHTTPRequestHandler):
+        def do_GET(self):
+            if self.headers.get("User-Agent", "").startswith("Python-urllib/"):
+                self.send_error(403, "error code: 1010")
+            else:
+                super().do_GET()
+
+        def log_message(self, *args):
+            pass
+
+    servers = []
+
+    def serve(file_url):
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Handler, directory=file_url.removeprefix("file://")))
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        servers.append(server)
+        return f"http://127.0.0.1:{server.server_address[1]}"
+
+    yield serve
+    for server in servers:
+        server.shutdown()
+        server.server_close()
+
+
 def files_of(result):
     return {p["name"]: (p["action"], p["file"]) for p in result["packages"]}
 
 
-def test_plan_against_a_channel_with_a_served_file_not_yet_indexed(tmp_path):
+@pytest.mark.parametrize("transport", ["file", "http"])
+def test_plan_against_a_channel_with_a_served_file_not_yet_indexed(tmp_path, over_http, transport):
     url = channel(tmp_path,
                   [record("isabelle-patch-control", "1.0.0", 0), record("isabelle-expose-foreign", "1", 0, "1"),
                    record("isabelle-light-locale", "1", 0, "1")],
                   served=[record("isabelle-light-locale", "1", 1, "2"),        # uploaded, not indexed, pins build 2
                           record("isabelle-expose-foreign", "1", 1, "3")])     # pins another build: skipped
+    if transport == "http":                                                    # also the HTTP 404 of a file not served
+        url = over_http(url)
     result = rp.plan(url, "2", "1.0.0", "pyh4616a5c", ["Isabelle2025-2/expose_foreign/1", "Isabelle2025-2/light_locale/1"])
     assert files_of(result) == {
         "isabelle-patch-control": ("reuse", "isabelle-patch-control-1.0.0-pyh4616a5c_0.conda"),
         "isabelle-expose-foreign": ("build", "isabelle-expose-foreign-1-Isabelle2025_2_2.conda"),
         "isabelle-light-locale": ("reuse", "isabelle-light-locale-1-Isabelle2025_2_1.conda")}
-    assert [p.get("tag") for p in result["packages"]] == [None, "Isabelle2025-2/expose_foreign/1", "Isabelle2025-2/light_locale/1"]
-    assert result["isabelle_old_build"] == "1"             # indexed records only; the served 3 is not counted
+    assert [(p.get("tag"), p.get("feature"), p.get("build_number")) for p in result["packages"]] == [
+        (None, None, None), ("Isabelle2025-2/expose_foreign/1", "expose_foreign", 2), ("Isabelle2025-2/light_locale/1", "light_locale", None)]
+    assert result["isabelle_old_build"] == "1"             # the top's indexed records only; the served 2 is not counted
 
 
 def test_an_empty_channel_and_no_other_build(tmp_path):
@@ -86,12 +121,20 @@ def test_an_empty_channel_and_no_other_build(tmp_path):
     assert result["isabelle_old_build"] == ""
 
 
-def test_the_highest_other_build_is_the_old_one(tmp_path):
+def test_the_old_build_is_the_highest_other_one_the_chain_top_pins(tmp_path):
+    """§6 (h) installs the chain top at that build, so only the top's records count, of any version."""
+    other_line = ("isabelle-light-locale-1-Isabelle2026_1_0.conda",
+                  {"name": "isabelle-light-locale", "version": "1", "build": "Isabelle2026_1_0", "build_number": 0,
+                   "depends": ["isabelle ==2026.1 13"], "subdir": "noarch"})
     url = channel(tmp_path, [record("isabelle-light-locale", "1", 0, "9"), record("isabelle-light-locale", "1", 1, "10"),
-                             record("isabelle-light-locale", "2", 2, "11"),      # another version: not this batch's
-                             record("isabelle-light-locale", "1", 3, "12")])     # this batch's own build: not an old one
-    result = rp.plan(url, "12", "1.0.0", "p", ["Isabelle2025-2/light_locale/1"])
-    assert result["isabelle_old_build"] == "10"
+                             record("isabelle-light-locale", "2", 2, "11"),      # another version of the top: counts
+                             record("isabelle-light-locale", "1", 3, "12"),      # this batch's own build: not an old one
+                             record("isabelle-expose-foreign", "1", 4, "14"),    # a lower feature: no state of (h)
+                             other_line])                                        # another release line's pin
+    result = rp.plan(url, "12", "1.0.0", "p", ["Isabelle2025-2/expose_foreign/1", "Isabelle2025-2/light_locale/1"])
+    assert result["isabelle_old_build"] == "11"
+    lower_only = rp.plan(url, "14", "1.0.0", "p", ["Isabelle2025-2/expose_foreign/1"])
+    assert lower_only["isabelle_old_build"] == ""
 
 
 @pytest.mark.parametrize("tags, says", [(["light_locale/1"], "is not a release tag"),

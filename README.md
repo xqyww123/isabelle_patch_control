@@ -148,7 +148,7 @@ instead: a reinstall does not fix that case and costs the user directory). If yo
 what you changed, undo it and run `isabelle-patch-control apply`. Otherwise save your edit elsewhere
 and reinstall `isabelle`. Before that, copy anything of your own out of `isa/` and out of this
 environment's Isabelle user directory (`isabelle getenv -b ISABELLE_HOME_USER` prints it; it is a
-directory under `~/.isabelle` that belongs to this environment alone): the reinstall deletes that
+directory under `~/.isabelle`): the reinstall deletes that
 directory, with the heaps built in it, its `etc/settings` and preferences, and every component you
 registered by hand with `isabelle components -u`. Installed packages register their components
 again; your own settings do not come back. Then:

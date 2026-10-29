@@ -1,0 +1,139 @@
+# §6 of the patch tool plan on the five platform legs (decision 11's accept job), as a reusable
+# workflow: release-features.yml calls it on the batch, tests.yml on the toy channel
+# (tools/tests/toy-channel.sh).  One definition, so a green toy run is a run of the release gate's
+# own job.
+name: accept
+
+on:
+  workflow_call:
+    inputs:
+      artifact:
+        description: "The artifact whose .conda files make the local channel: feature-packages, or the toy channel's"
+        required: true
+        type: string
+      ci_run_id:
+        description: "A rehearsal: the isabelle-packaging-ci run whose conda-packages artifact joins the local channel"
+        default: ""
+        type: string
+      tool_ref:
+        default: ""
+        type: string
+      isabelle_build:
+        required: true
+        type: string
+      old_build:
+        default: ""
+        type: string
+      top:
+        required: true
+        type: string
+      component:
+        default: ""
+        type: string
+      other_component:
+        description: "An Isabelle_RPC-style component package for (c) and (e)"
+        default: ""
+        type: string
+      online_channel:
+        description: "https://conda.qiyuan.me for a batch; empty for the toy channel, which must never meet the online one"
+        default: ""
+        type: string
+      session_build_legs:
+        default: ""
+        type: string
+      strict:
+        description: "A skipped scenario is wrong (the toy channel, where every scenario can run)"
+        default: false
+        type: boolean
+    secrets:
+      PACKAGING_CI_ACTIONS_READ_TOKEN:
+        required: false
+
+jobs:
+  accept:
+    name: "Accept (§6) on ${{ matrix.leg }}"
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {leg: linux-64, os: ubuntu-latest}
+          - {leg: linux-aarch64, os: ubuntu-24.04-arm}
+          - {leg: osx-arm64, os: macos-15}
+          - {leg: osx-64, os: macos-15-intel}       # native Intel: under Rosetta Isabelle picks its arm64 programs
+          - {leg: win-64, os: windows-latest}
+    defaults:
+      run:
+        shell: bash -l {0}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tool_ref }}           # empty: the dispatched commit (github.sha)
+          path: tool
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact }}
+          path: ${{ runner.temp }}/pkgs
+      - name: "The rehearsal's isabelle package"
+        if: inputs.ci_run_id != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: conda-packages
+          path: ${{ runner.temp }}/pkgs-ci
+          repository: xqyww123/isabelle-packaging-ci
+          run-id: ${{ inputs.ci_run_id }}
+          github-token: ${{ secrets.PACKAGING_CI_ACTIONS_READ_TOKEN }}
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-version: latest      # conda-forge only: no defaults channel, no Terms of Service prompt
+          # (e) and (i) pin isabelle=2025.2=0, which only the online channel serves; past a rehearsal's local
+          # isabelle they reach it only under flexible priority (local-channel's build-0 guard rests on it too)
+          channel-priority: flexible
+          auto-activate-base: true
+          activate-environment: ""
+      - name: "Index the local channel"
+        env:
+          B: ${{ inputs.isabelle_build }}
+        run: bash tool/tools/local-channel "$RUNNER_TEMP/local" "$B" "$RUNNER_TEMP/pkgs" "$RUNNER_TEMP/pkgs-ci"
+      - name: "The component session (linux-64 and session_build_legs)"
+        if: inputs.component == 'isabelle-light-locale' && (matrix.leg == 'linux-64' || contains(inputs.session_build_legs, matrix.leg))
+        run: |
+          set -euo pipefail
+          d="$RUNNER_TEMP/session"; mkdir -p "$d"
+          printf '%s\n' 'session Accept_Light_Locale = Light_Locale +' '  theories Accept_Light_Locale' > "$d/ROOT"
+          printf '%s\n' 'theory Accept_Light_Locale' '  imports Light_Locale.Light_Locale' 'begin' \
+            'light_locale Accept = fixes S :: "nat set" assumes "finite S"' 'end' > "$d/Accept_Light_Locale.thy"
+          echo "SESSION_DIR=$d" >> "$GITHUB_ENV"
+      - name: "tools/accept"
+        env:
+          B: ${{ inputs.isabelle_build }}
+          TOP: ${{ inputs.top }}
+          COMPONENT: ${{ inputs.component }}
+          OTHER: ${{ inputs.other_component }}
+          OLD: ${{ inputs.old_build }}
+          ONLINE: ${{ inputs.online_channel }}
+          LEG: ${{ matrix.leg }}
+          STRICT: ${{ inputs.strict }}
+        run: |
+          set -euo pipefail
+          # the package cache on the environments' drive: conda hard-links, as on a user's machine ((a) checks it)
+          export CONDA_PKGS_DIRS="$RUNNER_TEMP/conda-pkgs"
+          local_url=$(python -c "import pathlib, sys; print(pathlib.Path(sys.argv[1]).resolve().as_uri())" "$RUNNER_TEMP/local")
+          args=(--isabelle-build "$B" --top "$TOP" --old-build "$OLD" --subdir "$LEG" --work "$RUNNER_TEMP/accept"
+                --channel "$local_url")
+          [ -z "$ONLINE" ] || args+=(--channel "$ONLINE" --start-channel "$ONLINE" --start-channel conda-forge)
+          args+=(--channel conda-forge)
+          [ -z "$COMPONENT" ] || args+=(--component "$COMPONENT")
+          [ -z "$OTHER" ] || args+=(--other-component "$OTHER")
+          [ -z "${SESSION_DIR-}" ] || args+=(--session-dir "$SESSION_DIR")
+          [ "$STRICT" != true ] || args+=(--strict)
+          python -u tool/tools/accept "${args[@]}"
+      - name: "Keep conda's output of every command"
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: accept-output-${{ inputs.artifact }}-${{ matrix.leg }}
+          path: ${{ runner.temp }}/accept/*.txt
+          if-no-files-found: ignore
+          retention-days: 14

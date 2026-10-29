@@ -177,8 +177,9 @@ checks each `.conda` (hooks present, `.bat` CRLF, `.sh` LF), uploads one artifac
 `feature-packages` containing only `noarch/*.conda`. **roundtrip** (linux-64) installs `isabelle`
 and the tool into a fresh environment, copies its `isa/` as the pristine tree, installs the chain
 top, and runs `tools/check-roundtrip` against the installed tool and `features.d`. **accept**
-(linux-64, linux-aarch64, osx-arm64 with osx-64 under Rosetta, win-64) installs the batch into a
-fresh environment and checks, through `status` and the bytes of every touched file, that the chain
+(linux-64, linux-aarch64, osx-arm64, osx-64 on an Intel runner, win-64; defined once in the reusable
+`.github/workflows/accept.yml`, which `tests.yml` also runs on the toy channel) installs the batch
+into a fresh environment and checks, through `status` and the bytes of every touched file, that the chain
 is applied, that removing a package reverses it, and that `--force-reinstall isabelle` re-applies
 it (plan §6). `roundtrip` and `accept` stop the batch. **publish** (only `publish=true`) calls
 `xqyww123/isabelle-packaging-ci/.github/workflows/publish-conda.yml@main` once with the artifact and

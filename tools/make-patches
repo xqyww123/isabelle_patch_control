@@ -48,7 +48,8 @@ import tarfile
 import tempfile
 from pathlib import Path
 
-from common import TOOLS_DIR, Refused, Repo, feature_pin, main, patch_blocks, run, split_branch
+from common import (TOOLS_DIR, Refused, Repo, build_string_prefix, feature_pin, listed, main, patch_blocks, run,
+                    shipped_files, split_branch)
 from isabelle_patch_control.api import apply_to, unapply_from
 
 # paths git tracks that an hg checkout of the release does not have, or has differently; the CI
@@ -57,12 +58,6 @@ TREE_HASH_EXCLUDES = [".gitignore", "Isabelle.options", "etc/ISABELLE_ID", "etc/
                       "etc/components", "lib/scripts/Isabelle_app"]
 RELEASE_FILES = ["etc/ISABELLE_ID", "etc/ISABELLE_TAGS", "etc/components", "lib/scripts/Isabelle_app", "Isabelle.options"]
 HG_ONLY = ["Admin", "README_REPOSITORY", ".hg_archival.txt", ".hgignore", ".hgtags"]
-
-
-def listed(path: Path) -> list[str]:
-    if not path.is_file():
-        raise Refused(f"{path} is missing")
-    return [line.strip() for line in path.read_text().splitlines() if line.strip() and not line.lstrip().startswith("#")]
 
 
 def resolve_branch(repo: Repo, cwd: Path, name: str) -> str:
@@ -92,12 +87,6 @@ def feature_repo(package: Path) -> Path:
     if r.returncode:
         raise Refused(f"{package} is not inside a git repository (every feature has its own)")
     return Path(r.stdout.strip()).resolve()
-
-
-def shipped_files(package: Path) -> list[Path]:
-    """tools/component_files.txt and the files it lists: the component payload the package ships."""
-    cf = package / "tools" / "component_files.txt"
-    return [cf, *(package / line for line in listed(cf))] if cf.is_file() else []
 
 
 def require_committed(top: Path, paths: list[Path]):
@@ -147,7 +136,7 @@ def feature_release(repo: Repo, cwd: Path, branch: str, version: str, package: P
 
     # 7. the feature repository
     top = feature_repo(package)
-    shipped = shipped_files(package)
+    shipped = [package / rel for rel in shipped_files(package)]
     lists = [package / "tools" / f for f in ("patched_files.txt", "signature_additions.txt", "required_sessions.txt")]
     require_committed(top, [*lists, *shipped])
     earlier = repo.tags_at(tip, f"{branch}/*")
@@ -227,7 +216,7 @@ def feature_release(repo: Repo, cwd: Path, branch: str, version: str, package: P
 
     # provenance
     tree_hash = repo.tree_hash_excluding(tip, TREE_HASH_EXCLUDES)
-    build_prefix = release.replace("-", "_")
+    build_prefix = build_string_prefix(release)
     base_version = base_tag.rsplit("/", 1)[1]
     base_is_pristine = base_name == "pristine"
     provenance = [

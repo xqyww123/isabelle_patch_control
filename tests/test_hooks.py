@@ -22,9 +22,15 @@ class Prefix:
         self.tree, self.features_d = features.locate(root)
         toy.tree(at).rename(self.tree)
         (root / "conda-meta").mkdir()
+        # isabelle is installed and this command does not link it: its record is there (decision 9)
+        self.isabelle_record.write_text(json.dumps({"name": "isabelle", "paths_data": {"paths": []}}))
         if features_d:
             shutil.copytree(toy.features_d, self.features_d)
         self.messages = root / ".messages.txt"
+
+    @property
+    def isabelle_record(self) -> Path:
+        return self.path / "conda-meta" / "isabelle-2025.2-1.json"
 
     def hook(self, *args, pkg: str | None = None) -> str:
         """Run the hook as conda would; return what it appended to .messages.txt (conda prints and
@@ -138,7 +144,7 @@ def test_post_link_refusals_end_with_the_command_to_run(prefix):
     text = prefix.hook("post-link")
     assert text == said(texts.post_link_failed(texts.symlink(real, prefix.tree)))
     assert "conda config --set always_softlink false" in text and "--force-reinstall isabelle" in text
-    assert "1. Copy anything of your own out of" in text                      # the user directory warning comes first
+    assert "2. Copy anything of your own out of" in text                      # right before the step that deletes it
 
 
 def test_post_link_write_failure_says_what_was_applied(prefix, monkeypatch):
@@ -351,6 +357,32 @@ def fake_isabelle_record(prefix: Prefix, cache: Path):
     (prefix.path / "conda-meta" / "isabelle-f1-1-Isabelle2025_2_0.json").write_text(json.dumps({"name": "isabelle-f1"}))
 
 
+def test_while_isabelle_is_being_linked_a_changed_file_names_the_cache_without_its_directory(prefix):
+    """No isabelle record in a post-link: this command links isabelle (conda writes the records
+    after the post-links), so its files came from the package cache just now (decision 9, (b))."""
+    prefix.hook("post-link")
+    prefix.edit("src/Pure/b.ML", "B5\n", "edited\n")                        # f2's file
+    prefix.edit("bin/new2", "echo new2", "echo mine")                        # f2 creates it
+    prefix.isabelle_record.unlink()
+    text = prefix.hook("post-link", pkg="isabelle-f3")
+    files = [("bin/new2", True), ("src/Pure/b.ML", False)]
+    assert texts.conflict_full("f2", files, prefix.tree, cache=texts.CacheCopy(None)) in text
+    assert f"conda list -p {prefix.path} --full-name isabelle shows" in text
+    # only a created path in the way: no step 2, so no word of the cache
+    prefix.edit("src/Pure/b.ML", "edited\n", "B5\n")
+    text = prefix.hook("post-link", pkg="isabelle-f3")
+    assert texts.conflict_full("f2", [("bin/new2", True)], prefix.tree) in text and "package cache" not in text
+
+
+def test_pre_unlink_does_not_infer_the_cache_from_a_missing_record(prefix):
+    """pre-unlink runs before conda removes any record: a missing one says nothing about the cache."""
+    prefix.hook("post-link")
+    prefix.edit("src/Pure/b.ML", "B5\n", "edited\n")
+    prefix.isabelle_record.unlink()
+    text = prefix.hook("pre-unlink", "f2")
+    assert "could not be fully undone" in text and "package cache" not in text
+
+
 def test_in_place_edit_through_the_hard_link_selects_the_cache_wording(prefix, tmp_path):
     cache = tmp_path / "pkgs" / "isabelle-2025.2-1"
     fake_isabelle_record(prefix, cache)
@@ -360,8 +392,8 @@ def test_in_place_edit_through_the_hard_link_selects_the_cache_wording(prefix, t
         f.write(b"XX")
     assert (cache / "isa" / "src" / "Pure" / "b.ML").read_bytes() == b.read_bytes()
     text = prefix.hook("post-link", pkg="isabelle-f3")
-    assert texts.conflict_full("f2", [("src/Pure/b.ML", False)], prefix.tree, cache_dir=cache) in text
-    assert f"Delete {cache} (conda re-creates" in text
+    assert texts.conflict_full("f2", [("src/Pure/b.ML", False)], prefix.tree, cache=texts.CacheCopy(cache)) in text
+    assert f"Delete\n     {cache} (conda re-creates it from the .conda archive)" in text
     # the same file edited through a new inode: the plain wording
     b.unlink()
     b.write_bytes(prefix.toy.expected(None)["src/Pure/b.ML"][0].replace(b"b5\n", b"YY\n"))

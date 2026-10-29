@@ -109,17 +109,30 @@ RATTLER_BUILD=<rattler-build 0.69.1> CONDA_EXE=<conda> HOOKS_TEST_CACHE=<dir kep
   tools/tests/test_conda_hooks.sh [<scratch dir>] [<scenario>...]   # the hook layer, real conda
 ```
 
-`test_conda_hooks.sh` (plan decision 15) builds a toy channel: the tool from `conda/recipe.yaml`, a
-toy `isabelle` package in three builds (0 with the old `ISABELLE_ID`, 1 and 2 pristine) whose stub
-`isa/bin/isabelle` answers `getenv` and `components`, whose pre-unlink is the real one and whose
-post-link only re-runs the direct dependents' post-links (plan §0 items 26, 33, 34), three toy
-features cut from a toy source repository and rendered by the real renderer (the middle one ships a
-component), a package that depends on `isabelle` only indirectly, a broken tool in a channel of its
-own, and a channel without the re-release for build 2. Every scenario starts from a new environment
-with a private `HOME`, `CONDARC` and package cache and reads conda's own output; the tree's bytes
-are checked by `tools/check-bytes`. The lock scenarios (`s_residue`, `s_rule`) wait for the tool's
-60-second lock timeout three times each; the whole run (116 checks in eleven scenarios) took 96
-minutes on the author's machine, most of it conda's solving.
+On GitHub, `.github/workflows/tests.yml` runs all of it on every push to `main` (and weekly):
+`lint` (actionlint over the workflows), `unit` (pytest on Linux at the tool's declared floors,
+python 3.12 and git 2.43, and on macOS at the latest; `run-all.sh` on Linux), `toy-channel`
+(`toy-channel.sh` with the release's rattler-build), `hooks` (`test_conda_hooks.sh`) and `accept`
+(`tools/accept --strict` on the toy channel on the five legs, through the release's own
+`accept.yml`). Kept local and uncommitted: mutation checks of new tests and one-off negative
+controls (plan decision 15).
+
+`test_conda_hooks.sh` (plan decision 15) runs on the toy channels of `tools/tests/toy-channel.sh`:
+the tool from `conda/recipe.yaml` (with its recipe's tests); a toy `isabelle` package in three
+builds (0 with the old `ISABELLE_ID`, 1 and 2 pristine) whose `isa/bin/isabelle` and
+`isa/bin/isabelle.bat` run one Python stub (`tools/tests/toy_isabelle.py`: `getenv`, `version`,
+`components`), whose two pre-unlinks are the real ones and whose post-link only re-runs the direct
+dependents' post-links (plan §0 items 26, 33, 34); three toy features cut from a toy source
+repository and rendered by the real renderer (each creates a file, the middle one ships a
+component); a component package of the Isabelle_RPC kind; a package that depends on `isabelle`
+only indirectly; a broken tool in a channel of its own; and a channel without the re-release for
+build 2. Every package is noarch, so `tools/accept` runs on the same channel on all five platforms.
+Every scenario starts from a new environment with a private `HOME`, `CONDARC` and package cache
+(`s_hardlink` has one of its own, so a failure cannot leave the shared one edited) and reads conda's
+own output; the tree's bytes are checked by `tools/check-bytes`. The lock scenarios (`s_residue`,
+`s_rule`) wait for the tool's 60-second lock timeout three times each; the twelve scenarios take
+about half an hour on the author's machine, most of it conda's solving (one run also stalled for
+an hour inside a single conda command).
 
 `tests/conftest.py` builds a toy Isabelle tree and a toy chain of three features the way
 `make-patches` builds real ones: commits in a toy git repository, `git diff-tree -r -p --no-renames`
@@ -141,21 +154,24 @@ reported with the status, never a traceback; permission bits under umask 002 and
 0755 file restored; a hard-linked changed file keeping its content and mode; five hostile git
 environments giving the clean result, git looked up at the prefix first and refused below 2.43; the
 lock (read-only tree and parent, busy within a shortened `engine.LOCK_TIMEOUT`, shared, two
-exclusive runs, no run without the exclusive lock touching the staging directory); the directory
+exclusive runs, no run without the exclusive lock touching the staging directory); the retry of
+`os.replace` on a target held open on Windows (with `engine.WINDOWS` patched); the directory
 interface; the hooks against a fake `$PREFIX` (post-link idempotence and single report, the
 CONFLICT diagnostic from the top package only and naming the lowest stopped feature, lock busy, the
 old build, refusals framed with the command to run, a write failure saying what was applied, the
 ASCII `.messages.txt`, pre-unlink's success texts, residue blocks for the three reasons, the
 chain's message when the packages do not link, a non-zero exit with nothing written when the
 residue cannot be computed, the in-place edit through a hard link selecting the package-cache
-wording); `check-roundtrip` on the toy chain, a CRLF and a Latin-1 file included, and a wrapped tool
+wording, and the same wording without the directory in a post-link that has no `isabelle` record
+because the command is linking isabelle itself); `check-roundtrip` on the toy chain, a CRLF and a Latin-1 file included, and a wrapped tool
 with one fault each for the mode listing, the created-file check and the check after unapply (the
 exit-code checks and the "A equals the pristine tree" guard have no fault test); `plan_builds`.
 
-Not covered here: the hook layer against real conda (a toy channel; plan decision 15, §5 step 5),
-`check_bytes` of the release workflow, and everything Windows-specific (`msvcrt` lock, `.bat`
-hooks, `core.longpaths`, retries of `os.replace`): those run on the win-64 leg of the release
-workflow.
+Not covered by pytest: the hook layer against real conda (`test_conda_hooks.sh`), and the
+Windows-specific behaviour, which `tools/accept` checks on the win-64 leg: the `msvcrt` lock while
+`type` and `isabelle version -i` read `etc/ISABELLE_ID`, a read-only and an in-use target, the
+`.bat` hooks including a negative exit code, the git the tool runs, and `core.longpaths` taking
+effect (a patch and its target over 260 characters apply, and fail with the flag turned off).
 
 A check against the real chain, done once by hand: build `features.d` from the Isabelle source
 repository's branches with `git diff-tree` (read-only), extract the touched files of the official

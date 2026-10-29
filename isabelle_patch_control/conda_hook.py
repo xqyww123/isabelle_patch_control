@@ -59,7 +59,8 @@ def post_link(prefix: Path, pkg_name: str | None) -> list[str]:
         feature = res.before.chain[s.number - 1].name
         if _is_top(pkg_name, res.before.chain):
             files = [(t, res.before.levels[t].created_by(s.number)) for t in s.conflicts]
-            out.append(texts.conflict_full(feature, files, tree, cache_dir=_edited_through_hardlink(prefix, tree, s.conflicts)))
+            cache = _edited_in_cache(prefix, tree, s.conflicts, linking=True)
+            out.append(texts.conflict_full(feature, files, tree, cache=cache))
         else:
             out.append(texts.conflict_line(feature, s.conflicts))
     return out
@@ -104,15 +105,19 @@ def _residue(prefix: Path, tree: Path, st: api.Status, reason: str, *, level: Ca
     left = [(t, st.levels[t].created_by(k)) for t in st.features[k - 1].files if (lv := level(t)) is None or lv >= k]
     if not left:
         return ""
-    cache = None if lock_package else _edited_through_hardlink(prefix, tree, [t for t, _ in left])
-    return texts.residue(st.chain[k - 1].name, reason, left, tree, lock_package=lock_package, cache_dir=cache)
+    cache = None if lock_package else _edited_in_cache(prefix, tree, [t for t, _ in left])
+    return texts.residue(st.chain[k - 1].name, reason, left, tree, lock_package=lock_package, cache=cache)
 
 
-def _edited_through_hardlink(prefix: Path, tree: Path, targets) -> Path | None:
+def _edited_in_cache(prefix: Path, tree: Path, targets, *, linking: bool = False) -> texts.CacheCopy | None:
     """Decision 9's one reading of conda-meta: the `isabelle` record's extracted_package_dir and
     paths_data.  A file that is the same inode as the package cache's copy but no longer has the
     recorded sha256 was edited in place through the hard link; a plain reinstall keeps the edit.
-    Returns the extracted_package_dir when any of `targets` is such a file."""
+    Returns the extracted_package_dir when any of `targets` is such a file.  In a post-link
+    (`linking`) without an `isabelle` record, this very command is linking isabelle (conda writes
+    the records after the post-links): its files came from the package cache just now, so a
+    changed target of the package means the cache's copy is changed; its directory is not known
+    yet (a created path in the way has no step 2 to word)."""
     meta = prefix / "conda-meta"
     if not meta.is_dir():
         return None
@@ -133,6 +138,6 @@ def _edited_through_hardlink(prefix: Path, tree: Path, targets) -> Path | None:
             except OSError:
                 same = False
             if same and hashlib.sha256(mine.read_bytes()).hexdigest() != sha:
-                return extracted
+                return texts.CacheCopy(extracted)
         return None
-    return None
+    return texts.CacheCopy(None) if linking and targets else None

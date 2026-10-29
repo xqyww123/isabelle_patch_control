@@ -9,14 +9,15 @@ post-link names that component's directory literally; the tool package ships its
 
 --chain: the feature packages are exactly these release tags, bottom first, each one's base_tag
 the tag before it and the first one's a pristine tag.  --summary writes {"chain": [packages,
-bottom first], "top": <package>, "components": [packages that ship a component]} for the jobs
-after the build.
+bottom first], "top": <package>, "top_feature": <feature>, "components": [packages that ship a
+component]} for the jobs after the build.
 """
 import argparse
 import json
 from pathlib import Path
 
 from common import Refused, conda_archive, main
+from isabelle_patch_control.features import provenance_fields
 from isabelle_patch_control.names import feature_name, package_name
 
 TOOL = "isabelle-patch-control"
@@ -65,7 +66,7 @@ def chain_problems(archives: dict[Path, tuple[dict, dict]], tags: list[str]) -> 
         feature = feature_name(index["name"])
         prov = files.get(f"share/isabelle_patch_control/features.d/{feature}/provenance.txt")
         if prov:
-            fields = dict(line.split(": ", 1) for line in prov[0].decode().splitlines() if ": " in line)
+            fields = provenance_fields(prov[0].decode())
             provenance[fields["release_tag"]] = fields["base_tag"]
     out = []
     if sorted(provenance) != sorted(tags):
@@ -94,10 +95,12 @@ def cli():
     if report:
         raise Refused("\n  ".join(["the packages are not as the batch needs them:", *report]))
     if a.summary:
-        chain = [package_name(t.split("/")[1]) for t in a.chain or []]
+        features = [t.split("/")[1] for t in a.chain or []]
+        chain = [package_name(f) for f in features]
         components = sorted(index["name"] for index, files in archives.values()
                             if any(f.startswith(f"share/{index['name']}/") for f in files))
-        a.summary.write_text(json.dumps({"chain": chain, "top": chain[-1] if chain else None, "components": components}))
+        a.summary.write_text(json.dumps({"chain": chain, "top": chain[-1] if chain else None,
+                                         "top_feature": features[-1] if features else None, "components": components}))
     print(f"check-packages: {len(a.packages)} packages as expected")
 
 

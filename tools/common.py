@@ -68,14 +68,67 @@ def patch_blocks(diff: bytes) -> dict[str, bytes]:
     binary diffs are not released (patch tool plan decision 16)."""
     out = {}
     for block in (b for b in re.split(rb"(?m)^(?=diff --git )", diff) if b):
-        head = block.split(b"\n", 1)[0].decode(errors="replace")      # git quotes unusual paths, so ASCII
-        m = re.fullmatch(r"diff --git a/(.*) b/(.*)", head)
-        if not m or m.group(1) != m.group(2):
-            raise Refused(f"unexpected diff header: {head}")
+        path = block_path(block)
         if re.search(rb"(?m)^(old mode|new mode|Binary files |GIT binary patch|similarity index)", block):
-            raise Refused(f"{m.group(1)}: mode changes, renames and binary diffs are not released")
-        out[m.group(1).replace("/", "-") + ".patch"] = block
+            raise Refused(f"{path}: mode changes, renames and binary diffs are not released")
+        out[path.replace("/", "-") + ".patch"] = block
     return out
+
+
+COMPONENT_LIST = "tools/component_files.txt"
+
+
+def listed(path: Path) -> list[str]:
+    """The entries of a list file (tools/*.txt, an additions file): its non-blank lines that do not
+    start with #.  Read once, so a pipe (/dev/fd/N) works."""
+    if not path.exists():
+        raise Refused(f"{path} is missing")
+    return [line.strip() for line in path.read_text().splitlines() if line.strip() and not line.lstrip().startswith("#")]
+
+
+def shipped_files(package: Path) -> list[str]:
+    """The component payload of a feature package, relative to its package directory:
+    tools/component_files.txt and the files it lists; none without that list."""
+    return [COMPONENT_LIST, *listed(package / COMPONENT_LIST)] if (package / COMPONENT_LIST).is_file() else []
+
+
+def components_sh(package: str, verb: str) -> str:
+    """The hook lines that register (-u) or unregister (-x) a package's component, share/<package>."""
+    return (f'"$PREFIX/isa/bin/isabelle" components {verb} "$PREFIX/share/{package}" 2>/dev/null \\\n'
+            f'  || echo "warning: \'isabelle components {verb} {package}\' failed; the session may be unavailable"'
+            f' >> "$PREFIX/.messages.txt"\n')
+
+
+def components_bat(package: str, verb: str) -> list[str]:
+    # Isabelle_RPC/conda/recipe.yaml's lines without their `@echo off`: a Cygwin path for
+    # components, and the getenv warm-up without which the first call cannot run a Scala tool.
+    return [f'set "COMP=%PREFIX%\\share\\{package}"',
+            'set "DL=%COMP:~0,1%"',
+            'set "REST=%COMP:~2%"',
+            'set "REST=%REST:\\=/%"',
+            'set "CYG=/cygdrive/%DL%%REST%"',
+            'call "%PREFIX%\\isa\\bin\\isabelle.bat" getenv -b ISABELLE_HOME >nul 2>&1',
+            f'call "%PREFIX%\\isa\\bin\\isabelle.bat" components {verb} "%CYG%" >nul 2>&1']
+
+
+def block_path(block: bytes) -> str:
+    """The path of one `git diff` block, from its `diff --git a/P b/P` line.  Not from `---`/`+++`:
+    git writes none for an empty file and appends a TAB to a path with a space."""
+    head = block.split(b"\n", 1)[0].decode(errors="replace")          # git quotes unusual paths, so ASCII
+    m = re.fullmatch(r"diff --git a/(.*) b/\1", head)
+    if not m:
+        raise Refused(f"unexpected diff header: {head}")
+    return m[1]
+
+
+def block_header(block: bytes) -> tuple[str, str, str]:
+    """(path, pre-image, post-image) of one `git diff` block; the images come from its `index
+    <pre>..<post>` line, an all-zero image being a file absent on that side."""
+    path = block_path(block)
+    index = re.search(rb"(?m)^index ([0-9a-f]+)\.\.([0-9a-f]+)", block.split(b"\n@@", 1)[0])
+    if not index:
+        raise Refused(f"{path}: no index line in the diff header")
+    return path, index[1].decode(), index[2].decode()
 
 
 def split_branch(branch: str) -> tuple[str, str]:
@@ -337,6 +390,17 @@ def isabelle_pin(build_string_prefix: str, isabelle_build: str) -> str:
     one and the same (rattler-build records it in `depends` as written).  `==`, not a bare version:
     rattler-build refuses `isabelle 2025.2 1` in a recipe; conda reads both the same."""
     return f"isabelle =={build_string_prefix.removeprefix('Isabelle').replace('_', '.')} {isabelle_build}"
+
+
+def pinned_build(record: dict, build_string_prefix: str) -> str | None:
+    """The inverse of isabelle_pin: the isabelle build a package record's depends pin, or None."""
+    pin = isabelle_pin(build_string_prefix, "")
+    return next((dep[len(pin):] for dep in record.get("depends", []) if dep.startswith(pin) and dep != pin), None)
+
+
+def build_string_prefix(release: str) -> str:
+    """A release line's build string prefix: Isabelle2025-2 -> Isabelle2025_2 (conda refuses '-' there)."""
+    return release.replace("-", "_")
 
 
 def feature_pin(version: str, build_string_prefix: str) -> str:

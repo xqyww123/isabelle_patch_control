@@ -1,0 +1,21 @@
+# The tools of the jobs that build packages or look inside them (patch tool plan decision 11): the
+# release's build job, and the toy-channel and hooks jobs of tests.yml.  The rattler-build version
+# is pinned here and nowhere else.
+name: build-tools
+description: "rattler-build 0.69.1 as $RATTLER_BUILD, and a python with the zstandard module"
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+    - shell: bash
+      run: |
+        set -euo pipefail
+        rb=$RUNNER_TEMP/rattler-build
+        curl -fsSL -o "$rb" https://github.com/prefix-dev/rattler-build/releases/download/v0.69.1/rattler-build-x86_64-unknown-linux-musl
+        echo "d72b98145cf9bee5a89e24b94f1ccb30150282a678d9e76ab649fdcc4e82d245  $rb" | sha256sum -c -
+        chmod +x "$rb"
+        "$rb" --version
+        python3 -m pip install --quiet zstandard
+        echo "RATTLER_BUILD=$rb" >> "$GITHUB_ENV"
