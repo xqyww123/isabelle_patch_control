@@ -152,6 +152,10 @@
    **10-29 范围外问题按用户授权（"你可以自决"+"一定要尽可能简单，一个地方讲清楚了不要到处重复"）只改两处**：`texts.save_line(tree)`（原
    `SAVE_LINE`，三种提示共用）点名本环境的 `isa/bin/isabelle`（Windows `isabelle.bat`）；第 2 步缓存版写 "every other environment with isabelle
    …"。第三轮 reader（`wf_6b690b7c-209`）一致指出作者"其余命令在错的环境里不丢东西"的理由对重装那条不成立、只改第 1 步反而更糟；于是加 `texts.reinstall(tree)`（`-p <tree.parent>`，三种提示共用），`CacheCopy` 只剩 `directory`，缓存版第 2 步让其他环境也先做第 1 步，符号链接拒绝调成 conda config → 保存 → 重装。计划 §4 已改（残留块第 1、2 步改为引用）。最后核对 `wf_ae1893a3-3ce` 与真 conda `s_hardlink`（`scratchpad/hooks8`）：真 conda 14/14 过；最后核对查实不丢东西，另删 `save_line` 与 `common-readme.md` 里 "that belongs to this environment alone"（软链接树里为假），三条少见的记进计划 §0 第 39 条不改。pytest 173、run-all 219 过。提交仍等用户说"提交"。
+   **10-29 用户"提交"**：工具仓库 `0133f6f`（5 个新文件 + 32 个修改）已推 origin；主仓库 `092a619e` 只动子模块指针，未推。GitHub 首跑
+   run 40829078927：lint、两个 unit、toy-channel、accept 的 linux-64/linux-aarch64/osx-arm64/osx-64 过；hooks 失败（Miniforge base 是
+   python 3.14、没有 zstandard → `common.unzstd` 先用标准库 `compression.zstd`）；win-64 accept 87 过 4 错（只读目标的暂存副本删不掉 →
+   `engine._remove_tree` 先去只读属性）。两处已修、pytest 173 过，**未提交，等用户"提交"后推送重跑**。
    接下来（每件仍要用户下令）：light 的 `tools/component_files.txt`、带 `-d <light 仓库>` 的构建、
    `make-patches light_locale <v>`（门禁 0 已满足：light 分支与 `Isabelle2025-2/future_assign_interrupt` 的 merge-base 就是带 tag 的 6d8be01）；
    checklist 现在在 `RELEASE.md`，**在构建之前**过。之后三个新 feature、`contrib/qiyuan_dev_patches/`（GitHub 仓库已建、本地目录未建）。第 4 步 `check-roundtrip` 在官方 tarball 树上跑；第 5 步渲染器、工具的 `conda/recipe.yaml`、

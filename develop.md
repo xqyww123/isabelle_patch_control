@@ -103,7 +103,7 @@ passing; change the plan's §4 first.
 ## Tests
 
 ```
-python -m pytest            # about 35 seconds; needs the zstandard module (conda's own dependency)
+python -m pytest            # about 35 seconds; needs the zstandard module (the tools also use Python 3.14's own zstd)
 tools/tests/run-all.sh      # the toy runs of tools/ (make-patches, run-tree, ...), about a minute
 RATTLER_BUILD=<rattler-build 0.69.1> CONDA_EXE=<conda> HOOKS_TEST_CACHE=<dir kept between runs> \
   tools/tests/test_conda_hooks.sh [<scratch dir>] [<scenario>...]   # the hook layer, real conda

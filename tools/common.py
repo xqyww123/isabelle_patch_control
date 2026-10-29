@@ -9,6 +9,7 @@ A tree's `etc/ISABELLE_IDENTIFIER` equals its directory name (new-tree is the on
 """
 from __future__ import annotations
 
+import io
 import json
 import os
 import re
@@ -411,19 +412,27 @@ def feature_pin(version: str, build_string_prefix: str) -> str:
     return f"=={version} {build_string_prefix}_*"
 
 
+def unzstd(data: bytes) -> bytes:
+    """zstd decompression: the standard library's from Python 3.14, else the zstandard module."""
+    try:
+        from compression import zstd
+    except ImportError:
+        import zstandard
+        return zstandard.ZstdDecompressor().stream_reader(io.BytesIO(data)).read()
+    return zstd.decompress(data)
+
+
 def conda_archive(data: bytes) -> tuple[dict, dict[str, tuple[bytes, int]]]:
     """(info/index.json, {path: (bytes, mode)} of the payload) of a .conda archive: a zip of two
-    zstd tarballs (needs the zstandard module, which conda itself depends on)."""
-    import io
+    zstd tarballs."""
     import tarfile
     import zipfile
-    import zstandard
 
     z = zipfile.ZipFile(io.BytesIO(data))
 
     def members(prefix: str) -> dict[str, tuple[bytes, int]]:
         name = next(n for n in z.namelist() if n.startswith(prefix) and n.endswith(".tar.zst"))
-        raw = zstandard.ZstdDecompressor().stream_reader(io.BytesIO(z.read(name))).read()
+        raw = unzstd(z.read(name))
         with tarfile.open(fileobj=io.BytesIO(raw)) as t:
             return {m.name: (t.extractfile(m).read(), m.mode) for m in t.getmembers() if m.isfile()}
 

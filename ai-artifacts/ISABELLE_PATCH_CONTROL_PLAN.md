@@ -511,7 +511,8 @@ README 已有 "Working in the Isabelle source repository" 一节。都未提交�
   算出的那份快照（rev 3 先算层级再重放一遍、多出 42 次 `git` 调用，删掉）。
 - 在哪里重放**由锁的模式决定**，不由命令名决定：**只有持排他锁的那次运行**用暂存目录 `<realpath(树)>.staging`（`$PREFIX/isa.staging`）——与树
   同一文件系统（`os.replace` 才是原子的；树是符号链接时取 realpath，否则 EXDEV），**不在树里**（残留不会让 `isa/` 留下来），持锁后先清空、
-  结束时删掉（`finally` 里也删）。其他一切 `git` 调用都在新建的临时目录（`tempfile.mkdtemp()`）里：读目标、`status`、任何 `--dry-run`、
+  结束时删掉（`finally` 里也删）；删的时候先去掉只读属性——目标只读时它的副本也是只读的（副本沿用目标的权限位），Windows 不让删只读文件，
+  旧代码把它悄悄留下，之后每次运行开头清空暂存目录都报 Access is denied（2026-10-29 GitHub 首跑 win-64 的 §6 (n) 查出）。其他一切 `git` 调用都在新建的临时目录（`tempfile.mkdtemp()`）里：读目标、`status`、任何 `--dry-run`、
   锁超时后 pre-unlink 的层级计算，前缀下不写任何东西。目录接口（决定 8）在 `realpath(<目录>)` 旁边的一个 per-run `mkdtemp` 里重放、不加锁
   ——这是"工具对树加锁"的一处有意例外，因为目录接口的调用方（门禁、(b2)）自己拥有那个目录。于是"只有锁的持有者碰暂存目录"由构造保证，
   超时后不持锁算层级的 pre-unlink 不会碰到持锁者正在用的暂存目录（评审四 C18 实测）。
@@ -1441,6 +1442,7 @@ feature，先这样恢复、再 `conda remove <它的包名>`——由工具反�
 | 改规约提议：`core.longpaths` 不做长路径测试；(l) 量 post-link 在锁里做的整链 apply | 前者用户同意、Opus agent 验证成立（附条件，理由改记），用户 2026-10-29 另加探针，已做于决定 4、15、§6 (a)；后者作者按授权采纳，已做于决定 15、§6 (l)；持锁上界改 30 秒（第 39 条） |
 | 本地冒烟查出：重装 `isabelle` 的事务里选不了硬链接文案 | 用户选 (b)，已做于决定 9；新文案与对提案的一处偏离待用户批准（第 39 条） |
 | GitHub 测试方案 judge 的两件设计事：macOS runner；可复用 `accept.yml` 与共用安装 action | 用户 2026-10-29 都同意，已做于决定 11、15（第 39 条） |
+| GitHub 首跑（2026-10-29，`0133f6f`，run 40829078927）：十个 job 八个过 | 两处失败都已修（未提交）：钩子层 job 的 python 是 Miniforge base 的 3.14，没有 zstandard——`tools/common.py` 解 `.conda` 先用 3.14 标准库的 zstd；win-64 §6 (n) 只读目标之后不收敛——暂存目录的只读副本删不掉，已做于决定 5 |
 | 改规约提议（可选）：`check-roundtrip` 去掉位置参数 `<链顶 feature>` | 不采纳：改接口，属设计；位置参数照旧 |
 
 ### 10.0 rev 6 → 代码评审第一轮（2026-10-25；38 条 challenge，报告 `ISABELLE_PATCH_CONTROL_CODE_REVIEW1.md`；用户裁决见 §0 第 38 条）

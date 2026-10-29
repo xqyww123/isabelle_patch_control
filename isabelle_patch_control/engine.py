@@ -11,6 +11,7 @@ import errno
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -115,14 +116,14 @@ def staging_dir(tree: Path):
     same file system as the tree, emptied first, removed at the end."""
     d = Path(os.path.realpath(tree) + ".staging")
     if d.is_dir() and not d.is_symlink():
-        shutil.rmtree(d)
+        _remove_tree(d)
     elif d.exists() or d.is_symlink():
         d.unlink()
     d.mkdir()
     try:
         yield d
     finally:
-        shutil.rmtree(d, ignore_errors=True)
+        _remove_tree(d, best_effort=True)
 
 
 @contextmanager
@@ -133,7 +134,20 @@ def temp_dir(near: Path | None = None):
     try:
         yield d
     finally:
-        shutil.rmtree(d, ignore_errors=True)
+        _remove_tree(d, best_effort=True)
+
+
+def _remove_tree(d: Path, *, best_effort: bool = False):
+    """shutil.rmtree that also removes read-only files, which Windows refuses to delete: the copy of
+    a read-only target in the staging directory is one (install keeps the target's mode)."""
+    def writable(remove, path, _):
+        os.chmod(path, stat.S_IWRITE)
+        remove(path)
+    try:
+        shutil.rmtree(d, onexc=writable)
+    except OSError:
+        if not best_effort:
+            raise
 
 
 # --- patches and levels
