@@ -200,6 +200,11 @@ def tool(tree: Path, features_d: Path, *args) -> Result:
     return run_cli("--isabelle-home", tree, "--features-dir", features_d, *args)
 
 
+def ran(tree: Path, features_d: Path) -> str:
+    """The tool as `tool` runs it: the commands in its output repeat the two options."""
+    return f"isabelle-patch-control --isabelle-home {tree} --features-dir {features_d}"
+
+
 @pytest.fixture
 def toy(tmp_path) -> Toy:
     return Toy(tmp_path)

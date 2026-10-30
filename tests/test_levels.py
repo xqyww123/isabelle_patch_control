@@ -2,8 +2,8 @@
 scenarios of review 1 C3, multi-level files, a simulated relink."""
 import pytest
 
-from conftest import same_tree, snapshot, tool
-from isabelle_patch_control import api, texts
+from conftest import ran, same_tree, snapshot, tool
+from isabelle_patch_control import api, cli, texts
 
 
 def states(toy, t) -> dict[str, str]:
@@ -22,14 +22,16 @@ def test_fresh_tree(fresh):
     assert states(toy, t) == {"f1": "not-applied", "f2": "not-applied", "f3": "not-applied"}
     assert set(levels(toy, t).values()) == {0}
     dry = tool(t, toy.features_d, "apply", "--dry-run")
-    assert dry.code == 0 and sorted(dry.out.splitlines()) == sorted([
-        "  src/Pure/a.ML  level 0 -> 3", "  src/Pure/new1.ML  level 0 -> 3", "  src/Pure/c.ML  level 0 -> 1",
-        "  etc/options  level 0 -> 1", "  src/Pure/b.ML  level 0 -> 2", "  bin/new2  level 0 -> 2", "  README  level 0 -> 2"])
+    assert dry.code == 0 and dry.out.splitlines()[0] == "These files would change:" and sorted(dry.out.splitlines()[1:]) == sorted([
+        "  src/Pure/a.ML  level 0 (original) -> level 3 (f3)", "  src/Pure/new1.ML  level 0 (original) -> level 3 (f3)", "  src/Pure/c.ML  level 0 (original) -> level 1 (f1)",
+        "  etc/options  level 0 (original) -> level 1 (f1)", "  src/Pure/b.ML  level 0 (original) -> level 2 (f2)", "  bin/new2  level 0 (original) -> level 2 (f2)", "  README  level 0 (original) -> level 2 (f2)"])
     assert tool(t, toy.features_d, "apply", "--dry-run", "-q").out == ""
-    assert tool(t, toy.features_d, "apply", "-v", "--dry-run").out.splitlines()[0] == f"tree {t}   features.d {toy.features_d}"
+    assert tool(t, toy.features_d, "apply", "-v", "--dry-run").out.splitlines()[:2] == [
+        f"Checked the Isabelle sources in {t} against 3 feature packages.",
+        f"The feature packages' patches are read from {toy.features_d}."]
     same_tree(t, toy.expected(None))                       # a dry run changes nothing
     down = tool(t, toy.features_d, "unapply", "--dry-run")
-    assert (down.code, down.out) == (0, "")
+    assert (down.code, down.out) == (0, "Nothing would change.\n")
 
 
 def test_apply_everything(fresh):
@@ -41,7 +43,7 @@ def test_apply_everything(fresh):
     assert states(toy, t) == {"f1": "applied", "f2": "applied", "f3": "applied"}
     assert tool(t, toy.features_d, "status").code == 0
     dry = tool(t, toy.features_d, "apply", "--dry-run")
-    assert (dry.code, dry.out) == (0, "")                  # a fully applied tree lists no file
+    assert (dry.code, dry.out) == (0, "Nothing would change.\n")   # a fully applied tree lists no file
     again = tool(t, toy.features_d, "apply")
     assert (again.code, again.out) == (0, "")
 
@@ -50,7 +52,11 @@ def test_unapply_everything(applied):
     toy, t = applied
     r = tool(t, toy.features_d, "unapply")
     assert r.code == 0
-    assert r.out == texts.changed(t, reversed=["f1", "f2", "f3"]) + "\n" + texts.BACK_AT_BOTTOM + "\n"
+    assert r.out == texts.changed(t, undone=["f1", "f2", "f3"]) + "\n" + texts.BACK_AT_BOTTOM + "\n"
+    assert r.out == (f"Isabelle sources under {t} changed (undone: f1, f2, f3).\n"
+                     "The sources are back to the original: you may delete heaps/ in this environment's Isabelle user directory "
+                     "(isabelle getenv -b ISABELLE_HOME_USER); Isabelle then uses the original heaps again instead of rebuilding "
+                     "them on first use (several minutes).\n")
     same_tree(t, toy.expected(None))
     assert not (t / "src" / "Pure" / "new1.ML").exists() and not (t / "bin" / "new2").exists()
 
@@ -61,7 +67,7 @@ def test_feature_numbers_differ_from_touch_order(chain3):
     t = chain3.tree("f1")
     assert levels(chain3, t)["src/Pure/a.ML"] == 1
     r = tool(t, chain3.features_d, "apply", "--feature", "f2", "--dry-run")
-    assert sorted(r.out.splitlines()) == ["  README  level 0 -> 2", "  bin/new2  level 0 -> 2", "  src/Pure/b.ML  level 0 -> 2"]
+    assert sorted(r.out.splitlines()[1:]) == ["  README  level 0 (original) -> level 2 (f2)", "  bin/new2  level 0 (original) -> level 2 (f2)", "  src/Pure/b.ML  level 0 (original) -> level 2 (f2)"]
     assert tool(t, chain3.features_d, "apply", "--feature", "f2").code == 0
     same_tree(t, chain3.expected("f2"))
     assert states(chain3, t) == {"f1": "applied", "f2": "applied", "f3": "not-applied"}
@@ -79,8 +85,9 @@ def test_stacked_context_on_every_tree(chain3):
         assert "CONFLICT" not in st.out and ("below" in st.out) == False
         up, down = tool(t, chain3.features_d, "apply", "--dry-run"), tool(t, chain3.features_d, "unapply", "--dry-run")
         assert up.code == 0 and down.code == 0
-        assert (f"  src/Pure/a.ML  level {want} -> 3" in up.out) == (want < 3)
-        assert (f"  src/Pure/a.ML  level {want} -> 0" in down.out) == (want > 0)
+        name = {0: "original", 1: "f1", 3: "f3"}[want]
+        assert (f"  src/Pure/a.ML  level {want} ({name}) -> level 3 (f3)" in up.out) == (want < 3)
+        assert (f"  src/Pure/a.ML  level {want} ({name}) -> level 0 (original)" in down.out) == (want > 0)
         same_tree(t, chain3.expected(at))                                 # dry runs change nothing
         assert tool(t, chain3.features_d, "apply").code == 0
         same_tree(t, chain3.expected("f3"))
@@ -95,10 +102,20 @@ def test_half_applied(applied):
     assert states(toy, t) == {"f1": "applied", "f2": "applied", "f3": "half-applied"}
     assert st.features[2].below == 1
     r = tool(t, toy.features_d, "status")
-    assert r.code == 1 and "half-applied f3" in r.out and "2 files, 1 below" in r.out
-    assert tool(t, toy.features_d, "apply", "--dry-run").out == "  src/Pure/a.ML  level 1 -> 3\n"
+    assert r.code == 1 and ("half-applied", "f3") in cli.read_status(r.out) and "1 of its 2 files does not" in r.out
+    assert tool(t, toy.features_d, "apply", "--dry-run").out == "These files would change:\n  src/Pure/a.ML  level 1 (f1) -> level 3 (f3)\n"
     assert tool(t, toy.features_d, "apply").code == 0
     same_tree(t, toy.expected("f3"))
+
+
+def test_status_with_feature_ends_on_its_own_features(applied):
+    """--feature F: the last line and the exit code both look at F and the features below it."""
+    toy, t = applied
+    (t / "src" / "Pure" / "a.ML").write_bytes(toy.expected("f1")["src/Pure/a.ML"][0])      # f3 half applied
+    r = tool(t, toy.features_d, "status", "--feature", "f2")
+    assert r.code == 0 and r.out.endswith("\n\nEverything up to `f2` is in order.\n")
+    r = tool(t, toy.features_d, "status", "--feature", "f3")
+    assert r.code == 1 and r.out.endswith(f"\n\nTo apply what is missing, run: {ran(t, toy.features_d)} apply --feature f3\n")
 
 
 def test_lost_change_reads_half_applied(applied):
@@ -115,16 +132,23 @@ def test_hand_edit_is_conflict_and_caps_apply(fresh):
     b.write_text(b.read_text().replace("b5\n", "edited\n"))
     r = tool(t, toy.features_d, "apply")
     assert r.code == 1
-    assert "CONFLICT  src/Pure/b.ML  no level" in r.out and "level 0:" in r.out and "level 2:" in r.out
-    assert texts.changed(t, applied=["f1"]) in r.out
+    assert r.out.startswith(texts.changed(t, applied=["f1"]))
+    assert r.out.endswith("\nFeature `f2` cannot be applied: src/Pure/b.ML was changed by something other than the installed "
+                          f"feature packages. Run {ran(t, toy.features_d)} status for what to do.\n")   # last: what to act on
+    assert "level 0:" not in r.out                                                 # git's complaints only under -v
+    r = tool(t, toy.features_d, "apply", "-v")
+    assert "\n    src/Pure/b.ML  no level\n      level 0: " in r.out and "\n      level 2: " in r.out
     assert states(toy, t) == {"f1": "applied", "f2": "CONFLICT", "f3": "not-applied"}
     st = tool(t, toy.features_d, "status")
-    assert st.code == 1 and "CONFLICT    f2" in st.out.replace("CONFLICT     f2", "CONFLICT    f2")
-    assert "src/Pure/b.ML" in st.out
+    assert st.code == 1 and ("CONFLICT", "f2") in cli.read_status(st.out)
+    assert texts.conflict("f2", ["src/Pure/b.ML"]) in st.out
     assert tool(t, toy.features_d, "apply", "--feature", "f1").code == 0          # below the CONFLICT: fine
+    r = tool(t, toy.features_d, "status", "--feature", "f1")
+    assert r.code == 0 and r.out.endswith("\n\nEverything up to `f1` is in order.\n")   # f2's CONFLICT is not asked about
     # unapply moves what it can and lists what it cannot
     r = tool(t, toy.features_d, "unapply")
-    assert r.code == 1 and "CONFLICT  src/Pure/b.ML" in r.out
+    assert r.code == 1 and r.out.endswith("\nFeature `f2` cannot be undone: src/Pure/b.ML was changed by something other than "
+                                          f"the installed feature packages. Run {ran(t, toy.features_d)} status for what to do.\n")
     assert levels(toy, t)["src/Pure/a.ML"] == 0
 
 
@@ -142,13 +166,13 @@ def test_upper_feature_moves_a_line_the_lower_added(toy):
     t = toy.tree("g2")
     assert levels(toy, t) == {"src/Pure/a.ML": 2}
     assert states(toy, t) == {"g1": "applied", "g2": "applied"}
-    assert tool(t, toy.features_d, "apply", "--dry-run").out == ""
+    assert tool(t, toy.features_d, "apply", "--dry-run").out == "Nothing would change.\n"
     assert tool(t, toy.features_d, "unapply").code == 0
     same_tree(t, toy.expected(None))
 
 
 def test_hole_below_marker(fresh):
-    """f2 applied while f1 is not (their files are disjoint): f2 shows (hole below), exit 1."""
+    """f2 applied while f1 is not (their files are disjoint): f2's sentence says so, exit 1."""
     toy, t = fresh
     final = toy.expected("f3")
     for rel in ("src/Pure/b.ML", "bin/new2", "README"):
@@ -157,8 +181,26 @@ def test_hole_below_marker(fresh):
         p.write_bytes(final[rel][0])
     assert states(toy, t) == {"f1": "not-applied", "f2": "applied", "f3": "not-applied"}
     r = tool(t, toy.features_d, "status")
-    assert r.code == 1 and "(hole below)" in [l for l in r.out.splitlines() if " f2 " in l][0]
+    assert r.code == 1 and "Feature `f2` is applied, but `f1` below it is not." in r.out.splitlines()
+    assert ("applied", "f2") in cli.read_status(r.out)
     assert tool(t, toy.features_d, "status", "--feature", "f2").code == 1
+
+
+def test_hole_below_names_every_feature_that_is_not_applied(applied):
+    """f3 applied, f1 half-applied (c.ML and etc/options back at the base), f2 not applied."""
+    toy, t = applied
+    base = toy.expected(None)
+    for rel in ("src/Pure/c.ML", "etc/options", "src/Pure/b.ML", "README"):
+        t.joinpath(*rel.split("/")).write_bytes(base[rel][0])
+    (t / "bin" / "new2").unlink()
+    assert states(toy, t) == {"f1": "half-applied", "f2": "not-applied", "f3": "applied"}
+    r = tool(t, toy.features_d, "status")
+    assert r.out.splitlines()[2:5] == [
+        "Feature `f1` is only partly applied: 2 of its 4 files do not have the feature's changes yet.",
+        "Feature `f2` is not applied yet.",
+        "Feature `f3` is applied, but `f1` and `f2` below it are not."]
+    assert r.code == 1 and r.out.endswith(f"\n\nTo apply what is missing, run: {ran(t, toy.features_d)} apply\n")
+    assert texts.applied("g4", ["f1", "f2", "f3"]) == "Feature `g4` is applied, but `f1`, `f2` and `f3` below it are not."
 
 
 @pytest.mark.parametrize("below", ["half-applied", "CONFLICT"])
@@ -171,7 +213,8 @@ def test_hole_below_counts_any_feature_that_is_not_applied(applied, below):
     assert states(toy, t) == {"f1": below, "f2": "applied", "f3": "applied"}
     r = tool(t, toy.features_d, "status")
     assert r.code == 1
-    assert all(l.endswith("(hole below)") for l in r.out.splitlines() if " f2 " in l or " f3 " in l)
+    lines = r.out.splitlines()
+    assert "Feature `f2` is applied, but `f1` below it is not." in lines and "Feature `f3` is applied, but `f1` below it is not." in lines
     assert tool(t, toy.features_d, "status", "--feature", "f3").code == 1
     assert tool(t, toy.features_d, "status", "--feature", "f1").code == 1
 
@@ -194,7 +237,18 @@ def test_unapply_of_a_shared_conflict_file_is_in_the_way_by_its_highest_feature(
     a = t / "src" / "Pure" / "a.ML"
     a.write_text(a.read_text().replace("a5\n", "edited\n"))
     r = tool(t, toy.features_d, "unapply", "--feature", "f3")
-    assert r.code == 1 and "CONFLICT  src/Pure/a.ML" in r.out
+    assert r.code == 1 and r.out.splitlines()[-1].startswith("Feature `f3` cannot be undone: src/Pure/a.ML was changed")
+    assert "`f1`" not in r.out                                     # below the target: not asked about
+
+
+def test_unapply_does_not_count_a_feature_it_could_not_undo_as_reversed(applied):
+    """b.ML is CONFLICT; f2's README and bin/new2 do move down, but f2 is not listed as reversed."""
+    toy, t = applied
+    b = t / "src" / "Pure" / "b.ML"
+    b.write_text(b.read_text().replace("B5\n", "edited\n"))
+    r = tool(t, toy.features_d, "unapply")
+    assert r.code == 1 and r.out.splitlines()[0] == texts.changed(t, undone=["f1", "f3"])
+    assert r.out.splitlines()[-1].startswith("Feature `f2` cannot be undone: ")
 
 
 def test_unapply_passes_a_conflict_file_below_its_target(applied):
@@ -221,7 +275,7 @@ def test_features_above_a_conflict_stay_applied(applied):
 def test_unapply_feature(applied):
     toy, t = applied
     r = tool(t, toy.features_d, "unapply", "--feature", "f2")
-    assert r.code == 0 and r.out == texts.changed(t, reversed=["f2", "f3"]) + "\n"
+    assert r.code == 0 and r.out == texts.changed(t, undone=["f2", "f3"]) + "\n"
     same_tree(t, toy.expected("f1"))
     assert states(toy, t) == {"f1": "applied", "f2": "not-applied", "f3": "not-applied"}
 

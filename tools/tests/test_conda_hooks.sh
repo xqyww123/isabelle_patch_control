@@ -42,17 +42,24 @@ never() { [ "$(times "$1")" = 0 ]; }
 rc0() { [ "$RC" = 0 ]; }
 userdir() { "$1/isa/bin/isabelle" getenv -b ISABELLE_HOME_USER; }     # the stub owns the naming rule
 registered() { [ -f "$(userdir "$1")/etc/components" ] && /usr/bin/grep -qxF "$1/share/$2" "$(userdir "$1")/etc/components"; }
-history() { [ -f "$1/conda-meta/history" ]; }
+
 installed() { compgen -G "$1/conda-meta/$2*.json" > /dev/null; }        # installed <env> <name-version-build>
 status_of() {  # the checkout's tool reads the environment: the state no matter which tool the environment has
   STRC=0; ST=$(PYTHONPATH="$root" python3 -m isabelle_patch_control --isabelle-home "$1/isa" status 2>&1) || STRC=$?
 }
-states() {  # states <env> "<state> <feature>"...: exactly these feature lines, in this order
+states() {  # states <env> "<state> <feature>"...: exactly these feature sentences, in this order
   status_of "$1"; shift
-  local got; got=$(printf '%s\n' "$ST" | awk 'NR > 1 && $1 != "" {print $1, $2}')
+  local got; got=$(printf '%s\n' "$ST" | PYTHONPATH="$root" python3 -c '
+import sys
+from isabelle_patch_control import cli
+for s in cli.read_status(sys.stdin.read()):
+    print(*s)')
   [ "$got" = "$(printf '%s\n' "$@")" ] || { echo "           status: $ST" | head -8; return 1; }
 }
-all_applied() { states "$1" "applied t_one" "applied t_two" "applied t_three" && [ "$STRC" = 0 ]; }
+said() { printf '%s\n' "$ST" | /usr/bin/grep -qF -- "$1"; }               # the last status printed this text
+text() { PYTHONPATH="$root" python3 -c "from isabelle_patch_control import texts; print(texts.$1)"; }   # text 'stopped("t_one")'
+states_rc() { local rc=$1; shift; states "$@" && [ "$STRC" = "$rc" ]; }   # states_rc <exit code> <env> <lines>...
+all_applied() { states_rc 0 "$1" "applied t_one" "applied t_two" "applied t_three"; }
 bytes() {  # bytes <env> <isabelle build> <features of the chain, bottom first> -- <applied...>
   local e=$1 b=$2; shift 2
   local args=(--isabelle "$P/isabelle-2025.2-$b")
@@ -99,7 +106,7 @@ s_order() {
   fresh order "isabelle=2025.2=1" isabelle-t-three || return 0
   check "one applied line, in chain order" once "changed (applied: t_one, t_two, t_three)"
   check "only that one" once "changed (applied:"
-  check "one heap paragraph" once "The heaps shipped with the isabelle package were built from other sources"
+  check "one heap paragraph" heap_paragraph_once
   check "status: the chain applied, exit 0" all_applied "$E"
   check "bytes: the chain applied" chain_bytes "$E" 1 t_one t_two t_three
   check "t_two's component registered" registered "$E" isabelle-t-two
@@ -144,8 +151,8 @@ s_conflict() {
   echo "--- CONFLICT: exactly one complete diagnostic per command that links isabelle or the chain top"
   fresh conflict "isabelle=2025.2=1" isabelle-t-one isabelle-t-two || return 0
   mkdir -p "$E/isa/src/Tools"; echo "my own file" > "$E/isa/src/Tools/t_three.ML"   # §6 (f2): conda does not track it
-  local full="t_three was NOT applied: src/Tools/t_three.ML under $E/isa has content the tool does not recognise"
-  local line="t_three was not applied (src/Tools/t_three.ML has unexpected content); see isabelle-patch-control status -v"
+  local full line
+  full=$(text 'stopped("t_three")'); line=$(text 'conflict_line("t_three", ["src/Tools/t_three.ML"])')
   c install -p "$E" "${CHANNELS[@]}" isabelle-t-three
   check "installing the top alone: one complete diagnostic" once "$full"
   check "and no one-line hint" never "$line"
@@ -158,7 +165,7 @@ s_conflict() {
   c install -p "$E" "${CHANNELS[@]}" --force-reinstall isabelle-t-three
   check "--force-reinstall of the top: one complete diagnostic" once "$full"
   c install -p "$E" "${CHANNELS[@]}" --force-reinstall isabelle-t-one
-  check "relinking only a lower package: no complete diagnostic" never "t_three was NOT applied"
+  check "relinking only a lower package: no complete diagnostic" never "$full"
   check "but one line" once "$line"
   c update -p "$E" "${CHANNELS[@]}" --all
   check "update --all to a new isabelle build: one complete diagnostic" once "$full"
@@ -171,7 +178,7 @@ s_conflict() {
   c install -p "$E" "${CHANNELS[@]}" --force-reinstall isabelle-t-one
   check "a CONFLICT at t_two, relinking t_one below it: t_one applied, t_three capped" \
     states "$E" "applied t_one" "CONFLICT t_two" "not-applied t_three"
-  check "one line for t_two" once "t_two was not applied (src/Pure/b.ML has unexpected content); see isabelle-patch-control status -v"
+  check "one line for t_two" once "$(text 'conflict_line("t_two", ["src/Pure/b.ML"])')"
 }
 
 s_rebuild() {
@@ -218,6 +225,14 @@ s_prune() {
   check "(iii) --force: only the top removed" bash -c "compgen -G '$E/conda-meta/isabelle-t-two-*.json' >/dev/null && compgen -G '$E/conda-meta/isabelle-patch-control-*.json' >/dev/null"
   check "(iii) its pre-unlink ran" once "t_three was undone"
   check "(iii) the two below still applied" states "$E" "applied t_one" "applied t_two"
+  # AGENTS.md: isabelle that came in only as a dependency goes with the last feature package, and
+  # installing it again while it is installed does not make it a package asked for
+  fresh prune4 isabelle-t-one || return 0
+  check "(iv) isabelle came in as a dependency" bash -c "compgen -G '$E/conda-meta/isabelle-2025*.json' >/dev/null"
+  c install -p "$E" "${CHANNELS[@]}" isabelle
+  check "(iv) installing the installed isabelle: nothing to do" rc0
+  c remove -p "$E" "${CHANNELS[@]}" isabelle-t-one
+  check "(iv) isabelle went with the last feature package" bash -c "! compgen -G '$E/conda-meta/isabelle-2025*.json' >/dev/null"
 }
 
 s_residue() {
@@ -227,26 +242,26 @@ s_residue() {
   # reverses, decision 6) and is kept; sed -i writes a new file, not through the hard link
   sed -i 's/^C2$/my edit/' "$E/isa/src/Pure/c.ML"
   c remove -p "$E" "${CHANNELS[@]}" isabelle-t-three
-  check "an edited file: the residue block names it and the reason" bash -c "/usr/bin/grep -qF 't_three could not be fully undone (reason: a file has unexpected content).' '$OUT' && /usr/bin/grep -qx '  src/Pure/c.ML' '$OUT'"
+  check "an edited file: the residue block names it and the reason" bash -c "/usr/bin/grep -qF 't_three could not be fully undone (reason: a file was changed by something other than the installed feature packages).' '$OUT' && /usr/bin/grep -qx '  src/Pure/c.ML' '$OUT'"
   check "no Retry later" never "Retry later"
   check "the removal succeeded" rc0
 
   fresh residue2 "isabelle=2025.2=1" isabelle-t-three || return 0
   echo "mine" >> "$E/isa/src/Pure/t_one.ML"; echo "mine" >> "$E/isa/src/Tools/t_three.ML"
   c remove -p "$E" "${CHANNELS[@]}" isabelle-t-three
-  check "(iv) two residue blocks, one created file each" bash -c "[ \$(/usr/bin/grep -c 'could not be fully undone' '$OUT') = 2 ] && /usr/bin/grep -qF '  src/Tools/t_three.ML   (created by the feature)' '$OUT' && /usr/bin/grep -qF '  src/Pure/t_one.ML   (created by the feature)' '$OUT'"
+  check "(iv) two residue blocks, one created file each" bash -c "[ \$(/usr/bin/grep -c 'could not be fully undone' '$OUT') = 2 ] && /usr/bin/grep -qF '  src/Tools/t_three.ML   (created by a feature)' '$OUT' && /usr/bin/grep -qF '  src/Pure/t_one.ML   (created by a feature)' '$OUT'"
   check "(iv) the removal rule holds" paragraph_rule
-  local removal=$OUT
-  c install -p "$E" "${CHANNELS[@]}" --force-reinstall isabelle              # the last block's step 2
-  /usr/bin/grep -F "(created by the feature)" "$removal" | awk '{print $1}' | sort -u | while read -r f; do rm -f "$E/isa/$f"; done
-  check "(iv) after the last block's steps no created file is left, the tree is the original" chain_bytes "$E" 1
+  check "(iv) only created files are left: each block says to delete them" bash -c "[ \$(/usr/bin/grep -c 'in these messages; then run: isabelle-patch-control apply (if that command is no longer found' '$OUT') = 2 ]"
+  check "(iv) no reinstall" never "reinstall the isabelle package"
+  /usr/bin/grep -F "(created by a feature)" "$OUT" | awk '{print $1}' | sort -u | while read -r f; do rm -f "$E/isa/$f"; done
+  check "(iv) after the blocks' steps no created file is left, the tree is the original" chain_bytes "$E" 1
 
   fresh residue3 "isabelle=2025.2=1" isabelle-t-three || return 0
   hold_lock "$E" 100000                      # until killed: every pre-unlink waits its 60 s and gives up
   c remove -p "$E" "${CHANNELS[@]}" isabelle-t-three
   kill "$HOLDER" 2>/dev/null || true; wait "$HOLDER" 2>/dev/null || true
   check "lock busy while pruning: a residue block per feature, reason the lock" bash -c "[ \$(/usr/bin/grep -c 'reason: another isabelle-patch-control was running' '$OUT') = 3 ]"
-  check "every block names the same, highest package" bash -c "[ \$(/usr/bin/grep -cF 'isabelle-t-three=1; then conda remove isabelle-t-three' '$OUT') = 3 ]"
+  check "every block names the same, highest package" bash -c "[ \$(/usr/bin/grep -cxF '  conda install -p $E -c https://conda.qiyuan.me -c conda-forge isabelle-t-three=1' '$OUT') = 3 ] && [ \$(/usr/bin/grep -cxF '  conda remove -p $E isabelle-t-three' '$OUT') = 3 ]"
   check "a.ML (changed by t_one and t_two) is listed" /usr/bin/grep -qx '  src/Pure/a.ML' "$OUT"
   check "no Retry later" never "Retry later"
   c install -p "$E" "${CHANNELS[@]}" "isabelle-t-three=1"
@@ -320,81 +335,30 @@ s_leftovers() {
 }
 
 s_interrupt() {
-  echo "--- conda install interrupted (SIGINT to its process group); the two repairs of §4, then the removal"
-  local route
-  for route in touch create; do
-    fresh "int-$route" "isabelle=2025.2=1" isabelle-t-one || continue
-    n=$((n + 1)); OUT="$W/out/$n-interrupted.txt"
-    setsid "$CONDA" install -q -y -p "$E" "${CHANNELS[@]}" toy-slow > "$OUT" 2>&1 &
-    local pid=$! i
-    for i in $(seq 1 1200); do [ -e "$E/slow.started" ] && break; sleep 0.1; done
-    kill -INT -- "-$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true
-    check "($route) the interrupted install deleted conda-meta/history" test ! -e "$E/conda-meta/history"
-    status_of "$E"
-    check "($route) status prints the repair" bash -c "printf '%s' \"\$1\" | /usr/bin/grep -qF 'has no conda-meta/history: a conda command was interrupted'" _ "$ST"
-    if [ "$route" = touch ]; then
-      touch "$E/conda-meta/history"
-      c install -p "$E" "${CHANNELS[@]}" "isabelle=2025.2=1" isabelle-t-one isabelle-t-two
-    else
-      c create -p "$E" "${CHANNELS[@]}" "isabelle=2025.2=1" isabelle-t-one isabelle-t-two
-    fi
-    check "($route) the repair succeeded" rc0
-    check "($route) kept: both features applied" states "$E" "applied t_one" "applied t_two"
-    check "($route) kept: bytes" bytes "$E" 1 t_one t_two -- t_one t_two
-    check "($route) kept: t_two registered" registered "$E" isabelle-t-two
-    check "($route) no staging directory" bash -c "! compgen -G '$E/isa.staging*' >/dev/null"
-    c remove -p "$E" "${CHANNELS[@]}" isabelle-t-two
-    check "($route) abandoned: t_two is gone, t_one applied" states "$E" "applied t_one"
-    check "($route) abandoned: bytes" bytes "$E" 1 t_one t_two -- t_one
-    check "($route) abandoned: t_two no longer registered" bash -c "! /usr/bin/grep -qF share/isabelle-t-two '$(userdir "$E")/etc/components'"
-    c remove -p "$E" "${CHANNELS[@]}" --dry-run isabelle-t-one
-    check "($route) the dry run lists the top for removal" bash -c "sed -n '/will be REMOVED/,\$p' '$OUT' | /usr/bin/grep -q '  isabelle-t-one-'"
-    check "($route) removing the top later keeps isabelle (it is asked for again)" bash -c "! sed -n '/will be REMOVED/,\$p' '$OUT' | /usr/bin/grep -q '  isabelle-2025'"
-  done
+  echo "--- conda install interrupted (SIGINT to its process group); the repair of §4: reinstall isabelle"
+  fresh interrupted "isabelle=2025.2=1" isabelle-t-one || return 0
+  n=$((n + 1)); OUT="$W/out/$n-interrupted.txt"
+  setsid "$CONDA" install -q -y -p "$E" "${CHANNELS[@]}" toy-slow > "$OUT" 2>&1 &
+  local pid=$! i
+  for i in $(seq 1 1200); do [ -e "$E/slow.started" ] && break; sleep 0.1; done
+  kill -INT -- "-$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true
+  check "conda rolled back" /usr/bin/grep -qF "Rolling back transaction" "$OUT"
+  # t_two's post-link had applied it: a.ML, which t_one changes too, now matches no level of t_one
+  check "status: CONFLICT t_one, exit 1" states_rc 1 "$E" "CONFLICT t_one"
+  check "status says to reinstall isabelle" said "--force-reinstall isabelle"
+  check "t_two registered: conda's rollback leaves what its post-link did" registered "$E" isabelle-t-two
+  # conda 25.11.0 to 26.5.x delete it when they roll back (plan §2.3); conda's business, not the tool's
+  [ -e "$E/conda-meta/history" ] || touch "$E/conda-meta/history"
+  c install -p "$E" "${CHANNELS[@]}" --force-reinstall isabelle
+  check "the reinstall succeeded" rc0
+  check "t_one applied, t_two gone, exit 0" states_rc 0 "$E" "applied t_one"
+  check "bytes: t_one" bytes "$E" 1 t_one -- t_one
+  check "b.ML (t_two's alone) is the original" bash -c "printf 'b%s\n' 1 2 3 4 5 6 7 8 | cmp -s - '$E/isa/src/Pure/b.ML'"
+  check "no staging directory" bash -c "! compgen -G '$E/isa.staging*' >/dev/null"
+  check "t_two no longer registered" bash -c "! /usr/bin/grep -qF share/isabelle-t-two '$(userdir "$E")/etc/components' 2>/dev/null"
 }
 
-s_hardlink() {
-  echo "--- an edit in place through the hard link into the package cache (a package cache of its own)"
-  local P="$W/pkgs-hardlink"; local -x CONDA_PKGS_DIRS="$W/pkgs-hardlink"   # a failure cannot leave the shared cache edited
-  fresh hl2 "isabelle=2025.2=1" isabelle-t-one || return 0
-  local other=$E
-  fresh hl1 "isabelle=2025.2=1" isabelle-t-one || return 0
-  local cached="$P/isabelle-2025.2-1" shared="Your edit went into conda's shared package cache"
-  local plain="(your other feature packages are re-applied automatically)"
-  check "b.ML (t_two's) is the package cache's file in both environments" python3 -I -c \
-    'import os, sys; sys.exit(not all(os.path.samefile(p, sys.argv[1]) for p in sys.argv[2:]))' \
-    "$cached/isa/src/Pure/b.ML" "$E/isa/src/Pure/b.ML" "$other/isa/src/Pure/b.ML"
-  python3 -I -c 'import sys; f = open(sys.argv[1], "r+b"); f.seek(len("b1\nb2\nb3\nb4\n")); f.write(b"XX")' "$E/isa/src/Pure/b.ML"
-  c install -p "$E" "${CHANNELS[@]}" isabelle-t-two
-  check "installing t_two over the edit: rc 0, the wording names the package cache" \
-    bash -c '[ "$1" = 0 ] && /usr/bin/grep -qF "$2" "$3" && /usr/bin/grep -qF "     $4 (conda re-creates it" "$3"' _ "$RC" "$shared" "$OUT" "$cached"
-  check "status: CONFLICT at t_two" states "$E" "applied t_one" "CONFLICT t_two"
-  c install -p "$E" "${CHANNELS[@]}" --force-reinstall isabelle
-  check "a plain --force-reinstall isabelle keeps the edit, rc 0" bash -c '[ "$1" = 0 ] && /usr/bin/grep -qx XX "$2"' _ "$RC" "$E/isa/src/Pure/b.ML"
-  # conda writes isabelle's record only after the post-links: the cache wording, the directory found through conda list
-  check "and still names the package cache" bash -c '/usr/bin/grep -qF "$1" "$3" && /usr/bin/grep -qF "conda list -p $2 --full-name isabelle shows" "$3"' \
-    _ "$shared" "$E" "$OUT"
-  "$CONDA" clean -p -y > "$W/out/hardlink-clean.txt" 2>&1 || true
-  check "conda clean -p keeps the extracted directory" test -f "$cached/isa/src/Pure/b.ML"
-  check "the other environment carries the edit and says nothing" /usr/bin/grep -qx XX "$other/isa/src/Pure/b.ML"
-  rm -rf "$cached"                                                          # decision 9's fix
-  c install -p "$E" "${CHANNELS[@]}" --force-reinstall isabelle
-  check "the directory deleted, --force-reinstall isabelle: the chain applied" states "$E" "applied t_one" "applied t_two"
-  check "bytes" bytes "$E" 1 t_one t_two -- t_one t_two
-  local here_env=$E; E=$other
-  c install -p "$E" "${CHANNELS[@]}" --force-reinstall isabelle
-  check "the other environment reinstalled too: b.ML is the original" /usr/bin/grep -qx b5 "$E/isa/src/Pure/b.ML"
-  E=$here_env
-  sed -i 's/^B5$/mine/' "$E/isa/src/Pure/b.ML"                              # a new inode, the cache unpacked again
-  c install -p "$E" "${CHANNELS[@]}" --force-reinstall isabelle-t-two
-  check "an edit through a new inode: the plain wording" \
-    bash -c '/usr/bin/grep -qF -- "$1" "$2" && ! /usr/bin/grep -qF "$3" "$2"' _ "$plain" "$OUT" "$shared"
-  c install -p "$E" "${CHANNELS[@]}" --force-reinstall isabelle
-  check "its step 2 works: the chain applied" states "$E" "applied t_one" "applied t_two"
-  check "bytes after step 2" bytes "$E" 1 t_one t_two -- t_one t_two
-}
-
-ALL=(s_order s_components s_conflict s_rebuild s_prune s_residue s_rule s_tool s_oldbuild s_leftovers s_interrupt s_hardlink)
+ALL=(s_order s_components s_conflict s_rebuild s_prune s_residue s_rule s_tool s_oldbuild s_leftovers s_interrupt)
 scenarios=("$@"); [ ${#scenarios[@]} -gt 0 ] || scenarios=("${ALL[@]}")
 # the removal rule's own positive control: a `conda remove` step outside the removal branch
 OUT="$W/out/rule-control.txt"

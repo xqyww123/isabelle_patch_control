@@ -43,8 +43,8 @@ current tag, and its `release_tag` is the next. A directory whose base is a pris
 release or build means the tree is not the build the packages were made for (`conda update --all`
 fixes it); this is reported first, whatever else is wrong. Otherwise a directory whose base no
 installed directory releases means the chain is broken (install matching versions), and the
-refusal names that directory. Both are exit 3. No feature directory at all is `no feature packages
-installed`, exit 0, whatever the build.
+refusal names that directory. Both are exit 3. No feature directory at all is `No feature packages
+are installed, so there is nothing to apply.`, exit 0, whatever the build.
 
 Every patch file changes exactly one path. A file that features `t1 < … < tm` change is *at level L*
 (L one of `0, t1, …, tm`) when, on a copy of its current content, reversing the patches of the
@@ -65,53 +65,72 @@ A feature's state follows from its files: `applied` when all are at or above its
 
 ### `status [--feature F]`
 
-Prints `tree <path>   features.d <path>`, then one line per feature in chain order:
-state, feature name, release tag, and `N files` (for `half-applied` also `, k below`: k of those
-files do not have the feature's changes yet; for
-`CONFLICT` the conflicting files instead), with `(hole below)` appended to an applied feature that
-has a feature below it that is not applied. With `-v`, each feature's files follow, with their level, files
-the feature creates marked `(created by the feature)`, and for a CONFLICT file the levels it fits or
+Prints the tree it checked and the number of feature packages, then one sentence per feature in
+chain order, ``Feature `<name>` <phrase>…``, where the phrase gives the state: `is applied`
+(`applied`; it goes on with ``, but `<feature>` below it is not`` when a feature below it is not
+applied), `is not applied yet` (`not-applied`), `is only partly applied` (`half-applied`, with how
+many of its files lack its changes), `cannot be applied` (`CONFLICT`, naming the files). The last
+lines say what to do, for the features the command was asked about (with `--feature F`, F and
+those below it, like the exit code): `Everything is in order.` (with `--feature F`: ``Everything up
+to `F` is in order.``), the `apply` command (with `--feature F` when given), or, for a CONFLICT, the
+repair. A file not in the `isabelle` package (a feature creates it) is deleted; a file of the
+package is restored, in a conda environment by reinstalling `isabelle` (the created files are
+deleted first, and the reinstall applies the features again), elsewhere by hand followed by
+`apply`; with created files only, deleting them is followed by `apply`. A command these lines give
+repeats `--isabelle-home` and `--features-dir` when they were given, so that it reaches the same
+tree. The texts are in `isabelle_patch_control/texts.py`. With `-v`, the `features.d` root follows
+the first sentence, and after each feature its package name, release tag and files, with their
+level and the feature it stands for (`level 3 (f3)`, `level 0 (original)`), files not in the
+`isabelle` package marked `(created by a feature)`, and for a CONFLICT file the levels it fits or
 `no level` and git's complaint per rejected level.
 
-When the environment has `conda-meta` but no `conda-meta/history`, a conda command was interrupted;
-`status` then also prints how to repair that.
-
 Exit code: 0 when every feature is `applied`; with `--feature F`, 0 when F and every feature below
-it are `applied`; 1 otherwise; 0 with `no feature packages installed`. An unknown `--feature` name
+it are `applied`; 1 otherwise; 0 with no feature packages installed. An unknown `--feature` name
 is refused (exit 3) before the lock is taken and before anything is printed.
 
 ### `apply [--feature F] [--dry-run]`
 
 Moves every file whose level is below its target up to it. The target is the top of the chain, or F,
-and never above the lowest feature that owns a CONFLICT file: that feature and the ones above it are
+and always below the lowest feature that owns a CONFLICT file: that feature and the ones above it are
 left alone. A file's own target is the highest level `≤` that target among the levels the file can
 have, so a file no feature in range changes is not touched, and on a fully applied tree nothing
-moves and `--dry-run` lists nothing.
+moves and `--dry-run` prints `Nothing would change.`
 
-Prints each move as `  <path>  level a -> b` under `-v` (always with `--dry-run`), then, if anything
-moved, `Isabelle sources under <tree> changed (applied: …)` and, if a file under `src/` changed, the
-heap hint. CONFLICT files in the way are printed as `CONFLICT  <path>  …` with git's complaints:
-in the way means touched by the target feature or by a feature below it (without `--feature`, every
-CONFLICT file). Exit code: 1 when a CONFLICT file is in the way, else 0. `--dry-run` has the same
-exit code and changes nothing; it also runs on a read-only tree.
+Prints, under `-v`, the same first line as `status` and the `features.d` root, then `These files
+changed:` and each move as `  <path>  level a (<feature>) -> level b (<feature>)`; `--dry-run` prints
+the moves under `These files would change:`. Then, if anything moved, `Isabelle
+sources under <tree> changed (applied: …)` and, if a file under `src/` changed, the heap hint. Last,
+for every CONFLICT feature up to F (without `--feature`, every one), the `status` sentence ``Feature
+`<name>` cannot be applied: …`` followed by `Run isabelle-patch-control status for what to do.`;
+under `-v` each of its CONFLICT files follows with git's complaints (without git's warnings). Those
+files are the CONFLICT files in the way: touched by F or by a feature below it (without
+`--feature`, every CONFLICT file). Exit code: 1 when a CONFLICT file is in the way or a file could
+not be written, else 0 (refusals: see *Exit codes*). When a file cannot be written, `apply` prints
+the error and then the `status` report, to show where it stopped (not with `-q`); `unapply` prints
+only the error. `--dry-run` has the same exit code and changes
+nothing; it also runs on a read-only tree.
 
 ### `unapply [--feature F] [--dry-run]`
 
 Moves every file whose level is above its target down to it: to level 0 (the pristine sources),
 or, with F, to just below F, which reverses F and every feature above it. CONFLICT files cannot be
-moved; everything else is, and the CONFLICT files in the way are listed, exit 1: in the way means
-touched by F or by a feature above it (without `--feature`, every CONFLICT file); a CONFLICT file
-that only features below F touch is left alone, not listed, and does not change the exit code. Prints
-`Isabelle sources under <tree> changed (reversed: …)` and, when the whole tree is back at the
-pristine sources, the line about deleting `heaps/` so that the shipped heaps are used again.
+moved; everything else is. Prints `Isabelle sources under <tree> changed (undone: …)`, listing
+the features it fully reversed (not a CONFLICT feature, even when some of its other files moved),
+and, when the whole tree is back at the pristine sources, the line about deleting `heaps/` so that
+the shipped heaps are used again. Last, for every CONFLICT feature from F up, ``Feature `<name>`
+cannot be undone: …`` and the same `status` hint as `apply` (git's complaints under `-v`), exit 1.
+Its CONFLICT files are those in the way: touched by F or by a feature above it (without
+`--feature`, every CONFLICT file); a CONFLICT file that only features below F touch is left alone,
+not listed, and does not change the exit code.
 
 ### `apply-to <dir> <feature dir>` / `unapply-from <dir> <feature dir>`
 
 The directory interface: `<dir>` is the tree and `<feature dir>` the only feature; no provenance
 file is read, no lock is taken, the copies live in a temporary directory next to `<dir>`. Used by
 the release gates (`tools/make-patches`) on an archive of the base release. Prints the moves under
-`-v` and CONFLICT files as `apply` does, nothing else: success is exit 0 and silence (the texts about
-heaps and the conda environment do not apply to an arbitrary directory). Exit 1 on a CONFLICT.
+`-v` and the CONFLICT sentence as `apply` does, without the `status` hint, nothing else: success is
+exit 0 and silence (the texts about heaps and the conda environment do not apply to an arbitrary
+directory). Exit 1 on a CONFLICT.
 
 ### `conda-hook post-link` / `conda-hook pre-unlink <feature>`
 
@@ -152,8 +171,8 @@ Prints [AGENTS.md](AGENTS.md).
 | Code | Meaning |
 |---|---|
 | 0 | success; `status` with everything applied; no feature packages installed |
-| 1 | `status` found `not-applied`, `half-applied`, `CONFLICT` or a hole; `apply`/`unapply` could not move a file; git could not write a copy; the tree, the lock file or a work directory could not be written or read (a read-only file system, a full disk); the lock was busy for 60 s |
-| 2 | no tree where expected; `git` missing or older than 2.43 |
+| 1 | `status` found a feature not applied yet, only partly applied, or one that cannot be applied (`not-applied`, `half-applied`, `CONFLICT`), or applied above one that is not; `apply`/`unapply` could not move a file; git could not write a copy; the tree, the lock file or a work directory could not be written or read (a read-only file system, a full disk); the lock was busy for 60 s |
+| 2 | no tree where expected; `git` missing or older than 2.43; a wrong command line |
 | 3 | refused: chain does not link, tree is another build than the packages were made for, tree has a `.git`, a target is a symbolic link, a patch file cannot be read or changes other than one path, a feature directory has no patch file, `--features-dir` does not exist, not a conda environment and no `--features-dir`, unknown `--feature` name |
 
 `conda-hook` exits 0 whenever it wrote its own message (see above).
@@ -163,7 +182,8 @@ Prints [AGENTS.md](AGENTS.md).
 Every run holds a lock on the tree's `etc/ISABELLE_ID` (an existing file; nothing is created):
 shared for `status` and any `--dry-run`, exclusive for `apply`, `unapply` and the hooks. A run
 waits up to 60 seconds, then reports `another isabelle-patch-control run holds the lock on …`
-(exit 1; in a post-link the message adds `Then run: isabelle-patch-control apply`). Environments
+(exit 1; it ends `Wait for that run to finish, then retry.`, in a post-link `…, then run:
+isabelle-patch-control apply.`). Environments
 built from the same package cache share that file's inode, so they also share the lock.
 
 Only the run holding the exclusive lock uses the staging directory `<tree>.staging`
@@ -174,19 +194,23 @@ or new, and the next `apply` or `unapply` finishes the job.
 
 ## Messages
 
-`isabelle_patch_control/texts.py` holds the plan's texts (§4, decision 9) and every frame a conda
-hook writes; three readers proofread the five texts named in plan §8, and read the rest once after
-code review 1. The refusals (an unknown name, a patch file git cannot read, a tree with a `.git`,
+`isabelle_patch_control/texts.py` holds the texts of the design plan
+(`ai-artifacts/ISABELLE_PATCH_CONTROL_PLAN.md` §4, decision 9) and every frame `conda-hook` writes
+(the hook scripts' own fallback lines are in `isabelle_patch_control/hooks/`); develop.md says how
+they are written. The refusals (an unknown name, a patch file git cannot read, a tree with a `.git`,
 ...) are written next to their checks, and a hook frame quotes them. The ones met most often:
 
 - the heap hint after `src/` changed: `Isabelle sources under <tree> changed (applied: …).` followed
-  by three lines on rebuilding heaps, or `(reversed: …)` with the line about `heaps/` when the tree
+  by two lines on rebuilding heaps, or `(undone: …)` with the line about `heaps/` when the tree
   is back at the pristine sources;
-- `install matching versions of these packages: <package> <version> needs <package> <version>;
-  installed: … (features.d/<dir> needs <tag>).`;
-- `run: conda update --all …. <tree> is not the Isabelle build the feature packages were made for:
-  they need the unmodified <release> build of the isabelle package (etc/ISABELLE_ID <id>; …).`;
-- the CONFLICT diagnostic `isabelle-patch-control: <feature> was NOT applied: <file> under <tree> has
-  content the tool does not recognise …`, with the repair steps;
+- `<package> <version> needs <package> <version>, which is not installed. Install matching versions
+  of these packages.` (or `, but <package> <version> is installed.`);
+- `<tree> is not the Isabelle build the feature packages were made for: they need the unmodified
+  <release> build of the isabelle package (this tree has etc/ISABELLE_ID <id>; …). To fix it, run:
+  conda update -p <prefix> --all …`;
+- the CONFLICT diagnostic ``isabelle-patch-control: Feature `<feature>` cannot be applied: <file> was
+  changed by something other than the installed feature packages.``, then what it stops and the
+  same repair as `status` prints (deleting the files a feature creates, then reinstalling `isabelle`
+  when a file of the package changed);
 - the pre-unlink texts `<feature> was undone …` and the residue block `<feature> could not be fully
   undone (reason: …)`.

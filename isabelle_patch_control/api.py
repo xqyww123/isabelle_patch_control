@@ -45,6 +45,7 @@ class Moves:
     moves: list[model.Move]
     conflicts: list[Levels]            # CONFLICT files in the command's way
     dry_run: bool
+    up: bool                           # apply, not unapply
 
     def level_after(self, target: str) -> int | None:
         for m in self.moves:
@@ -137,7 +138,7 @@ def _move(st: Status, replayer: Replayer, *, target: int, up: bool, dry_run: boo
                 replayer.install(st.tree, m.levels, m.target)
             except OSError as e:
                 raise WriteFailed(f"could not write {tree_path(st.tree, m.levels.target)}: {e}") from e
-    return Moves(st, moves, conflicts, dry_run)
+    return Moves(st, moves, conflicts, dry_run, up)
 
 
 # --- the public functions
@@ -167,7 +168,7 @@ def unapply(tree: Path, features_dir: Path, *, feature: str | None = None, dry_r
 def _apply_or_unapply(tree, features_dir, feature, dry_run, *, up: bool) -> Moves:
     chain, k = _chain(tree, features_dir, feature)
     if not chain:
-        return Moves(Status(tree, []), [], [], dry_run)
+        return Moves(Status(tree, []), [], [], dry_run, up)
     with _session(tree, chain, exclusive=not dry_run, lock=True, selected=k) as (st, replayer):
         target = (k or len(chain)) if up else (k - 1 if k else 0)
         return _move(st, replayer, target=target, up=up, dry_run=dry_run)

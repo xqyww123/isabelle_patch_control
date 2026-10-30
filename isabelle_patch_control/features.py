@@ -118,8 +118,8 @@ def link_chain(tree: Tree, dirs: list[FeatureDir]) -> list[FeatureDir]:
         needs_name, needs_version = fd.base_tag.split("/")[1:3]
         installed = [d for d in dirs if d.name == needs_name]
         raise ChainBroken(texts.chain_broken(
-            fd.package, fd.version, fd.dir.name, names.package_name(needs_name), needs_version, fd.base_tag,
-            " and ".join(d.package + " " + d.version for d in installed) or "none"))
+            fd.package, fd.version, names.package_name(needs_name), needs_version,
+            " and ".join(d.package + " " + d.version for d in installed) or None))
     return chain
 
 

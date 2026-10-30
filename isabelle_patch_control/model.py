@@ -16,7 +16,11 @@ class FeatureState:
     state: str
     conflicts: tuple[str, ...]      # files without a single level
     below: int                      # files at a level below this feature (half-applied)
-    hole: bool                      # applied with a feature below it that is not applied
+    not_below: tuple[int, ...]      # applied, but these features below it are not
+
+    @property
+    def hole(self) -> bool:
+        return bool(self.not_below)
 
 
 def feature_states(levels: dict[str, Levels], n: int) -> list[FeatureState]:
@@ -33,8 +37,8 @@ def feature_states(levels: dict[str, Levels], n: int) -> list[FeatureState]:
             state = NOT_APPLIED
         else:
             state = HALF
-        hole = state == APPLIED and any(s.state != APPLIED for s in states)
-        states.append(FeatureState(k, tuple(own), state, conflicts, at_or_above.count(False), hole))
+        not_below = tuple(s.number for s in states if s.state != APPLIED) if state == APPLIED else ()
+        states.append(FeatureState(k, tuple(own), state, conflicts, at_or_above.count(False), not_below))
     return states
 
 

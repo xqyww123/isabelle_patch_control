@@ -37,7 +37,8 @@ def hostile(request, chain3, tmp_path, monkeypatch):
     """The tree to use, with the clean run's results taken before the environment is made hostile
     in the parametrized way (the fixtures' own git must not be fooled either)."""
     setup = request.param
-    clean = tool(chain3.tree(), chain3.features_d, "status").out.splitlines()[1:]
+    first = chain3.tree()
+    clean = tool(first, chain3.features_d, "status").out.replace(str(first), "<tree>").splitlines()[1:]
     expected_top, expected_pristine = chain3.expected("f3"), chain3.expected(None)
     tree = chain3.tree()
     if setup == "tree-in-ignored-subdir":
@@ -75,7 +76,7 @@ def hostile(request, chain3, tmp_path, monkeypatch):
 
 def test_hostile_environment_gives_the_clean_result(chain3, hostile):
     t = hostile.tree
-    assert tool(t, chain3.features_d, "status").out.splitlines()[1:] == hostile.clean_status
+    assert tool(t, chain3.features_d, "status").out.replace(str(t), "<tree>").splitlines()[1:] == hostile.clean_status
     r = tool(t, chain3.features_d, "apply")
     assert r.code == 0
     same_tree(t, hostile.expected_top)

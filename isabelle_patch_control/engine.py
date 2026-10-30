@@ -191,8 +191,11 @@ class Levels:
         assert self.level is not None, "a CONFLICT file has no content table"
         return self.tables[self.level][level]
 
-    def created_by(self, feature: int) -> bool:
-        return any(p.feature == feature and p.creates for p in self.patches)
+    @property
+    def created(self) -> bool:
+        """The file is not in the isabelle package: a feature creates it, so a reinstall of isabelle
+        does not touch it."""
+        return self.patches[0].creates
 
     def mode_at(self, level: int) -> int | None:
         """The permission bits a file that does not exist in the tree gets at `level`: from the

@@ -38,9 +38,9 @@ def test_status_and_dry_run_on_a_read_only_tree(fresh):
     try:
         assert tool(t, toy.features_d, "status").code == 1
         r = tool(t, toy.features_d, "apply", "--dry-run")
-        assert r.code == 0 and "src/Pure/a.ML  level 0 -> 3" in r.out
+        assert r.code == 0 and "src/Pure/a.ML  level 0 (original) -> level 3 (f3)" in r.out
         r = tool(t, toy.features_d, "apply")
-        assert r.code == 1 and "Permission denied" in r.err and r.out.startswith(f"tree {t}")
+        assert r.code == 1 and "Permission denied" in r.err and r.out.startswith(texts.checked(t, 3))
     finally:
         t.parent.chmod(t.parent.stat().st_mode | stat.S_IWUSR)
         make_writable(t)
@@ -59,7 +59,7 @@ def test_any_os_error_is_reported_with_status(fresh, monkeypatch):
 
     monkeypatch.setattr(engine, "open", read_only_open, raising=False)
     r = tool(t, toy.features_d, "apply")
-    assert r.code == 1 and r.out.startswith(f"tree {t}")
+    assert r.code == 1 and r.out.startswith(texts.checked(t, 3))
     assert r.err == texts.PREFIX + texts.os_error(OSError(errno.EROFS, "Read-only file system", str(t / "etc" / "ISABELLE_ID"))) + "\n"
     assert r.err.startswith(texts.PREFIX + f"Read-only file system ({t / 'etc' / 'ISABELLE_ID'}); nothing in the tree was changed.")
     monkeypatch.undo()
@@ -72,8 +72,10 @@ def test_any_os_error_is_reported_with_status(fresh, monkeypatch):
 
     monkeypatch.setattr(engine.Replayer, "_copy", full_disk_copy)
     r = tool(t, toy.features_d, "unapply")
-    assert r.code == 1 and r.out.startswith(f"tree {t}")
+    assert (r.code, r.out) == (1, "")                    # no status report: its last line would say apply
     assert r.err == texts.PREFIX + texts.os_error(OSError(errno.ENOSPC, "No space left on device")) + "\n"
+    r = tool(t, toy.features_d, "apply", "-q")
+    assert (r.code, r.out) == (1, "")                    # -q: errors only
     assert r.err.startswith(texts.PREFIX + "No space left on device; nothing in the tree was changed.")
     same_tree(t, toy.expected(None))
 

@@ -3,7 +3,7 @@
 How the tool works inside, where things are, and how to test. The design is the plan
 `ai-artifacts/ISABELLE_PATCH_CONTROL_PLAN.md` (rev 6, with five plan reviews and the first code
 review next to it); change the plan before changing the design. For what the tool does for a user
-see [reference.md](reference.md).
+see [reference.md](reference.md). No `isabelle build` in this repository without the owner's word.
 
 ## One path for every command
 
@@ -58,7 +58,7 @@ isabelle_patch_control/
   api.py         status, apply, unapply, apply_to, unapply_from; Status, Moves  (never exits)
   texts.py       the plan's texts (§4, decision 9) and every frame a conda hook writes
   cli.py         argument parsing, output, exit codes
-  conda_hook.py  conda-hook post-link / pre-unlink; the one reading of conda-meta
+  conda_hook.py  conda-hook post-link / pre-unlink
   hooks/         the hook texts the feature packages ship: post-link.sh/.bat (the fragment every
                  feature package's post-link copies verbatim), pre-unlink.sh/.bat (templates with
                  <feature>, <package>, <version> for the renderer); the .bat files are CRLF
@@ -128,9 +128,8 @@ component); a component package of the Isabelle_RPC kind; a package that depends
 only indirectly; a broken tool in a channel of its own; and a channel without the re-release for
 build 2. Every package is noarch, so `tools/accept` runs on the same channel on all five platforms.
 Every scenario starts from a new environment with a private `HOME`, `CONDARC` and package cache
-(`s_hardlink` has one of its own, so a failure cannot leave the shared one edited) and reads conda's
-own output; the tree's bytes are checked by `tools/check-bytes`. The lock scenarios (`s_residue`,
-`s_rule`) wait for the tool's 60-second lock timeout three times each; the twelve scenarios take
+and reads conda's own output; the tree's bytes are checked by `tools/check-bytes`. The lock scenarios (`s_residue`,
+`s_rule`) wait for the tool's 60-second lock timeout three times each; the eleven scenarios take
 about half an hour on the author's machine, most of it conda's solving (one run also stalled for
 an hour inside a single conda command).
 
@@ -144,7 +143,9 @@ are 0644/0755 like the conda package's). No Isabelle is needed and nothing runs 
 What is covered (plan decision 15, tool layer): the linking rules and every refusal, with
 directory names that sort out of chain order; the derivation of the tree and `features.d`, the
 default invocation, relative paths through the API; the four states, holes (any feature below that
-is not applied), the scenarios of the first review's C3; a CONFLICT file that two features touch
+is not applied), the scenarios of the first review's C3; the last line of `status` for a CONFLICT
+in a file a feature creates, in a file of the `isabelle` package, and in both, inside and outside a
+conda environment (the approved texts are compared word for word at least once); a CONFLICT file that two features touch
 (the cap, what is in the way of `apply --feature` and `unapply --feature`, which feature post-link
 names); the two multi-level cases (created then deleted; a hunk whose context occurs twice);
 stacked hunk context on fresh, half and fully applied trees with both dry runs; created files and a
@@ -159,11 +160,10 @@ exclusive runs, no run without the exclusive lock touching the staging directory
 interface; the hooks against a fake `$PREFIX` (post-link idempotence and single report, the
 CONFLICT diagnostic from the top package only and naming the lowest stopped feature, lock busy, the
 old build, refusals framed with the command to run, a write failure saying what was applied, the
-ASCII `.messages.txt`, pre-unlink's success texts, residue blocks for the three reasons, the
+ASCII `.messages.txt`, pre-unlink's success texts, residue blocks for the three reasons and for
+created files, the
 chain's message when the packages do not link, a non-zero exit with nothing written when the
-residue cannot be computed, the in-place edit through a hard link selecting the package-cache
-wording, and the same wording without the directory in a post-link that has no `isabelle` record
-because the command is linking isabelle itself); `check-roundtrip` on the toy chain, a CRLF and a Latin-1 file included, and a wrapped tool
+residue cannot be computed); `check-roundtrip` on the toy chain, a CRLF and a Latin-1 file included, and a wrapped tool
 with one fault each for the mode listing, the created-file check and the check after unapply (the
 exit-code checks and the "A equals the pristine tree" guard have no fault test); `plan_builds`.
 

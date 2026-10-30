@@ -156,6 +156,62 @@
    run 40829078927：lint、两个 unit、toy-channel、accept 的 linux-64/linux-aarch64/osx-arm64/osx-64 过；hooks 失败（Miniforge base 是
    python 3.14、没有 zstandard → `common.unzstd` 先用标准库 `compression.zstd`）；win-64 accept 87 过 4 错（只读目标的暂存副本删不掉 →
    `engine._remove_tree` 先去只读属性）。两处已修、pytest 173 过，**未提交，等用户"提交"后推送重跑**。
+   **10-29 用户"提交"**：工具仓库 `8da1a9e`（zstd、只读副本）已推；主仓库 `181b874b` 未推。GitHub 第二跑 run 40832352868：除钩子层外全过
+   （win-64 只读问题已好）；钩子层 135 过 4 错，全在 `s_interrupt`：conda 26.9.4 修了"回滚删 history"的 bug（conda#16474），工具因此看不出
+   被中断的安装——**设计问题，记在计划 §2.3 的订正，交用户定**。用户"赞同你的建议，请 run Opus agent team 头脑风暴"：Workflow `wf_b5126230-1d6`（事实 1、方案 4：只补说明/记账/比对 conda 记录的 sha256/另找出路，各配一个质疑者，judge 1）在跑；注意 §9 早先否决过记账与 sha256 比对两条路。**结果（17:0x +08）**：judge 推荐 (1) 改所有讲回滚的文字（按 conda 打印的 "Rolling back transaction" 说、修法是同一条命令再跑一次）；(2) 唯一设计改动：命令行 `status` 加一项对 conda `isabelle` 记录 sha256 的检查（检查、非状态来源）；否决记账与树里记录文件。完整推荐在 `scratchpad/wf-rollback/verdict.md`，各项改动清单在 `tasks/w1s8pffcn.output` 的 verdict 里。新事实（作者核过四个 tag）：只有 conda 25.11.0–26.5.x 回滚删 history。**等用户定**。
+   **10-29 用户要在 cslh19 的 MLML/contrib 同步本机状态**：裁定 (A) 只同步各 git 仓库的已提交状态；Isabelle2025-2 换成本机的 git 仓库加工作树；
+   冲突以本机为准。用户让先把未推的仓库推上 GitHub：已推 Isabelle2025-2（`isabelle-patched` 全部分支加 `refs/notes/tested`）、
+   isabelle-base-features、Isa-Mini、isasearch-web、light_locale、nunchaku、Performant_Isabelle_ML、phi-system、Theory-Agent-over-Trees
+   （都只快进）。未推、待用户定：AutoCorrode（origin 是 awslabs，只读；另有 `fork` 远端）、localized_record（没有远端）。cslh19 只能用 ssh 地址
+   读 GitHub（https 没凭据）。cslh19 上正跑着 light 的变异测试构建（`~/light_mutants/`，与 MLML 无关），任何构建都要等它。同步方案（含两处
+   "先备份再覆盖"与 `scala_build`）等用户批准。
+   **执行（10-29 16:0x +08，用户：AutoCorrode 不同步、localized_record 先不管、Isabelle-MCP 与 isabelle-packaging-ci 必须是和本机一样的 git 仓库）**：
+   cslh19 上 9 个仓库快进到本机提交（Isa-Mini 的 translator 对到记录的 `f402f9d`）；克隆 11 个（含原来是空目录的两个子模块与三个空仓库）；
+   `Isabelle2025-2` 原地接 `.git`（来自 `isabelle-patched`，HEAD daily `7eb9137`，11 分支 3 tag 8 条 tested 记录），39 个旧补丁文件与 5 个 `.bak`
+   先打包到 cslh19 `~/sync-20261029/isabelle-pre-sync-files.tar`，再换成 daily 内容并补上 3 个；`.bak` 未删；上游、`--ff-only`、钩子照本机。
+   **未做**：`scala_build`（4 个 `.scala` 文件变了，jar 是旧补丁编的，PIDE 前端在它之前可能出错；等用户批准）；之后 `new-tree` 建 19 棵私有树；
+   heap 等用户下令。cslh19 上 light 的变异测试循环一直在跑（`~/light_mutants/`）。
+   **用户批准 `scala_build`，"请帮忙 rebuild the heaps on cslh19"，"等 light 那个循环停下来再跑"；私有树（new-tree）用户问"我们只是要去同步状态对吗"，作者建议不建、按需再建**。
+   cslh19 后台脚本 `~/sync-20261029/heaps.sh`（pid 记在 `heaps.pid`，日志 `heaps.log`）：每步前等连续 600 s 没有别的 Isabelle 构建，然后
+   `scala_build` → `build -b -j 1 -o threads=12` 那 12 个 32 位 heap → `-o ML_system_64=true Phi_System_Base`；scala_build 失败就停。16:15 起等待。
+   scala_build 16:57 exit 0（jar 已是新的）；32 位那步 17:19:38 自己开跑（light 的循环停了 10 分钟；当时作者刚问用户要不要放宽等待条件，
+   用户还没答；作者没掐断它，已告知用户）。同时跑着另一会话的 class_variant 作业（`/tmp/xero_s4t/run_cvs.sh`，用 MLML 的 Isabelle 与
+   AFP-ALL-4 heap，17:09 起、超时 4 小时）与 Isabelle2026 的 mirabelle；作者另起了 cslh19 可用内存低于 5 GB 的监视。
+   **10-29 用户对头脑风暴的裁定**（计划 §0 第 40 条）："好的，赞同 / 可以加 status 的这项检查 / status 的退出码可以变成 1 / 与文档、测试相关的，
+   在不改变设计的前提下，你可以自决"。计划已改（§0 第 40 条、§2.3、决定 5/6/9/15、§4、§9、附录 A、§10.0a 末行）。代码已写（未提交）：
+   `features.IsabelleRecord`/`edited_in_cache`、`api.unexplained`、cli `status`、texts（`RERUN_LINE`、`UNEXPLAINED_ROW`、`unexplained_row`、
+   `unexplained`，CONFLICT 文案第 2 行与 RERUN_LINE，残留块删 "(nothing will remind you later)"，包缓存第 2 步末两行）；README/AGENTS/reference；
+   新文件 `tests/test_unexplained.py`（14 例，**提交前要用户批准**）；变异 12 个全杀（插件在 scratchpad `mut-unexplained/`）；pytest 187 过；
+   钩子层 `s_interrupt` 按 conda 版本分两支、`toy-slow` 只等一次、`states()` 只读状态行；`tools/accept` 的 `states()` 同改。
+   本机钩子层全量（conda 25.11.1，删 history 那支）143 过 0 错（`scratchpad/hooks9.log`，用的是校读前的文案）；临时装的 conda 26.9.4
+   （`scratchpad/conda269`）单跑 `s_interrupt` 的重跑那支 15 过 0 错（`scratchpad/hooks10.log`）。三个 Opus reader 校读一轮，文案已按意见改、
+   计划 §4 记了取舍；pytest 188 过（新文件 15 例）。**等用户批准文案与新文件**，之后用定稿文案重跑钩子层、等"提交"。
+   cslh19：32 位 12 个 heap 17:58 建完 exit 0；64 位 Phi_System_Base 18:08 建完 exit 0（46 秒，它的 64 位上游已是新的——大概是 class_variant
+   作业启动时建的，未核实）；heaps.sh 18:08:51 DONE。cslh19 同步与 heap 重建都完成。
+   **同晚用户收回第 40 条（计划 §0 第 41 条）**：检查与自动修复都是"过度设计"，回滚的修法只有重装 isabelle；history 不管；`status` 改成
+   整句（用户批准）；钩子 CONFLICT 诊断与残留块缩成与 status 同一段重装说明（用户批准）；删掉经硬链接改进包缓存的检测，工具不再读
+   conda-meta（用户"按你建议来"）。第 40 条的代码已撤（diff 存 `scratchpad/ruling40-withdrawn.diff`），`tests/test_unexplained.py` 删了；
+   pytest 172 过；status 的句子经一个 Opus reader 三面校读一轮并照改（查出 feature 新建文件那种情形会抛异常，已修、加测试），4 个变异全杀。
+   钩子层全量在跑（`scratchpad/hooks13.log` 25.11.1、`hooks14.log` 26.9.4）。之后：给用户看结果、等"提交"。
+   钩子层全量两版本各 110 过 0 错（`hooks13.log`、`hooks14.log`）；钩子 CONFLICT 诊断、残留块、硬链接检测删除都已做、用户批准文案。
+   **等用户"提交"**（提交里没有新文件）。
+   下游 5 个分支已合并（4 个快进到 3578f4c，dev_patches 合并成 ea71fb4，五棵 stock 树挪到 3578f4c），用户令推送、已推 isabelle-patched。
+   dev_patches 的 run-tree 构建测试：用户同意在 cslh19 跑，但等新目录布局落地后再建树。
+   **目录重组（主仓库 `ai-artifacts/ISABELLE_GIT_MIGRATION_PLAN.md` §0 第 34 条、§12）**：用户定每棵树是 feature 仓库里真正独立的 submodule
+   克隆，daily 仓库为每台机器的中转站，推送不需用户下令（提交仍需），gitlink 只在发布时由 make-patches 写，isabelle-patched 公开，三个新
+   GitHub 仓库公开，`contrib` 软链接 `../../../Isabelle2025-2/contrib`。第一稿、第二稿各经一个 Opus agent 实测评审，结论与修法都记在 §12；
+   **第三稿用户已批准**（§12"第三稿"；执行状态与 compact 后的下一步在 §12 末"执行状态"小节）。删门 1、迁移时搬运未提交改动并通知所有
+   相关会话、GitHub 不加保护规则、check-signatures 的 `-C` 修复顺带做，都已定。
+   **代码评审四的实施清单 (a)–(h) 已改完（2026-10-30）**；用户说新文案"不需要我批准"、让起 Opus reader 校读，两轮校读（三人一轮、
+   事实核对一轮）之后，用户定"是问题就都要改"，旧文案的问题也全改了（补丁工具计划 §0 第 41 条末）。pytest 181、变异 58 个全抓到、
+   钩子层测试两版 conda 全过（工作目录 `/var/tmp/claude-hooks/`）。等用户说"提交"，之后推送并重跑 GitHub CI；钩子兜底文件的新文案随此后
+   发布的 feature 包生效。staging 目录已归档删除；三个 GitHub
+   仓库已建（Local_Datatype、Local_Type_Abbrev、Localized_Record）。
+   **compact 后先做**：(1) 等/问用户"提交"补丁工具这批改动；(2) 迁移第 (i) 步剩下的：isabelle-patched 设公开（gh 写法要核）、三个新仓库的
+   名字向用户确认后建；(3) `Isabelle2025-2-staging` 的调查结果交用户；(4) 第 (ii) 步工具改动。README 的 "When something went wrong" 新段落
+   用户还没单独看过（补丁工具计划 §4 标"待用户批准"），提交前给用户看。
+   另：net printing 会话转来三项提议（check-signatures 在 `-C` 下解析 `<rev>` 的 bug、"新建功能到发布"的流程文档、一个
+   isabelle-feature-package SKILL），自称用户原话"很好这些提议请你发给 git agent 让它去办"；同伴消息不算批准，已问用户，未动手。
    接下来（每件仍要用户下令）：light 的 `tools/component_files.txt`、带 `-d <light 仓库>` 的构建、
    `make-patches light_locale <v>`（门禁 0 已满足：light 分支与 `Isabelle2025-2/future_assign_interrupt` 的 merge-base 就是带 tag 的 6d8be01）；
    checklist 现在在 `RELEASE.md`，**在构建之前**过。之后三个新 feature、`contrib/qiyuan_dev_patches/`（GitHub 仓库已建、本地目录未建）。第 4 步 `check-roundtrip` 在官方 tarball 树上跑；第 5 步渲染器、工具的 `conda/recipe.yaml`、

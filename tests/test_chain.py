@@ -7,19 +7,22 @@ from pathlib import Path
 
 import pytest
 
-from conftest import OLD_BUILD_ID, PRISTINE_ID, RELEASE, run_cli, tool
-from isabelle_patch_control import api, features, texts
+from conftest import OLD_BUILD_ID, PRISTINE_ID, RELEASE, ran, run_cli, tool
+from isabelle_patch_control import api, cli, features, texts
 
 
 def test_fresh_tree_links_three_features(fresh):
     toy, t = fresh
     r = tool(t, toy.features_d, "status")
     assert r.code == 1
-    lines = r.out.splitlines()
-    assert lines[0] == f"tree {t}   features.d {toy.features_d}"
-    assert [l.split()[1] for l in lines[1:]] == ["f1", "f2", "f3"]
-    assert all(l.startswith("not-applied") for l in lines[1:])
-    assert lines[1].endswith(" 4 files") and lines[2].endswith(" 3 files") and lines[3].endswith(" 2 files")
+    assert r.out.splitlines()[0] == texts.checked(t, 3)
+    assert cli.read_status(r.out) == [("not-applied", "f1"), ("not-applied", "f2"), ("not-applied", "f3")]
+    assert r.out.endswith(f"\n\nTo apply what is missing, run: {ran(t, toy.features_d)} apply\n")   # the same tree again
+    shutil.rmtree(toy.features_d / "f3")
+    shutil.rmtree(toy.features_d / "f2")
+    r = tool(t, toy.features_d, "status")
+    assert r.out == (f"Checked the Isabelle sources in {t} against 1 feature package.\n\n"
+                     f"Feature `f1` is not applied yet.\n\nTo apply what is missing, run: {ran(t, toy.features_d)} apply\n")
 
 
 def test_hole_in_the_chain_is_refused(fresh):
@@ -27,8 +30,9 @@ def test_hole_in_the_chain_is_refused(fresh):
     shutil.rmtree(toy.features_d / "f2")
     r = tool(t, toy.features_d, "status")
     assert r.code == 3
-    assert r.err.strip() == texts.PREFIX + texts.chain_broken("isabelle-f3", "1", "f3", "isabelle-f2", "1", f"{RELEASE}/f2/1", "none")
-    assert "needs isabelle-f2 1; installed: none" in r.err
+    assert r.err.strip() == texts.PREFIX + texts.chain_broken("isabelle-f3", "1", "isabelle-f2", "1", None)
+    assert r.err == ("isabelle-patch-control: isabelle-f3 1 needs isabelle-f2 1, which is not installed. "
+                     "Install matching versions of these packages.\n")
 
 
 def test_wrong_version_installed_is_named(fresh):
@@ -37,7 +41,7 @@ def test_wrong_version_installed_is_named(fresh):
     prov.write_text(prov.read_text().replace(f"release_tag: {RELEASE}/f2/1", f"release_tag: {RELEASE}/f2/2"))
     r = tool(t, toy.features_d, "status")
     assert r.code == 3
-    assert f"needs isabelle-f2 1; installed: isabelle-f2 2 (features.d/f3 needs {RELEASE}/f2/1)." in r.err
+    assert "isabelle-f3 1 needs isabelle-f2 1, but isabelle-f2 2 is installed. Install matching versions" in r.err
 
 
 def test_fork_is_refused(fresh):
@@ -63,7 +67,8 @@ def test_tree_that_is_not_the_pristine_build(chain3):
     r = tool(t, chain3.features_d, "status")
     assert r.code == 3
     assert r.err.strip() == texts.PREFIX + texts.not_pristine(t, OLD_BUILD_ID, "f1", RELEASE, PRISTINE_ID)
-    assert r.err.startswith(texts.PREFIX + f"run: conda update --all {texts.CHANNELS}.") and OLD_BUILD_ID in r.err
+    assert r.err.startswith(f"{texts.PREFIX}{t} is not the Isabelle build the feature packages were made for: ") and OLD_BUILD_ID in r.err
+    assert r.err.endswith(f". To fix it, run: conda update -p {t.parent} --all -c https://conda.qiyuan.me -c conda-forge\n")
     for cmd in ("apply", "unapply"):
         assert tool(t, chain3.features_d, cmd).code == 3
 
@@ -74,14 +79,14 @@ def test_refusals_do_not_depend_on_directory_order(chain3):
     (chain3.features_d / "f3").rename(chain3.features_d / "a3")             # the top now sorts first
     t = chain3.old_build_tree()
     r = tool(t, chain3.features_d, "status")
-    assert r.code == 3 and "features.d/f1 was made for" in r.err and "conda update --all" in r.err
+    assert r.code == 3 and "features.d/f1 was made for" in r.err and " --all -c https://conda.qiyuan.me" in r.err
     shutil.rmtree(chain3.features_d / "f2")                                 # a3's base is unreleased too: the build still comes first
     r = tool(t, chain3.features_d, "status")
     assert r.code == 3 and "features.d/f1 was made for" in r.err
     shutil.rmtree(chain3.features_d / "f1")
     r = tool(chain3.tree(), chain3.features_d, "status")
     assert r.code == 3
-    assert "isabelle-f3 1 needs isabelle-f2 1; installed: none (features.d/a3 needs" in r.err   # the name comes from release_tag
+    assert "isabelle-f3 1 needs isabelle-f2 1, which is not installed." in r.err   # the name comes from release_tag
 
 
 def test_no_feature_packages(toy, tmp_path):
@@ -89,7 +94,7 @@ def test_no_feature_packages(toy, tmp_path):
     empty.mkdir()
     for t in (toy.tree(), toy.old_build_tree()):           # whatever build the tree is (ruling 29)
         r = tool(t, empty, "status")
-        assert r.code == 0 and r.out.splitlines() == [f"tree {t}   features.d {empty}", texts.NO_FEATURES]
+        assert r.code == 0 and r.out.splitlines() == [texts.NO_FEATURES]
         for cmd in ("apply", "unapply"):
             r = tool(t, empty, cmd)
             assert (r.code, r.out) == (0, "")
@@ -180,18 +185,19 @@ def test_resolve_prefix_and_features_root(chain3, tmp_path, monkeypatch):
     (env / "conda-meta").mkdir()
     root = env / features.FEATURES_D
     shutil.copytree(chain3.features_d, root)
-    r = run_cli("--isabelle-home", tree, "status")
-    assert r.code == 1 and r.out.startswith(f"tree {tree}   features.d {root}\n")
+    head = f"Checked the Isabelle sources in {tree} against 3 feature packages.\nThe feature packages' patches are read from {root}.\n"
+    r = run_cli("--isabelle-home", tree, "status", "-v")
+    assert r.code == 1 and r.out.startswith(head)
     # the default invocation: sys.prefix is the environment; CONDA_PREFIX and ISABELLE_HOME are not read
     monkeypatch.setattr(sys, "prefix", str(env))
     monkeypatch.setenv("CONDA_PREFIX", str(tmp_path / "decoy"))
     monkeypatch.setenv("ISABELLE_HOME", str(tmp_path / "decoy" / "isa"))
-    r = run_cli("status")
-    assert r.code == 1 and r.out.startswith(f"tree {tree}   features.d {root}\n")
+    r = run_cli("status", "-v")
+    assert r.code == 1 and r.out.startswith(head)
     # `..` in --isabelle-home: the prefix is the tree's real parent
     monkeypatch.chdir(tree / "src")
-    r = run_cli("--isabelle-home", "..", "status")
-    assert r.code == 1 and r.out.startswith(f"tree {tree}   features.d {root}\n")
+    r = run_cli("--isabelle-home", "..", "status", "-v")
+    assert r.code == 1 and r.out.startswith(head)
     # the tool of another prefix, no conda-meta there: sys.prefix is not an environment
     monkeypatch.setattr(sys, "prefix", str(tmp_path / "plain"))
     r = run_cli("status")
@@ -203,19 +209,16 @@ def test_resolve_prefix_and_features_root(chain3, tmp_path, monkeypatch):
     # a conda environment without any feature package: its features.d does not exist
     shutil.rmtree(root)
     r = run_cli("--isabelle-home", tree, "status")
-    assert r.code == 0 and r.out.splitlines()[1] == texts.NO_FEATURES
-    assert "conda-meta/history" in r.out                            # no history file: an interrupted conda command
-    (env / "conda-meta" / "history").write_text("")
-    r = run_cli("--isabelle-home", tree, "status")
-    assert r.code == 0 and r.out.splitlines() == [f"tree {tree}   features.d {root}", texts.NO_FEATURES]
+    assert r.code == 0 and r.out.splitlines() == [texts.NO_FEATURES]
 
 
 def test_status_verbose_lists_files_with_levels(fresh):
     toy, t = fresh
     r = tool(t, toy.features_d, "status", "-v")
-    assert "    src/Pure/new1.ML  level 0  " + texts.CREATED in r.out      # f1 creates it
-    assert "    src/Pure/c.ML  level 0\n" in r.out
-    assert r.out.count(texts.CREATED) == 2                                 # new1.ML (f1) and bin/new2 (f2)
+    assert "    src/Pure/new1.ML  level 0 (original)  (created by a feature)" in r.out    # f1 creates it
+    assert "    src/Pure/c.ML  level 0 (original)\n" in r.out
+    assert r.out.count(texts.CREATED) == 3                                 # new1.ML under f1 and f3, bin/new2 under f2
+    assert "\n    package isabelle-f1, release Isabelle2025-2/f1/1; its files:\n" in r.out
 
 
 def test_help_prints_agents_md():
@@ -269,3 +272,64 @@ def test_git_is_looked_up_at_the_prefix_first_and_must_be_recent(fresh, tmp_path
     monkeypatch.setenv("PATH", str(tmp_path / "empty"))
     r = tool(t, toy.features_d, "status")
     assert r.code == 2 and "git not found" in r.err
+
+
+def test_the_reinstall_command_quotes_the_prefix(monkeypatch):
+    """It is pasted into the user's shell: a POSIX shell, or cmd.exe / PowerShell on Windows."""
+    tail = "-c https://conda.qiyuan.me -c conda-forge --force-reinstall isabelle"
+    spaced = Path("/home/a b/env/isa")
+    if sys.platform != "win32":
+        assert texts.reinstall(spaced) == f"conda install -p '/home/a b/env' {tail}"
+        assert texts.reinstall(Path("/home/ab/env/isa")) == f"conda install -p /home/ab/env {tail}"
+    monkeypatch.setattr(texts.os, "name", "nt")
+    assert texts.reinstall(spaced) == f'conda install -p "{spaced.parent}" {tail}'
+
+
+def test_status_says_how_to_fix_files_it_does_not_recognise(chain3, tmp_path, monkeypatch):
+    """The last line of status for a feature that cannot be applied: delete a file a feature creates
+    (first), reinstall isabelle for a file of the isabelle package (in a conda environment only)."""
+    env = tmp_path / "env"
+    tree = env / "isa"
+    shutil.copytree(chain3.tree("f3"), tree)
+    (env / "conda-meta").mkdir()
+    shutil.copytree(chain3.features_d, env / features.FEATURES_D)
+    (tree / "bin" / "new2").write_text("other\n")                                  # f2 creates it
+    r = run_cli("--isabelle-home", tree, "status")
+    assert r.code == 1 and ("CONFLICT", "f2") in cli.read_status(r.out)
+    assert r.out.endswith(f"\nTo fix it, delete {tree / 'bin' / 'new2'} (created by a feature), "
+                          f"then run: isabelle-patch-control --isabelle-home {tree} apply\n")
+    v = run_cli("--isabelle-home", tree, "status", "-v").out                  # bin/new2 is 0755: git's mode warning is left out
+    assert "\n        level 2: error: " in v and "warning:" not in v
+    (tree / "src" / "Pure" / "b.ML").write_text("edited\n")                        # f2 changes it
+    r = run_cli("--isabelle-home", tree, "status")
+    assert ("Feature `f2` cannot be applied: bin/new2 and src/Pure/b.ML were changed by something other than the installed "
+            "feature packages.\n") in r.out
+    assert r.out.endswith(
+        "\nThis usually means a conda command was interrupted halfway. To fix it, first delete "
+        f"{tree / 'bin' / 'new2'} (created by a feature); then reinstall the isabelle package.\n"
+        "This deletes this environment's Isabelle user directory (the heaps built there, your settings and preferences, "
+        "and components you registered by hand); copy out anything you want to keep first "
+        "(isabelle getenv -b ISABELLE_HOME_USER shows where it is).\n"
+        f"Then run:\n  conda install -p {env} -c https://conda.qiyuan.me -c conda-forge --force-reinstall isabelle\n"
+        "The installed feature packages are applied again, and Isabelle rebuilds the heaps on first use.\n")
+    # a file f1 creates and f3 changes is deleted, not reinstalled, whichever feature's state shows it
+    shutil.rmtree(tree)
+    shutil.copytree(chain3.tree("f3"), tree)
+    (tree / "src" / "Pure" / "new1.ML").write_text("other\n")
+    r = run_cli("--isabelle-home", tree, "status")
+    assert cli.read_status(r.out) == [("CONFLICT", "f1"), ("applied", "f2"), ("CONFLICT", "f3")]
+    assert r.out.endswith(f"\nTo fix it, delete {tree / 'src' / 'Pure' / 'new1.ML'} (created by a feature), "
+                          f"then run: isabelle-patch-control --isabelle-home {tree} apply\n") and "reinstall" not in r.out
+    monkeypatch.setattr(sys, "prefix", str(env))                                      # run without options: the command is too
+    r = run_cli("status")
+    assert r.out.endswith(" (created by a feature), then run: isabelle-patch-control apply\n")
+    t = chain3.tree("f3")                                                            # outside a conda environment
+    (t / "src" / "Pure" / "b.ML").write_text("edited\n")
+    r = tool(t, chain3.features_d, "status")
+    assert r.out.endswith(f"\nRestore {t / 'src' / 'Pure' / 'b.ML'} to the original Isabelle sources, then run: "
+                          f"{ran(t, chain3.features_d)} apply\n")
+    assert "reinstall" not in r.out
+    (t / "bin" / "new2").write_text("other\n")
+    r = tool(t, chain3.features_d, "status")
+    assert r.out.endswith(f"\nRestore {t / 'src' / 'Pure' / 'b.ML'} to the original Isabelle sources and delete {t / 'bin' / 'new2'} "
+                          f"(created by a feature), then run: {ran(t, chain3.features_d)} apply\n")

@@ -35,4 +35,20 @@ def test_pyproject_names_the_new_tool_only():
 
 def test_agents_md_has_the_section_the_conflict_message_points_to():
     assert "## Coming from my-better-isabelle 0.x" in (ROOT / "AGENTS.md").read_text()
+
+
+def test_agents_md_lists_the_commands_as_help_does():
+    from isabelle_patch_control import cli
+    block = (ROOT / "AGENTS.md").read_text().split("## Commands\n\n```\n", 1)[1].split("```", 1)[0]
+    commands = [line for line in block.splitlines() if line.startswith("  ")]
+    assert len(commands) == 7 and all(line in cli.__doc__.splitlines() for line in commands)
+
+
+def test_readme_sends_what_to_do_to_help():
+    """The common text answers what it is, how to install, how to check; what to do is in AGENTS.md,
+    which `isabelle-patch-control help` prints."""
+    common = " ".join((ROOT / "common-readme.md").read_text().split())
+    assert "`isabelle-patch-control help`" in common and "--force-reinstall" not in common
+    agents = (ROOT / "AGENTS.md").read_text()
+    assert "## What to do in each situation" in agents and "## Removing, re-installing, and what conda does on its own" in agents
     assert (ROOT / "isabelle_patch_control" / "AGENTS.md").resolve() == (ROOT / "AGENTS.md").resolve()

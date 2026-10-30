@@ -58,6 +58,7 @@ sys.path.insert(0, str(TOOLS.parent))
 sys.path.insert(0, str(TOOLS))
 from common import build_string_prefix, pinned_build  # noqa: E402
 from isabelle_patch_control import engine, texts  # noqa: E402
+from isabelle_patch_control.cli import read_status  # noqa: E402
 from isabelle_patch_control.features import provenance_fields  # noqa: E402
 from isabelle_patch_control.names import feature_name, package_name  # noqa: E402
 
@@ -109,13 +110,13 @@ class Leg:
         return r.returncode, (r.stdout + r.stderr).replace("\r", "")
 
     def states(self, prefix: Path) -> list[str]:
-        """`<state> <feature>` of every feature line of `status`; a refusal comes back whole, as one
-        element, so that it can never read as a state."""
+        """`<state> <feature>` of every feature sentence of `status`; a refusal comes back whole, as
+        one element, so that it can never read as a state."""
         _, out = self.tool(prefix, "status")
-        lines = out.splitlines()
-        if not lines or not lines[0].startswith("tree "):
-            return [out.strip()]
-        return [" ".join(line.split()[:2]) for line in lines[1:] if line.strip() and line.strip() != texts.NO_FEATURES]
+        read = read_status(out)
+        if read or out.strip() == texts.NO_FEATURES:
+            return [f"{state} {name}" for state, name in read]
+        return [out.strip()]
 
     def status_rc(self, prefix: Path) -> int:
         return self.tool(prefix, "status")[0]
@@ -342,7 +343,7 @@ def scenario_f(leg: Leg, a, chain):
     k = names.index(feature)
     unpacked, below = chain[k][1], [d for _, d in chain[:k]]
     lower = [package_name(f) for f in names[:k]]
-    full = f"{feature} was NOT applied:"
+    full = texts.stopped(feature)
     for case, created in (("f1", False), ("f2", True)):
         path = leg.target(unpacked, created, below)
         if path is None:
@@ -364,7 +365,7 @@ def scenario_f(leg: Leg, a, chain):
             leg.check("(f2) --force-reinstall isabelle, the CONFLICT still there: one complete diagnostic", leg.times(full) == 1)
         else:
             leg.check("(f1) --force-reinstall isabelle: all applied, no diagnostic",
-                      leg.all_applied(e) and leg.times("NOT applied") == 0 and leg.times("was not applied") == 0)
+                      leg.all_applied(e) and leg.times(full) == 0 and leg.times(texts.IS_CONFLICT) == 0)
 
 
 def scenario_g(leg: Leg, a):
@@ -420,7 +421,7 @@ def scenario_i(leg: Leg, a, chain):
     shutil.copytree(unpacked / FD / bottom, e / FD / bottom)
     rc, out = leg.tool(e, "status")
     leg.check("(i) a feature directory on the 2025.2-0 build: exit 3, update --all with both channels",
-              rc == 3 and f"conda update --all {texts.CHANNELS}" in out, out)
+              rc == 3 and "To fix it, run: conda update -p " in out and out.rstrip().endswith(f" --all {texts.CHANNELS}"), out)
 
 
 def scenario_j(leg: Leg, a):

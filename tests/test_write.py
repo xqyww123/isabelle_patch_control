@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from conftest import ROOT, run_cli, same_tree, snapshot, tool
-from isabelle_patch_control import api, engine
+from conftest import ROOT, ran, run_cli, same_tree, snapshot, tool
+from isabelle_patch_control import api, engine, texts
 
 KILL = Path(__file__).parent / "kill_after.py"
 
@@ -76,7 +76,14 @@ def test_os_replace_failure_is_reported_with_status(fresh, monkeypatch):
     monkeypatch.setattr(os, "replace", failing_replace)
     r = tool(t, toy.features_d, "apply")
     assert r.code == 1 and "No space left on device" in r.err
-    assert r.out.startswith(f"tree {t}")                                   # status printed after the failure
+    assert r.out.startswith(texts.checked(t, 3))                                   # status printed after the failure
+    # outside a conda environment the status after the failure restores files, it does not reinstall
+    b = t / "src" / "Pure" / "b.ML"
+    b.write_text(b.read_text().replace("b5\n", "edited\n"))
+    r = tool(t, toy.features_d, "apply")
+    assert r.code == 1 and r.out.endswith(
+        f"\nRestore {b} to the original Isabelle sources, then run: {ran(t, toy.features_d)} apply\n")
+    assert "reinstall the isabelle package" not in r.out
 
 
 def test_shared_inode_keeps_content_and_mode(fresh, tmp_path):
@@ -136,13 +143,18 @@ def test_directory_interface(chain3, tmp_path):
     res = api.apply_to(plain, chain3.features_d / "f1")
     assert res.exit_code == 1 and [lv.target for lv in res.conflicts] == ["src/Pure/a.ML"]
     r = run_cli("apply-to", plain, chain3.features_d / "f1")
-    assert r.code == 1 and "CONFLICT  src/Pure/a.ML" in r.out
+    assert (r.code, r.out) == (1, "Feature `f1` cannot be applied: src/Pure/a.ML was changed by something other than the "
+                                  "installed feature packages.\n")
+    r = run_cli("apply-to", plain, chain3.features_d / "f1", "-v")
+    assert r.code == 1 and "\n    src/Pure/a.ML  no level\n      level 0: " in r.out
     # success is exit 0 and nothing printed: the texts about the conda environment do not apply here
     r = run_cli("unapply-from", plain, chain3.features_d / "f2")
     assert (r.code, r.out, r.err) == (0, "", "") and not (plain / "bin" / "new2").exists()
     r = subprocess.run([sys.executable, "-m", "isabelle_patch_control", "apply-to", str(plain), str(chain3.features_d / "f2"), "-v"],
                        cwd=ROOT, capture_output=True, text=True)
-    assert r.returncode == 0 and r.stdout.splitlines() == ["  README  level 0 -> 1", "  bin/new2  level 0 -> 1", "  src/Pure/b.ML  level 0 -> 1"]
+    assert r.returncode == 0 and r.stdout.splitlines() == ["These files changed:", "  README  level 0 (original) -> level 1 (f2)",
+                                               "  bin/new2  level 0 (original) -> level 1 (f2)",
+                                               "  src/Pure/b.ML  level 0 (original) -> level 1 (f2)"]
 
 
 def test_apply_unapply_leaves_the_pristine_file_set(applied):
