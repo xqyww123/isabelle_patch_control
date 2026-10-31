@@ -336,5 +336,6 @@ jobs:
           set -euo pipefail
           conda activate isabelle
           isabelle-patch-control status | tee "$RUNNER_TEMP/status.txt"
-          ! grep -v '^tree ' "$RUNNER_TEMP/status.txt" | grep -v '^applied ' | grep -q . \
-            || { echo "::error::a feature is not applied"; exit 1; }
+          # the last line is the installed tool's own text for everything in order (texts.ALL_APPLIED)
+          python -I -c 'import sys; from isabelle_patch_control import texts; sys.exit(open(sys.argv[1]).read().splitlines()[-1:] != [texts.ALL_APPLIED])' \
+            "$RUNNER_TEMP/status.txt" || { echo "::error::status does not end with the line it prints when every feature is applied"; exit 1; }
