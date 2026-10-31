@@ -13,6 +13,12 @@ Not for hand use:
   unapply-from  <dir> <feature dir>    the reverse
   conda-hook    post-link | pre-unlink <feature>     what the feature packages' hooks run
 
+For the developers of feature packages (`<command> --help` says more):
+  new-tree      <feature repo>         put the trees that the feature repository registers in place
+  new-tree      --home <feature repo> --base <R>/<base> <R>/<feature>     register a feature's two trees
+  make-patches  --package <dir> [<R>/]<feature> <version>                 release a feature, in its private tree
+  check-signatures  <base rev> <rev> <additions file>                     release gate (d) on its own
+
 Exit codes: 0 `status` found everything asked for applied, or `apply`/`unapply` found nothing in its
 way (also: no feature packages installed); 1 something is not applied, a file could not be moved,
 or the lock is busy; 2 no Isabelle tree where expected, git missing or older than 2.43, or a wrong
@@ -20,7 +26,8 @@ command line; 3 refused: the installed packages do not link into one chain,
 the tree is another build than they were made for, it has a .git, a patch target is a symbolic
 link, a patch file cannot be read, a name is unknown, the prefix is not a conda environment and no
 --features-dir is given, or --features-dir is not a directory.  conda-hook exits 0 whenever it wrote
-its own message.
+its own message.  new-tree, make-patches and check-signatures exit 0 when done and 3 when refused;
+check-signatures exits 1 when the signatures differ from the additions file.
 """
 # This docstring is what --help prints; the command line is plan §4.
 from __future__ import annotations
@@ -30,12 +37,14 @@ import os
 import sys
 from pathlib import Path
 
-from . import api, conda_hook, model, names, texts
+from . import api, check_signatures, conda_hook, make_patches, model, names, new_tree, texts
+from .dev import listed
 from .errors import Error, Refused, WriteFailed
 from .features import locate
 
 
 def main():
+    sys.stdout.reconfigure(line_buffering=True)      # progress lines stay in order with refusals when output is captured
     sys.exit(run(sys.argv[1:], os.environ))
 
 
@@ -47,6 +56,8 @@ def run(argv, env) -> int:
             return 0
         if args.command == "conda-hook":
             return conda_hook.run(args.hook, getattr(args, "feature", None), env)
+        if args.command in DEVELOPER:
+            return developer_run(args)
         if args.command in ("apply-to", "unapply-from"):
             fn = api.apply_to if args.command == "apply-to" else api.unapply_from
             res = fn(Path(os.path.abspath(args.dir)), Path(os.path.abspath(args.feature_dir)))
@@ -236,7 +247,64 @@ def parser() -> argparse.ArgumentParser:
     hs.add_parser("post-link")
     hs.add_parser("pre-unlink").add_argument("feature")
     subs.add_parser("help")
+    developer(subs)
     return p
+
+
+DEVELOPER = {"new-tree": new_tree, "make-patches": make_patches, "check-signatures": check_signatures}
+
+
+def developer(subs):
+    """The developers' subcommands: each module's docstring is its `--help`."""
+    def add(name):
+        s = subs.add_parser(name, description=DEVELOPER[name].__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+        s.set_defaults(usage=s)
+        return s
+    s = add("new-tree")
+    s.add_argument("--home", metavar="<feature repo>", help="register <R>/<feature> in this feature repository")
+    s.add_argument("--base", metavar="<R>/<base>", help="the base of the feature --home registers")
+    s.add_argument("target", metavar="<feature repo> | <R>/<feature>")
+    s = add("make-patches")
+    s.add_argument("-C", metavar="dir", default=".", help="the private tree (pristine: a directory in the repository)")
+    s.add_argument("--package", metavar="dir", type=Path, help="the feature's package directory")
+    s.add_argument("--hg", metavar="repo", type=Path, help="pristine: the Isabelle hg repository")
+    s.add_argument("--tarball", metavar="file", type=Path, help="pristine: the official release tarball")
+    s.add_argument("feature", metavar="[<R>/]<feature>")
+    s.add_argument("version", metavar="<version>|<hg id>")
+    s = add("check-signatures")
+    s.add_argument("-C", metavar="dir", default=".", help="a directory inside the repository")
+    s.add_argument("base", metavar="<base rev>")
+    s.add_argument("rev", metavar="<rev>")
+    s.add_argument("additions", metavar="<additions file>", type=Path)
+
+
+def developer_run(args) -> int:
+    if args.command == "new-tree":
+        if (args.home is None) != (args.base is None):
+            args.usage.error("--home and --base go together")
+        if args.home:
+            new_tree.register(new_tree.feature_home(Path(args.home)), args.target, args.base)
+        else:
+            new_tree.set_up_all(new_tree.feature_home(Path(args.target)))
+        return 0
+    if args.command == "make-patches":
+        if args.feature.rsplit("/", 1)[-1] == "pristine":
+            if not (args.hg and args.tarball):
+                args.usage.error("pristine needs --hg <repo> and --tarball <file>")
+            make_patches.pristine_release(Path(args.C), args.feature, args.version, args.hg, args.tarball)
+        else:
+            if not args.package:
+                args.usage.error("a feature release needs --package <dir>")
+            make_patches.feature_release(Path(args.C), args.feature, args.version, args.package.resolve())
+        return 0
+    heads = listed(args.additions)
+    problems = check_signatures.check(Path(args.C), args.base, args.rev, heads, str(args.additions))
+    for problem in problems:
+        print(f"ERROR: {problem}")
+    if problems:
+        return 1
+    print(f"signature sections: every entry of {args.base} unchanged in {args.rev}, {len(heads)} additions as listed")
+    return 0
 
 
 def verbosity(p: argparse.ArgumentParser, default):

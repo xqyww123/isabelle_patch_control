@@ -1,10 +1,9 @@
-#!/usr/bin/env python3
 """check-signatures [-C <dir>] <base rev> <rev> <additions file>
 
-Release gate (d) of the migration plan (§5.1), light locale's make_patches.sh check generalised:
-for every .ML file that differs between <base rev> and <rev>, every entry of the signature
-sections of the base version is still present unchanged in <rev>, and the entries added have
-exactly the heads listed in <additions file>.
+Release gate (d) of make-patches: for every .ML file that differs between <base rev> and <rev>,
+every entry of the signature sections of the base version is still present unchanged in <rev>,
+and the entries added have exactly the heads listed in <additions file>.  Both revisions are
+resolved, and the files read, in the repository of <dir> (default: the current directory).
 
 A signature section is Isabelle style: `signature NAME =` ... `end` at column 0.  An entry starts
 at a specification keyword (val, type, eqtype, datatype, exception, structure, include, sharing);
@@ -13,13 +12,15 @@ its continuation lines are joined, comments dropped, white space squeezed.  A he
 `datatype 'a state = ...` has the head `... datatype state`).  The additions file lists one
 head per line; `#` lines and blank lines are ignored.
 """
-import argparse
-import os
+# This docstring is what `check-signatures --help` prints; gate (d) is MLML's
+# ai-artifacts/ISABELLE_GIT_MIGRATION_PLAN.md §5.1, light locale's make_patches.sh check generalised.
+from __future__ import annotations
+
 import re
 from collections import Counter
 from pathlib import Path
 
-from common import Repo, listed, main, run
+from .dev import git, run
 
 KEYWORDS = {"val", "type", "eqtype", "datatype", "exception", "structure", "include", "sharing"}
 COMMENT = re.compile(r"\(\*([^*]|\*+[^*)])*\*+\)")
@@ -68,20 +69,18 @@ def head(path: str, entry: str) -> str:
     return f"{path} {name} " + re.sub(r" *(:|=| of ).*", "", body)
 
 
-def show(repo: Repo, rev: str, path: str) -> str:
+def show(repo: Path, rev: str, path: str) -> str:
     """The file's content at rev; empty when it does not exist there (a new or deleted file)."""
-    if run(["git", "cat-file", "-e", f"{rev}:{path}"], cwd=repo.common_dir, check=False).returncode:
+    if run(["git", "cat-file", "-e", f"{rev}:{path}"], cwd=repo, check=False).returncode:
         return ""
-    return run(["git", "show", f"{rev}:{path}"], cwd=repo.common_dir).stdout
+    return run(["git", "show", f"{rev}:{path}"], cwd=repo).stdout
 
 
-def check(repo: Repo, base: str, rev: str, heads: list[str], source: str, files: list[str] | None = None) -> list[str]:
+def check(repo: Path, base: str, rev: str, heads: list[str], source: str) -> list[str]:
     """The problems found (empty = the gate passes); `heads` are the heads read from `source`."""
-    if files is None:
-        files = repo.git("diff-tree", "-r", "--name-only", "--no-renames", base, rev).split("\n")
     problems = []
     added = []
-    for path in files:
+    for path in git("diff-tree", "-r", "--name-only", "--no-renames", base, rev, cwd=repo).split("\n"):
         if not path.endswith(".ML"):
             continue
         before = entries(show(repo, base, path))
@@ -97,23 +96,3 @@ def check(repo: Repo, base: str, rev: str, heads: list[str], source: str, files:
                         + "".join(f"\n  not listed: {h}" for h in extra)
                         + "".join(f"\n  listed but not added: {h}" for h in missing))
     return problems
-
-
-def cli():
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("-C", metavar="dir", default=os.getcwd(), help="a directory inside the repository")
-    p.add_argument("base")
-    p.add_argument("rev")
-    p.add_argument("additions", type=Path)
-    a = p.parse_args()
-    repo = Repo(Path(a.C))
-    heads = listed(a.additions)
-    problems = check(repo, a.base, a.rev, heads, str(a.additions))
-    for problem in problems:
-        print(f"ERROR: {problem}")
-    if problems:
-        return 1
-    print(f"signature sections: every entry of {a.base} unchanged in {a.rev}, {len(heads)} additions as listed")
-
-
-main(cli)

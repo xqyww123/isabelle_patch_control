@@ -1,154 +1,157 @@
 #!/usr/bin/env bash
-# Toy run of new-tree and run-tree: a repository laid out like the Isabelle source repository
-# (shared tree <work>/contrib/R on R/daily, chain R/pristine -> R/expose_foreign -> R/light_locale
-# -> R/dev_patches, the hook installed, a stub bin/isabelle), every documented behaviour exercised.
-# Usage: test_trees.sh [<scratch dir>]
+# Toy run of `isabelle-patch-control new-tree`: a bare repository plays GitHub's isabelle-patched
+# (git's url.<dir>.insteadOf points the real URL at it), a shared tree <work>/contrib/R with build
+# products, feature repositories next to it; every documented behaviour exercised, on a second
+# machine (a clone of the feature repository) too.  Usage: test_trees.sh [<scratch dir>]
 set -euo pipefail
-tools=$(cd "$(dirname "$0")/.." && pwd)
-work=${1:-$(mktemp -d)}; rm -rf "$work"; mkdir -p "$work/contrib" "$work/home"
-export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t \
-  GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t HOME=$work/home
-unset ISABELLE_GIT_OWNER ISABELLE_IDENTIFIER
-pass=0; fail=0
-expect() {  # expect ok|refused <description> -- <command...>
-  local want=$1 what=$2; shift 3
-  if "$@" >"$work/out" 2>&1; then got=ok; else got=refused; fi
-  if [[ $got == "$want" ]]; then echo "ok       $what ($got)"; pass=$((pass + 1))
-  else echo "WRONG    $what: expected $want, got $got"; sed 's/^/           /' "$work/out"; fail=$((fail + 1)); fi
-}
-check() { if eval "$2"; then echo "ok       $1"; pass=$((pass + 1)); else echo "WRONG    $1"; fail=$((fail + 1)); fi; }
+. "$(dirname "$0")/harness.sh" "$@"
 commit() { echo "$1 $RANDOM" > "$1"; git add "$1"; git commit -q -m "$1"; }
-shared=$work/contrib/R
+head_of() { git -C "$1" rev-parse HEAD; }
+nt() { isabelle-patch-control new-tree "$@"; }
 
-# the toy line R
-git init -q -b R/pristine "$shared"; cd "$shared"
-mkdir -p bin etc src lib; cp "$tools/tests/stub-isabelle" bin/isabelle; chmod +x bin/isabelle
-printf '%s\n' /contrib /heaps /lib/classes /lib/browser_info.db /src/Tools/Demo/lib /src/Tools/Find_Facts/lib/isabelle.db /etc/ISABELLE_IDENTIFIER > .gitignore
+# "GitHub": R/pristine -> R/base (release R/base/1) and R/other (on R/base/1), R/daily; its default branch R/daily
+git init -q --bare "$work/hub.git"; git -C "$work/hub.git" symbolic-ref HEAD refs/heads/R/daily
+git init -q -b R/pristine "$work/seed"; cd "$work/seed"
+mkdir -p etc src; printf '%s\n' /contrib /lib/classes /src/Tools/Demo/lib /etc/ISABELLE_IDENTIFIER > .gitignore
 echo settings > etc/settings; git add -A; git commit -q -m pristine
-git switch -q -c R/expose_foreign; commit src/ml_name_space.ML; git branch -u R/pristine
-git switch -q -c R/light_locale; commit src/locale.ML; git branch -u R/expose_foreign
-git switch -q -c R/dev_patches; commit src/printer.ML; git branch -u R/light_locale
-git branch R/daily R/dev_patches; git switch -q R/daily
-cp "$tools/hooks/reference-transaction" .git/hooks/; chmod +x .git/hooks/reference-transaction
-mkdir -p contrib/comp lib/classes src/Tools/Demo/lib; echo jar > lib/classes/isabelle.jar; echo demo > src/Tools/Demo/lib/demo.jar
-echo db > lib/browser_info.db; echo comp > contrib/comp/x; echo R > etc/ISABELLE_IDENTIFIER
-check "toy shared tree: status empty with the products in place" '[[ -z $(git status --porcelain) ]]'
+git switch -q -c R/base; commit src/base.ML; git tag -a -m 1 R/base/1
+git switch -q -c R/other; commit src/other.ML
+git switch -q -c R/daily R/base; commit src/daily.ML           # daily is ahead of every base: a fresh clone's default checkout
+git push -q "$work/hub.git" R/pristine R/base R/other R/daily R/base/1
+base1=$(git rev-parse R/base)
 
-echo "--- new-tree: private tree"
-expect ok      "new-tree R/light_locale creates the private tree"     -- "$tools/new-tree" -C "$shared" R/light_locale
-t=$work/contrib/R-light_locale
-check "locked worktree on R/light_locale" '[[ $(git -C "$t" symbolic-ref --short HEAD) == R/light_locale ]] && git worktree list --porcelain | /usr/bin/grep -A3 "^worktree $t$" | /usr/bin/grep -q "^locked"'
-check "identifier = directory name, no newline" 'cmp -s "$t/etc/ISABELLE_IDENTIFIER" <(printf R-light_locale)'
-check "contrib is a relative link into the shared tree" '[[ $(readlink "$t/contrib") == ../R/contrib && -f $t/contrib/comp/x ]]'
-check "lib/classes copied (real directory, new inode)" '[[ -d $t/lib/classes && ! -L $t/lib/classes && $(stat -c %i "$t/lib/classes/isabelle.jar") != $(stat -c %i "$shared/lib/classes/isabelle.jar") ]]'
-check "src/Tools/Demo/lib copied" '[[ -d $t/src/Tools/Demo/lib && ! -L $t/src/Tools/Demo/lib ]]'
-check "browser_info.db linked" '[[ -L $t/lib/browser_info.db && -f $t/lib/browser_info.db ]]'
-check "private tree status empty" '[[ -z $(git -C "$t" status --porcelain) ]]'
-expect ok      "new-tree R/light_locale again is a no-op"             -- "$tools/new-tree" -C "$shared" R/light_locale
-check "no-op kept the jar inode" '[[ $(stat -c %i "$t/lib/classes/isabelle.jar") == $(cat "$work/out" >/dev/null; stat -c %i "$t/lib/classes/isabelle.jar") ]]'
-rm "$t/lib/classes/isabelle.jar"; ln -s ../../../R/lib/classes "$t/lib/classes2"; mv "$t/lib/classes" "$t/lib/classes.real"; mv "$t/lib/classes2" "$t/lib/classes"
-expect refused "a symlinked lib/classes is refused, not repaired"    -- "$tools/new-tree" -C "$shared" R/light_locale
-rm "$t/lib/classes"; mv "$t/lib/classes.real" "$t/lib/classes"; echo jar > "$t/lib/classes/isabelle.jar"
-expect ok      "new-tree R/pristine (commit-only tree)"               -- "$tools/new-tree" -C "$shared" R/pristine
-check "pristine tree has no products" '[[ ! -e $work/contrib/R-pristine/contrib && ! -e $work/contrib/R-pristine/lib/classes ]]'
-expect ok      "new-tree R/daily on the main worktree is a no-op"     -- "$tools/new-tree" -C "$shared" R/daily
-check "daily mergeOptions set" '[[ $(git config branch.R/daily.mergeOptions) == --ff-only ]]'
-git worktree add -q "$work/elsewhere" R/dev_patches
-expect refused "new-tree on a branch checked out elsewhere"          -- "$tools/new-tree" -C "$shared" R/dev_patches
-git worktree remove --force "$work/elsewhere"
-mkdir "$work/contrib/R-dev_patches"
-expect refused "directory exists but is not the branch's worktree"   -- "$tools/new-tree" -C "$shared" R/dev_patches
-rmdir "$work/contrib/R-dev_patches"
+# the shared tree: a clone on R/daily with the build products
+git clone -q -b R/daily "$URL" "$work/contrib/R"; shared=$work/contrib/R
+mkdir -p "$shared/contrib/comp" "$shared/lib/classes" "$shared/src/Tools/Demo/lib"
+echo jar > "$shared/lib/classes/isabelle.jar"; echo demo > "$shared/src/Tools/Demo/lib/demo.jar"; echo comp > "$shared/contrib/comp/x"
+printf R > "$shared/etc/ISABELLE_IDENTIFIER"
+check "toy shared tree: status empty with the products in place" '[[ -z $(git -C "$shared" status --porcelain) ]]'
 
-echo "--- new-tree: branch creation"
-expect refused "new feature without previous line and without --base" -- "$tools/new-tree" -C "$shared" R/foo
-expect refused "--base without ISABELLE_GIT_OWNER=1 (hook)"          -- "$tools/new-tree" -C "$shared" --base R/light_locale R/foo
-check "nothing was created by the refused attempt" '[[ ! -e $work/contrib/R-foo ]] && ! git show-ref -q refs/heads/R/foo'
-expect ok      "--base with ISABELLE_GIT_OWNER=1"                     -- env ISABELLE_GIT_OWNER=1 "$tools/new-tree" -C "$shared" --base R/light_locale R/foo
-check "R/foo has upstream R/light_locale and a locked tree" '[[ $(git rev-parse --abbrev-ref R/foo@{upstream}) == R/light_locale && -d $work/contrib/R-foo/lib/classes ]]'
-cp "$tools/hooks/reference-transaction" "$work/hook.bak"; echo '# changed' >> .git/hooks/reference-transaction
-expect refused "a modified hook stops new-tree"                       -- "$tools/new-tree" -C "$shared" R/light_locale
-cp "$work/hook.bak" .git/hooks/reference-transaction
+# the feature repository H, its init.sh as every feature repository has it
+H=$work/contrib/H; git init -q -b main "$H"; cd "$H"; echo readme > README.md
+printf '#!/usr/bin/env bash\nisabelle-patch-control new-tree "$(dirname "$0")"\n' > init.sh; git add -A; git commit -q -m init
+t=$H/worktrees/R-feat; s=$H/worktrees/R-feat-stock
 
-echo "--- new-tree --stock"
-expect ok      "stock tree of R/light_locale"                         -- "$tools/new-tree" -C "$shared" --stock R/light_locale
-s=$work/contrib/R-light_locale-stock
-check "stock tree detached at merge-base(expose_foreign, light_locale) with products" '[[ $(git -C "$s" rev-parse HEAD) == $(git merge-base R/expose_foreign R/light_locale) ]] && ! git -C "$s" symbolic-ref -q HEAD >/dev/null && [[ -L $s/contrib && -d $s/lib/classes ]]'
-"$tools/new-tree" -C "$shared" R/expose_foreign >/dev/null
-( cd "$work/contrib/R-expose_foreign" && commit src/fix.ML )
-( cd "$t" && git merge -q --no-edit R/expose_foreign )
-expect ok      "stock tree moves after the base was merged"          -- "$tools/new-tree" -C "$shared" --stock R/light_locale
-check "stock tree now at the new merge base" '[[ $(git -C "$s" rev-parse HEAD) == $(git rev-parse R/expose_foreign) ]]'
-echo dirty > "$s/src/stray.ML"
-( cd "$work/contrib/R-expose_foreign" && commit src/fix2.ML ); ( cd "$t" && git merge -q --no-edit R/expose_foreign )
-expect refused "stock tree with uncommitted changes is not moved"    -- "$tools/new-tree" -C "$shared" --stock R/light_locale
-rm "$s/src/stray.ML"
-expect ok      "stock tree moves once clean"                          -- "$tools/new-tree" -C "$shared" --stock R/light_locale
+echo "--- new-tree --home: a new feature"
+expect refused "--home with a base of another line"                  -- nt --home "$H" --base R2/base R/feat
+expect refused "--home without --base"                               -- nt --home "$H" R/feat
+expect refused "--home with a base not on GitHub, a prefix of the branch" -- nt --home "$H" --base R/oth R/other
+check "the refusals registered nothing" '[[ ! -e $H/.gitmodules && ! -e $H/worktrees ]]'
+expect ok      "--home registers R/feat on base R/base"              -- nt --home "$H" --base R/base R/feat
+saw "says to push the new branch before the registration commit" "push -u origin R/feat"
+check ".gitmodules: url, branch, base, ignore on the private tree; url, ignore on the stock tree" '
+  [[ $(git config -f .gitmodules submodule.worktrees/R-feat.url) == "$URL" && $(git config -f .gitmodules submodule.worktrees/R-feat.branch) == R/feat
+  && $(git config -f .gitmodules submodule.worktrees/R-feat.base) == R/base && $(git config -f .gitmodules submodule.worktrees/R-feat.ignore) == all
+  && $(git config -f .gitmodules submodule.worktrees/R-feat-stock.url) == "$URL" && $(git config -f .gitmodules submodule.worktrees/R-feat-stock.ignore) == all
+  && -z $(git config -f .gitmodules submodule.worktrees/R-feat-stock.branch) ]]'
+check "private tree on the new branch R/feat at origin/R/base, without upstream" '[[ $(git -C "$t" symbolic-ref --short HEAD) == R/feat && $(head_of "$t") == "$base1" ]] && ! git -C "$t" rev-parse -q --verify "R/feat@{upstream}" >/dev/null 2>&1'
+check "stock tree detached at merge-base(origin/R/base, R/feat)" '! git -C "$s" symbolic-ref -q HEAD >/dev/null && [[ $(head_of "$s") == "$base1" ]]'
+saw "ready line names the base release" "release tag R/base/1"
+check "both trees: identifier = directory name, no newline" 'cmp -s "$t/etc/ISABELLE_IDENTIFIER" <(printf R-feat) && cmp -s "$s/etc/ISABELLE_IDENTIFIER" <(printf R-feat-stock)'
+check "contrib is the relative link ../../../R/contrib" '[[ $(readlink "$t/contrib") == ../../../R/contrib && -f $t/contrib/comp/x && $(readlink "$s/contrib") == ../../../R/contrib ]]'
+check "lib/classes and Demo lib copied (real directories, new inodes)" '[[ -d $t/lib/classes && ! -L $t/lib/classes && $(stat -c %i "$t/lib/classes/isabelle.jar") != $(stat -c %i "$shared/lib/classes/isabelle.jar") && -f $t/src/Tools/Demo/lib/demo.jar && ! -L $s/src/Tools/Demo/lib ]]'
+check "both trees' status empty with the products in place" '[[ -z $(git -C "$t" status --porcelain) && -z $(git -C "$s" status --porcelain) ]]'
+check "H has .gitmodules and both gitlinks staged, at the trees' HEADs" '[[ $(git diff --cached --name-only --ignore-submodules=none | tr "\n" " ") == ".gitmodules worktrees/R-feat worktrees/R-feat-stock " && $(git rev-parse :worktrees/R-feat) == $(head_of "$t") && $(git rev-parse :worktrees/R-feat-stock) == "$base1" ]] && git diff --quiet -- .gitmodules'
+inode=$(stat -c %i "$t/lib/classes/isabelle.jar" 2>/dev/null || echo none)
+expect ok      "--home again with the same arguments"                -- nt --home "$H" --base R/base R/feat
+check "--home again moved, cloned and switched nothing" '! /usr/bin/grep -q "moved\|cloned\|switched" "$work/out"'
+expect refused "--home of the registered feature with another base" -- nt --home "$H" --base R/pristine R/feat
+expect ok      "new-tree H (init.sh) right after: nothing to do"     -- bash "$H/init.sh"
+check "the reruns kept the copied jar and moved nothing" '[[ $(stat -c %i "$t/lib/classes/isabelle.jar") == "$inode" && $(head_of "$s") == "$base1" ]] && ! /usr/bin/grep -q "moved\|cloned\|switched" "$work/out"'
+cd "$t"; commit src/feat.ML; git push -q -u origin R/feat; cd "$H"
+check "after the push R/feat tracks origin/R/feat" '[[ $(git -C "$t" rev-parse --abbrev-ref "R/feat@{upstream}") == origin/R/feat ]]'
 
-echo "--- run-tree"
-expect refused "the shared tree is refused"                           -- "$tools/run-tree" "$shared" version
-expect refused "the pristine tree is refused"                         -- "$tools/run-tree" "$work/contrib/R-pristine" version
-expect ok      "private tree runs"                                    -- "$tools/run-tree" "$t" version
-expect ok      "outer ISABELLE_IDENTIFIER does not leak in"           -- env ISABELLE_IDENTIFIER=bogus "$tools/run-tree" "$t" version
-expect ok      "build in the private tree"                            -- "$tools/run-tree" "$t" build -b -j 2 -o threads=4 HOL
-check "tested record with the session set" 'git -C "$t" notes --ref=tested show HEAD | /usr/bin/grep -q "^sessions: Pure HOL$" && git -C "$t" notes --ref=tested show HEAD | /usr/bin/grep -q "^command: isabelle build -b -j 2 -o threads=4 HOL$"'
-expect ok      "build with -o quick_and_dirty"                        -- "$tools/run-tree" "$t" build -o quick_and_dirty=true HOL
-check "no second record for quick_and_dirty" '[[ $(git -C "$t" notes --ref=tested show HEAD | /usr/bin/grep -c "^tested ") == 1 ]]'
-expect ok      "second clean build appends a record"                  -- "$tools/run-tree" "$t" build -d x -g main FOL ZF
-check "two records, the second lists FOL ZF" '[[ $(git -C "$t" notes --ref=tested show HEAD | /usr/bin/grep -c "^tested ") == 2 ]] && git -C "$t" notes --ref=tested show HEAD | /usr/bin/grep -q "^sessions: Pure FOL ZF$"'
-echo "--- run-tree: the state of -d repositories (migration plan §0 item 32)"
-git init -q "$work/light"; ( cd "$work/light" && echo root > ROOT && echo thy > Light.thy && git add -A && git commit -q -m light && echo wip > notes.txt && echo edit >> ROOT )
-expect ok      "build with -d of a git worktree and -d of a plain directory" -- "$tools/run-tree" "$t" build -d "$work/light" -d "$work/home" -g main HOL
-check "one dir: line: top, HEAD, tracked files with uncommitted changes (not the untracked notes.txt)" '[[ $(git -C "$t" notes --ref=tested show HEAD | /usr/bin/grep -c "^dir: ") == 1 ]] && git -C "$t" notes --ref=tested show HEAD | /usr/bin/grep -q "^dir: $work/light $(git -C "$work/light" rev-parse HEAD) ROOT$"'
-echo "$work/light/Light.thy" > "$HOME/.stub-build-edit"
-expect ok      "build during which a -d file is changed and changed back" -- "$tools/run-tree" "$t" build -d "$work/light" HOL
-check "no record, the reason names the -d directory" '/usr/bin/grep -q "no tested record: the repository of -d $work/light changed during the build" "$work/out" && [[ $(git -C "$t" notes --ref=tested show HEAD | /usr/bin/grep -c "^tested ") == 3 ]]'
-rm "$HOME/.stub-build-edit"
-echo "$work/light/scratch.txt" > "$HOME/.stub-build-create"
-expect ok      "build during which an untracked file appears in the -d repository" -- "$tools/run-tree" "$t" build -d "$work/light" HOL
-check "a record all the same: untracked files do not count" '[[ -f $work/light/scratch.txt && $(git -C "$t" notes --ref=tested show HEAD | /usr/bin/grep -c "^tested ") == 4 ]]'
-rm "$HOME/.stub-build-create"
-# an outer repository that ignores the directory given with -d (MLML ignores /contrib, where the AFP checkout lives)
-git init -q "$work/outer"; ( cd "$work/outer" && echo /contrib > .gitignore && echo x > tracked.txt && git add -A && git commit -q -m outer && mkdir -p contrib/afp/thys && echo thy > contrib/afp/thys/A.thy )
-echo "$work/outer/tracked.txt" > "$HOME/.stub-build-edit"
-expect ok      "build with -d on an ignored directory while the outer repository's tracked file changes" -- "$tools/run-tree" "$t" build -d "$work/outer/contrib/afp/thys" -d "$work/light" HOL
-check "a record with light's dir: line only: the ignored directory is tied to no repository" '[[ $(git -C "$t" notes --ref=tested show HEAD | /usr/bin/grep -c "^tested ") == 5 && $(git -C "$t" notes --ref=tested show HEAD | /usr/bin/grep -c "^dir: $work/light ") == 3 && $(git -C "$t" notes --ref=tested show HEAD | /usr/bin/grep -c "^dir: $work/outer") == 0 ]]'
-rm "$HOME/.stub-build-edit"
-# a dir: line longer than one command-line argument may be (128 KiB on Linux): 4000 tracked files with uncommitted changes
-git init -q "$work/big"; ( cd "$work/big" && for i in $(seq 4000); do echo $i > "theory-file-with-a-rather-long-name-$i.thy"; done && git add -A && git commit -q -m big && for i in $(seq 4000); do echo edit >> "theory-file-with-a-rather-long-name-$i.thy"; done )
-expect ok      "build with -d of a repository with 4000 changed tracked files" -- "$tools/run-tree" "$t" build -d "$work/big" HOL
-check "the record was written (the note goes in on stdin, not as an argument)" '[[ $(git -C "$t" notes --ref=tested show HEAD | /usr/bin/grep -c "^tested ") == 6 && $(git -C "$t" notes --ref=tested show HEAD | /usr/bin/grep "^dir: $work/big " | wc -c) -gt 131072 ]]'
-echo 3 > "$HOME/.stub-build-rc"
-expect refused "failed build exits non-zero"                          -- "$tools/run-tree" "$t" build HOL
-rm "$HOME/.stub-build-rc"; echo src/dirty.ML > "$HOME/.stub-build-touch"
-expect ok      "build that leaves the tree dirty"                     -- "$tools/run-tree" "$t" build HOL
-check "no record when status is not empty afterwards" '[[ -f $t/src/dirty.ML && $(git -C "$t" notes --ref=tested show HEAD | /usr/bin/grep -c "^tested ") == 6 ]]'
-rm "$t/src/dirty.ML" "$HOME/.stub-build-touch"
-expect ok      "stock tree runs (no record)"                          -- "$tools/run-tree" "$s" build HOL
-check "stock tree got no note" '! git notes --ref=tested show "$(git -C "$s" rev-parse HEAD)" >/dev/null 2>&1 || ! git notes --ref=tested show "$(git -C "$s" rev-parse HEAD)" | /usr/bin/grep -q "^tested "'
-( cd "$work/contrib/R-expose_foreign" && commit src/fix3.ML ); ( cd "$t" && git merge -q --no-edit R/expose_foreign )
-expect refused "stale stock tree is refused"                          -- "$tools/run-tree" "$s" version
-rm -r "$t/lib/classes"
-expect refused "tree without products is refused"                     -- "$tools/run-tree" "$t" version
-"$tools/new-tree" -C "$shared" R/light_locale >/dev/null
+echo "--- new-tree --home: a feature whose branch is on GitHub"
+expect ok      "--home registers R/other (branch from GitHub)"       -- nt --home "$H" --base R/base R/other
+check "private tree on R/other, upstream origin/R/other" '[[ $(git -C "$H/worktrees/R-other" symbolic-ref --short HEAD) == R/other && $(git -C "$H/worktrees/R-other" rev-parse --abbrev-ref "R/other@{upstream}") == origin/R/other ]]'
+git commit -q -m "register R/feat and R/other" -- .gitmodules worktrees
+check "the registration commit records the trees' HEADs; H is clean" '[[ $(git rev-parse HEAD:worktrees/R-feat) == $(head_of "$t") && $(git rev-parse HEAD:worktrees/R-feat-stock) == "$base1" && -z $(git status --porcelain) ]]'
+cd "$t"; commit src/feat2.ML; unpushed=$(git rev-parse HEAD); cd "$H"
+git commit -q -m "gitlink at an unpushed commit" -- worktrees/R-feat
+check "a commit by path recorded the unpushed private HEAD (allowed between releases)" '[[ $(git rev-parse HEAD:worktrees/R-feat) == "$unpushed" ]]'
+git submodule update -q --remote -- worktrees/R-feat    # detaches it at GitHub's tip; the unpushed commit stays on R/feat
+check "the private tree is detached at origin/R/feat" '! git -C "$t" symbolic-ref -q HEAD >/dev/null && [[ $(head_of "$t") == $(git -C "$t" rev-parse origin/R/feat) ]]'
+expect ok      "init.sh puts a detached private tree back on its branch" -- bash "$H/init.sh"
+check "on R/feat at the unpushed commit" '[[ $(git -C "$t" symbolic-ref --short HEAD) == R/feat && $(head_of "$t") == "$unpushed" ]]'
 
-echo "--- forward-merge mode: a new line R2"
-ISABELLE_GIT_OWNER=1 git switch -q -c R2/pristine R/pristine; echo 'settings 2' > etc/settings; git commit -q -am "R2 pristine"; git switch -q R/daily
-expect refused "R2/light_locale before R2/expose_foreign exists"      -- env ISABELLE_GIT_OWNER=1 "$tools/new-tree" -C "$shared" R2/light_locale
-expect ok      "R2/expose_foreign forward-merged from R/expose_foreign" -- env ISABELLE_GIT_OWNER=1 "$tools/new-tree" -C "$shared" R2/expose_foreign
-check "R2/expose_foreign: upstream R2/pristine, contains both lines" '[[ $(git rev-parse --abbrev-ref R2/expose_foreign@{upstream}) == R2/pristine ]] && git merge-base --is-ancestor R/expose_foreign R2/expose_foreign && git merge-base --is-ancestor R2/pristine R2/expose_foreign'
-check "no products yet: R2 shared tree does not exist" '[[ ! -e $work/contrib/R2-expose_foreign/contrib ]] && /usr/bin/grep -q "not installed" "$work/out"'
-expect ok      "R2/light_locale forward-merged"                       -- env ISABELLE_GIT_OWNER=1 "$tools/new-tree" -C "$shared" R2/light_locale
-expect ok      "R2/dev_patches forward-merged"                        -- env ISABELLE_GIT_OWNER=1 "$tools/new-tree" -C "$shared" R2/dev_patches
-( cd "$work/contrib/R-expose_foreign" && commit src/fix4.ML )
-expect ok      "later fix of the old line carried forward"            -- "$tools/new-tree" -C "$shared" R2/expose_foreign
-check "R2/expose_foreign contains fix4" 'git merge-base --is-ancestor R/expose_foreign R2/expose_foreign'
-expect refused "R2/daily without the variable"                        -- "$tools/new-tree" -C "$shared" R2/daily
-expect ok      "R2/daily created on R2/pristine"                      -- env ISABELLE_GIT_OWNER=1 "$tools/new-tree" -C "$shared" R2/daily
-check "R2 shared tree on R2/daily at R2/pristine" '[[ $(git -C "$work/contrib/R2" symbolic-ref --short HEAD) == R2/daily && $(git rev-parse R2/daily) == $(git rev-parse R2/pristine) ]]'
-mkdir -p "$work/contrib/R2/contrib" "$work/contrib/R2/lib/classes" "$work/contrib/R2/src/Tools/Demo/lib"; echo jar2 > "$work/contrib/R2/lib/classes/isabelle.jar"
-expect ok      "rerun installs the products once the shared tree has them" -- "$tools/new-tree" -C "$shared" R2/light_locale
-check "R2-light_locale now has products from R2" '[[ $(readlink "$work/contrib/R2-light_locale/contrib") == ../R2/contrib && $(cat "$work/contrib/R2-light_locale/lib/classes/isabelle.jar") == jar2 ]]'
+echo "--- a second machine: a clone of H"
+git clone -q "$H" "$work/contrib/H2"; H2=$work/contrib/H2; t2=$H2/worktrees/R-feat; s2=$H2/worktrees/R-feat-stock
+check "the clone's tree directories are empty" '[[ -z $(ls -A "$t2") && -z $(ls -A "$s2") ]]'
+expect ok      "H2's init.sh builds both features' trees (gitlink at an unpushed commit: --remote)" -- bash "$H2/init.sh"
+check "H2's private tree on R/feat at GitHub's tip, upstream origin/R/feat" '[[ $(git -C "$t2" symbolic-ref --short HEAD) == R/feat && $(head_of "$t2") == $(git -C "$work/hub.git" rev-parse R/feat) && $(git -C "$t2" rev-parse --abbrev-ref "R/feat@{upstream}") == origin/R/feat ]]'
+check "H2's stock trees detached at their merge bases" '[[ $(head_of "$s2") == "$base1" && $(head_of "$H2/worktrees/R-other-stock") == "$base1" ]] && ! git -C "$s2" symbolic-ref -q HEAD >/dev/null'
+check "H2's trees have their products" '[[ -L $t2/contrib && -d $s2/lib/classes && $(cat "$H2/worktrees/R-other/etc/ISABELLE_IDENTIFIER") == R-other ]]'
+check "H2 is clean" '[[ -z $(git -C "$H2" status --porcelain) ]]'
+
+echo "--- the stock tree follows the base"
+cd "$work/seed"; git switch -q R/base; commit src/base2.ML; git tag -a -m 2 R/base/2; git push -q "$work/hub.git" R/base R/base/2; base2=$(git rev-parse R/base)
+cd "$t"; git fetch -q; git merge -q --no-edit origin/R/base; cd "$H"
+expect ok      "init.sh after an unpushed merge of base release 2"   -- bash "$H/init.sh"
+check "the stock tree moved to R/base/2 (merge base computed in the private tree)" '[[ $(head_of "$s") == "$base2" ]]'
+saw "names the release" "release tag R/base/2"
+check "R/other's stock tree stayed at R/base/1" '[[ $(head_of "$H/worktrees/R-other-stock") == "$base1" ]]'
+git -C "$t" push -q
+git -C "$t2" pull -q --no-rebase origin R/feat
+check "on H2, after git pull origin R/feat, origin/R/base is stale" '[[ $(git -C "$t2" rev-parse origin/R/base) == "$base1" ]]'
+expect ok      "H2's init.sh fetches before computing the merge base" -- bash "$H2/init.sh"
+check "H2's stock tree at R/base/2" '[[ $(head_of "$s2") == "$base2" ]]'
+
+echo "--- each feature on its own"
+cd "$work/seed"; commit src/base3.ML; git tag -a -m 3 R/base/3; git push -q "$work/hub.git" R/base R/base/3; base3=$(git rev-parse R/base)
+o=$H/worktrees/R-other; cd "$o"; echo conflict > src/other.ML; git commit -q -am mine; git switch -q -c side HEAD~1; echo theirs > src/other.ML; git commit -q -am theirs; git switch -q R/other
+git merge -q side >/dev/null 2>&1 || true
+check "R/other's private tree has a conflicted merge in progress" '[[ -f $(git -C "$o" rev-parse --absolute-git-dir)/MERGE_HEAD ]]'
+cd "$t"; git fetch -q; git merge -q --no-edit origin/R/base; echo wip >> src/feat.ML; echo new > untracked.txt; cd "$H"
+expect ok      "init.sh with a merge in progress in R/other and edits in R/feat's private tree" -- bash "$H/init.sh"
+check "R/feat's stock tree moved to R/base/3" '[[ $(head_of "$s") == "$base3" ]]'
+check "the edits in R/feat's private tree are untouched" '/usr/bin/grep -q wip "$t/src/feat.ML" && [[ -f $t/untracked.txt ]]'
+git -C "$o" merge --abort; git -C "$t" checkout -q -- src/feat.ML; rm "$t/untracked.txt"
+echo edit >> "$s/etc/settings"
+expect ok      "a stock tree with uncommitted changes already in place is left alone" -- bash "$H/init.sh"
+git -C "$t" reset -q --hard HEAD~1                       # toy repository only: back to the merge of R/base/2
+expect refused "a stock tree with uncommitted changes that must move" -- bash "$H/init.sh"
+saw "says why" "a stock tree is not edited"
+check "the stock tree stayed; R/other was still set up" '[[ $(head_of "$s") == "$base3" ]] && /usr/bin/grep -q "ready: worktrees/R-other on R/other" "$work/out"'
+git -C "$s" checkout -q -- etc/settings
+expect ok      "once clean, init.sh moves it back"                   -- bash "$H/init.sh"
+check "stock tree at R/base/2 again" '[[ $(head_of "$s") == "$base2" ]]'
+git -C "$s" switch -q -c R/base2; printf wrong > "$t/etc/ISABELLE_IDENTIFIER"   # on a branch at its commit, as `git submodule add` leaves it when GitHub's default branch is there
+expect ok      "init.sh with the stock tree on a branch at its commit and a wrong identifier" -- bash "$H/init.sh"
+check "the stock tree detached at R/base/2; the identifier rewritten" '! git -C "$s" symbolic-ref -q HEAD >/dev/null && [[ $(head_of "$s") == "$base2" ]] && cmp -s "$t/etc/ISABELLE_IDENTIFIER" <(printf R-feat)'
+
+echo "--- shapes that are refused, not repaired"
+mv "$t/lib/classes" "$t/lib/classes.real"; ln -s ../../../R/lib/classes "$t/lib/classes"
+expect refused "a symlinked lib/classes"                             -- nt "$H"
+rm "$t/lib/classes"; mv "$t/lib/classes.real" "$t/lib/classes"
+rm "$t/contrib"; ln -s /elsewhere "$t/contrib"
+expect refused "a contrib link elsewhere"                            -- nt "$H"
+rm "$t/contrib"
+expect ok      "a missing link is installed again"                   -- nt "$H"
+mv "$shared/lib/classes" "$shared/lib/classes.away"
+git clone -q "$H" "$work/contrib/H3"; H3=$work/contrib/H3
+expect refused "a shared tree without build products"               -- nt "$H3"
+saw "names the shared tree" "$shared has no build products"
+mv "$shared/lib/classes.away" "$shared/lib/classes"
+rm -rf "$H3/worktrees/R-other"; mkdir -p "$H3/worktrees/R-other/x"
+expect refused "a tree directory that is not empty and not a clone" -- nt "$H3"
+check "the other feature was set up: its trees got the build products" '[[ -L $H3/worktrees/R-feat/contrib && -d $H3/worktrees/R-feat-stock/lib/classes ]]'
+cp .gitmodules "$work/gitmodules"
+git config -f .gitmodules --unset submodule.worktrees/R-other.base
+expect refused "a private tree registered without base"              -- nt "$H"
+cp "$work/gitmodules" .gitmodules; git config -f .gitmodules --unset submodule.worktrees/R-other.branch
+expect refused "a tree under worktrees/ that is neither private nor stock" -- nt "$H"
+cp "$work/gitmodules" .gitmodules; git config -f .gitmodules --remove-section submodule.worktrees/R-other-stock
+expect refused "a private tree without its stock tree"                -- nt "$H"
+cp "$work/gitmodules" .gitmodules
+expect refused "a directory that is not a feature repository's top"  -- nt "$H/worktrees"
+expect refused "--base without --home"                               -- nt --base R/base "$H"
+
+echo "--- two merge bases"
+cd "$work/seed"; git switch -q -c x R/other; commit src/x.ML; git switch -q R/base; commit src/b4.ML; b4=$(git rev-parse HEAD)
+git merge -q --no-edit x; git push -q "$work/hub.git" R/base; git switch -q R/other; git merge -q --no-edit "$b4"; git push -q "$work/hub.git" R/other
+git -C "$o" pull -q --no-rebase
+expect refused "a feature with two merge bases with its base"       -- nt "$H"
+saw "says how many" "have 2 merge bases"
 
 echo "--- $pass passed, $fail wrong (toy trees: $work/contrib)"
 [[ $fail == 0 ]]

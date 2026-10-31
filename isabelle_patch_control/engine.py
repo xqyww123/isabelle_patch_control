@@ -1,5 +1,6 @@
-"""The engine (plan decisions 4-6): the one function that starts git, the lock on the tree, the
-work directory, the per-file replay that gives a file its level, and the writes into the tree.
+"""The engine (plan decisions 4-6): the one function that starts git outside the developer
+subcommands, the lock on the tree, the work directory, the per-file replay that gives a file its
+level, and the writes into the tree.
 
 git runs only inside a directory this module created (the staging directory or a temporary one),
 never in the tree and never in the caller's current directory.  The tree is changed only by
@@ -33,7 +34,8 @@ WINDOWS = os.name == "nt"
 # --- git
 
 class Git:
-    """Locates git and runs it; `run` is the only place in the tool that starts git."""
+    """Locates git and runs it; outside the developer subcommands, `run` is the only place in the
+    tool that starts git."""
 
     def __init__(self):
         own = Path(sys.prefix) / ("Library/bin/git.exe" if WINDOWS else "bin/git")

@@ -3,11 +3,11 @@
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 base=${TMPDIR:-/tmp}/isabelle-tools-tests-$$
-status=0
-for t in test_hook test_trees test_signatures test_make_patches test_advance_daily; do
+status=0; mkdir -p "$base"
+for t in test_trees test_signatures test_make_patches; do
   echo "=== $t"
-  "$here/$t.sh" "$base/$t" 2>&1 | /usr/bin/grep -E '^(WRONG|---|           )'   # WRONG lines and their indented diagnostics
+  "$here/$t.sh" "$base/$t" 2>&1 | tee "$base/$t.log" | /usr/bin/grep -E '^(WRONG|---|           )'   # WRONG lines and their indented diagnostics
   rc=${PIPESTATUS[0]}
-  (( rc == 0 )) || { echo "WRONG    $t exited with status $rc"; status=1; }
+  (( rc == 0 )) || { echo "WRONG    $t exited with status $rc; its last lines ($base/$t.log):"; tail -n 3 "$base/$t.log" | sed 's/^/           /'; status=1; }
 done
 exit $status
