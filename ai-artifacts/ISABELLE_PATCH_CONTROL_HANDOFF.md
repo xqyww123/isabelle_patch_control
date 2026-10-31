@@ -1,5 +1,10 @@
 # 交接：补丁工具改造计划（2026-10-28 20:40 +08 更新；首版 2026-10-23 compact 前写）
 
+> **2026-10-30 起的下一件事不在本文件**：Git 重组的第 (ii) 步要改本仓库——`tools/` 下的 new-tree、make-patches、check-signatures 挪进包、
+> 做成 `isabelle-patch-control` 的子命令，run-tree、advance-daily、钩子、tested 记录去掉，玩具测试重写。规格与顺序在 MLML 的
+> `ai-artifacts/ISABELLE_GIT_MIGRATION_PLAN.md` §12 末尾的"第四稿"与"执行状态 → 下一步"第 2 条；在开发副本 `/var/tmp/claude-tools-dev/mbip`
+> 里做，共用目录不动。补丁工具计划 §0 第 42 条（tested 记录去掉、发布 CI 在五个平台编 HOL）与此相关。本文件下面是补丁工具改造的历史。
+
 ## compact 之后怎么开工（2026-10-25 傍晚写；下面"现状"与"§5 第 1 步的进展"两节是按时间顺序的流水账，细节在那里）
 1. **现场**：工具仓库 `contrib/my_better_isabelle_prover` 的 `main` 在 **16078a3**（已推 GitHub `origin/main`；历史已用 filter-repo 改写、去掉了五份
    评审明细，旧哈希 113a28f/cc0e603/fa1d64a/321646d 已不存在），工作树有本文件与 `RELEASE.md`（见第 3 条）两处未提交改动，另有两份未跟踪的
@@ -204,8 +209,8 @@
    相关会话、GitHub 不加保护规则、check-signatures 的 `-C` 修复顺带做，都已定。
    **代码评审四的实施清单 (a)–(h) 已改完（2026-10-30）**；用户说新文案"不需要我批准"、让起 Opus reader 校读，两轮校读（三人一轮、
    事实核对一轮）之后，用户定"是问题就都要改"，旧文案的问题也全改了（补丁工具计划 §0 第 41 条末）。pytest 181、变异 58 个全抓到、
-   钩子层测试两版 conda 全过（工作目录 `/var/tmp/claude-hooks/`）。等用户说"提交"，之后推送并重跑 GitHub CI；钩子兜底文件的新文案随此后
-   发布的 feature 包生效。staging 目录已归档删除；三个 GitHub
+   钩子层测试两版 conda 全过（工作目录 `/var/tmp/claude-hooks/`）。已提交 a13cab3 并推送，GitHub CI 运行 41008559667 全过；钩子兜底文件的
+   新文案随此后正常重发的 feature 包生效（用户"按你建议来"）。staging 目录已归档删除；三个 GitHub
    仓库已建（Local_Datatype、Local_Type_Abbrev、Localized_Record）。
    **compact 后先做**：(1) 等/问用户"提交"补丁工具这批改动；(2) 迁移第 (i) 步剩下的：isabelle-patched 设公开（gh 写法要核）、三个新仓库的
    名字向用户确认后建；(3) `Isabelle2025-2-staging` 的调查结果交用户；(4) 第 (ii) 步工具改动。README 的 "When something went wrong" 新段落

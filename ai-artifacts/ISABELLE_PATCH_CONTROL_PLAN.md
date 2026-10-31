@@ -406,6 +406,20 @@
       libmamba 源码与实测的"再装已装的包不记成显式要求"），其中最后一句补进钩子层测试 `s_prune` (iv)。pytest 181、变异 58 个全部抓到。
       钩子层测试两版 conda 各 116 项过、1 项错：`s_order` 里一条检查还在找旧 heap 段的原文，改成 `heap_paragraph_once` 后该场景两版各
       14 项全过（25.11.1 那轮最后因作者在运行中改了测试脚本、bash 读到移位的字节而以语法错误结束，此前所有检查都已打出）。
+    - 用户"批准提交"（2026-10-30）：工具仓库 a13cab3（已推 origin，GitHub CI 运行 41008559667），MLML 指针 f0f79495（不推）。钩子兜底文件的
+      新文案什么时候到用户手里，作者建议不为它专门重发、随各 feature 包下次正常重发带上，**用户："按你建议来"**。
+42. **发布前由 GitHub 在每个平台上真的编译；tested 记录整个去掉**（2026-10-30，Git 迁移方案 §12 第三稿复审之后）。作者说 tested 记录防的是"合并出来的
+    提交没人构建过""测的与提交的不是同一份"，用户："这些东西立成规约写进文档你自己检查不行吗？…不能用 GitHub workers 在发布前真的编译一下吗？"；
+    **用户："赞同 tested 记录整个去掉"，"建议每个平台都做，反正是免费的 Github worker"**，SKILL 里写规矩（发布前、移动 daily 前在本机构建需要的
+    session，作者自己照做、自己检查）**"好吧，我赞同"**。于是：
+    - 发布工作流的验收（`accept.yml`）在五个平台的全新环境里装好这一批包后，编译 HOL 与这一批每个 feature 的 `tools/required_sessions.txt` 所列
+      session，全部通过才发布（"每个平台都通过才发布"这条今天已有）。今天它只在 light_locale 时于 linux-64（另可选几个平台）编一个建在
+      Light_Locale 上的小 session，只改 Pure、没有组件的包从没编过 HOL。工作流今天不读 `required_sessions.txt`，要加。（作者估计每个平台多几十
+      分钟、Windows 更慢，未实测；补丁工具仓库 `xqyww123/isabelle_patch_control` 是公开仓库，标准 runner 不收费。）
+    - tested 记录（Git 迁移方案 §0 第 32 条、§5.1 门 (e)、`advance-daily` 的记录检查、glossary 的词条）整个去掉：`run-tree` 写记录的逻辑与
+      `-d` 仓库状态那一套（`dir_states`、`repo_state`、`tracked_mtimes`）、`Repo.tested_records`、`make-patches` 的门 (e)（连同组件文件的核对）、
+      `advance-daily` 的覆盖检查与 session 参数、相关测试；`run-tree` 只剩"用对的环境在树里跑 Isabelle"。daily 里已有的 9 条 `refs/notes/tested`
+      留着不动（GitHub 上同样）。在 Git 迁移的第 (ii) 步一起做；本计划决定 16 里提到门 (e) 的地方随之作废。
 
 作者 2026-10-24 对用户的更正（第二轮评审 C16、C22 与第三轮 C4 查出）：
 - 作者 2026-10-23 04:46 对用户说"问题 10 后半（内置 feature 出新版）消失了"是错的；该问题以问题 3 重新提出，由第 22 条解决。
