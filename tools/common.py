@@ -14,8 +14,8 @@ from typing import Callable
 
 TOOLS_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(TOOLS_DIR.parent))            # the checkout's isabelle_patch_control, not an installed one
-from isabelle_patch_control.dev import (block_path, build_string_prefix, feature_pin, patch_blocks,  # noqa: E402,F401
-                                        run, shipped_files)                  # (re-exported for the scripts)
+from isabelle_patch_control.dev import (block_path, build_string_prefix, feature_pin, isabelle_version,  # noqa: E402,F401
+                                        patch_blocks, run, shipped_files)    # (re-exported for the scripts)
 from isabelle_patch_control.errors import Error as ToolError, Refused  # noqa: E402
 from isabelle_patch_control.names import package_name  # noqa: E402,F401  (re-exported for the scripts)
 
@@ -85,7 +85,7 @@ def isabelle_pin(build_string_prefix: str, isabelle_build: str) -> str:
     feature recipes imports this: the pin a recipe writes and the pin plan_builds looks for are then
     one and the same (rattler-build records it in `depends` as written).  `==`, not a bare version:
     rattler-build refuses `isabelle 2025.2 1` in a recipe; conda reads both the same."""
-    return f"isabelle =={build_string_prefix.removeprefix('Isabelle').replace('_', '.')} {isabelle_build}"
+    return f"isabelle =={isabelle_version(build_string_prefix)} {isabelle_build}"
 
 
 def pinned_build(record: dict, build_string_prefix: str) -> str | None:
@@ -121,6 +121,11 @@ def conda_archive(data: bytes) -> tuple[dict, dict[str, tuple[bytes, int]]]:
     return json.loads(members("info-")["info/index.json"][0]), members("pkg-")
 
 
+def indexed(repodata: dict) -> dict[str, dict]:
+    """{file name: record} of every package a repodata.json indexes, .tar.bz2 and .conda alike."""
+    return {**repodata.get("packages", {}), **repodata.get("packages.conda", {})}
+
+
 def plan_builds(repodata: dict, wanted: list[Wanted], fetch: Callable[[str], dict | None]) -> dict[str, tuple[str, str | int]]:
     """For every wanted package: ("reuse", <file name on the channel>) or ("build", <build number>).
 
@@ -130,7 +135,7 @@ def plan_builds(repodata: dict, wanted: list[Wanted], fetch: Callable[[str], dic
     reused; a served candidate it does not want is skipped; with no wanted candidate the package
     is built with the next number after everything indexed or served (0 when there is nothing).
     So a dispatch repeated with the same inputs resumes byte for byte."""
-    records = {**repodata.get("packages", {}), **repodata.get("packages.conda", {})}
+    records = indexed(repodata)
     plan = {}
     for w in wanted:
         candidates = [(fn, rec) for fn, rec in records.items()

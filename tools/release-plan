@@ -1,20 +1,27 @@
 #!/usr/bin/env python3
-"""release-plan --isabelle-build <b> --tool-version <v> --tool-prefix <p> [--channel <url>] <release tag>...
+"""release-plan --isabelle-build <b> --tool-version <v> --tool-prefix <p> [--channel <url>] [--rehearsal] <release tag>...
 
 The build job's plan (patch tool plan decisions 10 and 11): for the tool package and for every
 feature release tag of the batch, whether the channel already serves exactly what the batch wants
 (reuse that file) or a new build is needed and with which build number -- tools/common.py's
 plan_builds, the one rule for every package.  The channel's noarch/repodata.json is read; a file
 the channel serves but has not indexed yet is probed by downloading it and reading its
-info/index.json.  Prints one JSON object:
+info/index.json.  The release tags are of one release line: one batch is one isabelle version.
+--rehearsal (the batch's isabelle comes from a CI run): refused when the channel's repodata.json of
+one of the five platforms already indexes isabelle <version> <b>, since the CI run's package would
+be a second package with that name, version and build, which conda cannot tell apart from it.
+Prints one JSON object:
 
   {"packages": [{"name", "version", "tag" and "feature" (features only), "action": "reuse" | "build",
                  "file": <the .conda file name either way>, "build_number" (to build only)}],
+   "isabelle_version": <the release line's isabelle version: Isabelle2025-2 -> 2025.2>,
+   "isabelle_non_pristine_build": <NON_PRISTINE_BUILDS of that version, or "">,
    "isabelle_old_build": <the highest isabelle build other than <b> that an indexed record of the
                           chain top's package (any version) pins, or "">}
 
 isabelle_old_build is where §6 (h) starts from (empty: (h) is skipped): an environment with
 isabelle at that build and the chain top, which only the top's own records can make solvable.
+isabelle_non_pristine_build is where §6 (e) and (i) start from (empty: they are skipped).
 """
 import argparse
 import json
@@ -22,13 +29,18 @@ import re
 import urllib.error
 import urllib.request
 
-from common import (Refused, Wanted, build_string_prefix, conda_archive, isabelle_pin, main, package_name,
-                    pinned_build, plan_builds)
+from common import (Refused, Wanted, build_string_prefix, conda_archive, indexed, isabelle_pin, isabelle_version, main,
+                    package_name, pinned_build, plan_builds)
 
 TOOL = "isabelle-patch-control"
 # The channel's Cloudflare front refuses urllib's default User-Agent (error 1010, HTTP 403).
 USER_AGENT = "isabelle-patch-control-release-plan"
-TAG = re.compile(r"^(Isabelle\d{4}-\d+)/([a-z][a-z0-9_]*)/([1-9][0-9]*)$")
+TAG = re.compile(r"^(Isabelle\d{4}(?:-\d+)?)/([a-z][a-z0-9_]*)/([1-9][0-9]*)$")
+PLATFORMS = ("linux-64", "linux-aarch64", "osx-64", "osx-arm64", "win-64")      # the subdirs of isabelle's builds
+# The build of each isabelle version on the channel that was not built from the pristine sources,
+# and so has another ISABELLE_ID than its pristine builds: 2025.2-0 carries expose_foreign
+# (ISABELLE_ID 5533cd83156e, not the pristine 89701cf1768e).
+NON_PRISTINE_BUILDS = {"2025.2": "0"}
 
 
 def get(url: str) -> bytes | None:
@@ -46,7 +58,14 @@ def get(url: str) -> bytes | None:
         raise
 
 
-def plan(channel: str, isabelle_build: str, tool_version: str, tool_prefix: str, tags: list[str]) -> dict:
+def repodata(channel: str, subdir: str) -> dict:
+    """The channel's repodata.json of subdir; {} when it serves none there."""
+    raw = get(f"{channel}/{subdir}/repodata.json")
+    return json.loads(raw) if raw else {}
+
+
+def plan(channel: str, isabelle_build: str, tool_version: str, tool_prefix: str, tags: list[str],
+         rehearsal: bool = False) -> dict:
     features = []
     for tag in tags:
         m = TAG.match(tag)
@@ -55,8 +74,18 @@ def plan(channel: str, isabelle_build: str, tool_version: str, tool_prefix: str,
         features.append((tag, m[2], m[3], build_string_prefix(m[1])))
     if len({f[1] for f in features}) != len(features):
         raise Refused("the batch names a feature twice")
-    raw = get(f"{channel}/noarch/repodata.json")
-    repodata = json.loads(raw) if raw else {}
+    lines = sorted({tag.split("/")[0] for tag, *_ in features})
+    if len(lines) > 1:
+        raise Refused(f"the batch's release tags span the release lines {' and '.join(lines)}: one batch is one isabelle version")
+    version = isabelle_version(features[0][3])
+    if rehearsal:
+        for subdir in PLATFORMS:
+            if any(rec.get("name") == "isabelle" and rec.get("version") == version and rec.get("build") == isabelle_build
+                   for rec in indexed(repodata(channel, subdir)).values()):
+                raise Refused(f"the channel already serves isabelle {version} {isabelle_build} ({subdir}): the rehearsal's "
+                              "would be a second package with that name, version and build, and conda cannot tell the "
+                              "two apart")
+    noarch = repodata(channel, "noarch")
     wanted = [Wanted(TOOL, tool_version, tool_prefix, None)]
     wanted += [Wanted(package_name(f), v, prefix, isabelle_pin(prefix, isabelle_build)) for _, f, v, prefix in features]
 
@@ -64,7 +93,7 @@ def plan(channel: str, isabelle_build: str, tool_version: str, tool_prefix: str,
         data = get(f"{channel}/noarch/{filename}")
         return None if data is None else conda_archive(data)[0]
 
-    decided = plan_builds(repodata, wanted, fetch)
+    decided = plan_builds(noarch, wanted, fetch)
     packages = []
     for w, feature in zip(wanted, [None, *features]):
         action, what = decided[w.name]
@@ -76,12 +105,12 @@ def plan(channel: str, isabelle_build: str, tool_version: str, tool_prefix: str,
             entry["tag"], entry["feature"] = feature[0], feature[1]
         packages.append(entry)
 
-    records = {**repodata.get("packages", {}), **repodata.get("packages.conda", {})}
     top = wanted[-1] if features else None
-    others = {b for rec in records.values() if top and rec.get("name") == top.name
+    others = {b for rec in indexed(noarch).values() if top and rec.get("name") == top.name
               if (b := pinned_build(rec, top.build_string_prefix)) is not None and b != isabelle_build}
     old = max(others, key=lambda b: (int(b) if b.isdigit() else -1, b), default="")
-    return {"packages": packages, "isabelle_old_build": old}
+    return {"packages": packages, "isabelle_version": version,
+            "isabelle_non_pristine_build": NON_PRISTINE_BUILDS.get(version, ""), "isabelle_old_build": old}
 
 
 def cli():
@@ -90,9 +119,10 @@ def cli():
     p.add_argument("--tool-version", required=True, metavar="v")
     p.add_argument("--tool-prefix", required=True, metavar="p", help="the tool's build string without _<n> (rattler-build --render-only)")
     p.add_argument("--channel", default="https://conda.qiyuan.me")
+    p.add_argument("--rehearsal", action="store_true", help="the batch's isabelle comes from a CI run: refuse a build the channel serves")
     p.add_argument("tags", nargs="+", metavar="release tag")
     a = p.parse_args()
-    print(json.dumps(plan(a.channel.rstrip("/"), a.isabelle_build, a.tool_version, a.tool_prefix, a.tags), indent=2))
+    print(json.dumps(plan(a.channel.rstrip("/"), a.isabelle_build, a.tool_version, a.tool_prefix, a.tags, a.rehearsal), indent=2))
 
 
 if __name__ == "__main__":

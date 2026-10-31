@@ -62,7 +62,7 @@ check the files, so it cannot report changes that a removal left behind; see the
   does it. Both are idempotent.
 - **A message says `Install matching versions of these packages`, or `is not the Isabelle build the
   feature packages were made for` (exit 3).** For the first, install the versions it names; for the
-  second, run the `conda update` command it gives.
+  second, run the `conda install --update-all` command it gives.
 - **"another isabelle-patch-control run holds the lock".** Another run (possibly in another
   environment sharing the same package cache) is working; wait and retry.
 - **A removal said `could not be fully undone`.** Do what that message said, right away: once the

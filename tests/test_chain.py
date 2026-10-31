@@ -68,7 +68,8 @@ def test_tree_that_is_not_the_pristine_build(chain3):
     assert r.code == 3
     assert r.err.strip() == texts.PREFIX + texts.not_pristine(t, OLD_BUILD_ID, "f1", RELEASE, PRISTINE_ID)
     assert r.err.startswith(f"{texts.PREFIX}{t} is not the Isabelle build the feature packages were made for: ") and OLD_BUILD_ID in r.err
-    assert r.err.endswith(f". To fix it, run: conda update -p {t.parent} --all -c https://conda.qiyuan.me -c conda-forge\n")
+    assert r.err.endswith(f'. To fix it, run: conda install -p {t.parent} --update-all "isabelle==2025.2" '
+                          '-c https://conda.qiyuan.me -c conda-forge\n')            # the update that keeps the release line
     for cmd in ("apply", "unapply"):
         assert tool(t, chain3.features_d, cmd).code == 3
 
@@ -79,7 +80,7 @@ def test_refusals_do_not_depend_on_directory_order(chain3):
     (chain3.features_d / "f3").rename(chain3.features_d / "a3")             # the top now sorts first
     t = chain3.old_build_tree()
     r = tool(t, chain3.features_d, "status")
-    assert r.code == 3 and "features.d/f1 was made for" in r.err and " --all -c https://conda.qiyuan.me" in r.err
+    assert r.code == 3 and "features.d/f1 was made for" in r.err and ' --update-all "isabelle==2025.2" -c https://conda.qiyuan.me' in r.err
     shutil.rmtree(chain3.features_d / "f2")                                 # a3's base is unreleased too: the build still comes first
     r = tool(t, chain3.features_d, "status")
     assert r.code == 3 and "features.d/f1 was made for" in r.err

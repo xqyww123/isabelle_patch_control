@@ -40,11 +40,12 @@ read from `etc/ISABELLE_IDENTIFIER`, the build from `etc/ISABELLE_ID`; the tool 
 The installed feature directories must link into one chain: the bottom is the tree's own tag
 `<release>/pristine/<etc/ISABELLE_ID>`; at each step exactly one directory's `base_tag` equals the
 current tag, and its `release_tag` is the next. A directory whose base is a pristine tag of another
-release or build means the tree is not the build the packages were made for (`conda update --all`
-fixes it); this is reported first, whatever else is wrong. Otherwise a directory whose base no
-installed directory releases means the chain is broken (install matching versions), and the
-refusal names that directory. Both are exit 3. No feature directory at all is `No feature packages
-are installed, so there is nothing to apply.`, exit 0, whatever the build.
+release or build means the tree is not the build the packages were made for (the `conda install
+--update-all` command the message gives fixes it); this is reported first, whatever else is wrong.
+Otherwise a directory whose base no installed directory releases means the chain is broken (install
+matching versions), and the refusal names that directory. Both are exit 3. No feature directory at
+all is `No feature packages are installed, so there is nothing to apply.`, exit 0, whatever the
+build.
 
 Every patch file changes exactly one path. A file that features `t1 < … < tm` change is *at level L*
 (L one of `0, t1, …, tm`) when, on a copy of its current content, reversing the patches of the
@@ -207,7 +208,7 @@ they are written. The refusals (an unknown name, a patch file git cannot read, a
   of these packages.` (or `, but <package> <version> is installed.`);
 - `<tree> is not the Isabelle build the feature packages were made for: they need the unmodified
   <release> build of the isabelle package (this tree has etc/ISABELLE_ID <id>; …). To fix it, run:
-  conda update -p <prefix> --all …`;
+  conda install -p <prefix> --update-all "isabelle==<isabelle version>" …`;
 - the CONFLICT diagnostic ``isabelle-patch-control: Feature `<feature>` cannot be applied: <file> was
   changed by something other than the installed feature packages.``, then what it stops and the
   same repair as `status` prints (deleting the files a feature creates, then reinstalling `isabelle`

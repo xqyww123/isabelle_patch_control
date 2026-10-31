@@ -18,10 +18,17 @@ on:
       tool_ref:
         default: ""
         type: string
+      isabelle_version:
+        required: true
+        type: string
       isabelle_build:
         required: true
         type: string
       old_build:
+        default: ""
+        type: string
+      non_pristine_build:
+        description: "The build of isabelle_version on the online channel not built from the pristine sources; empty skips (e) and (i)"
         default: ""
         type: string
       top:
@@ -42,7 +49,7 @@ on:
         default: ""
         type: string
       strict:
-        description: "A skipped scenario is wrong (the toy channel, where every scenario can run)"
+        description: "A skipped scenario is wrong unless an empty input asks for the skip (the toy channels, where every other scenario can run)"
         default: false
         type: boolean
     secrets:
@@ -87,15 +94,16 @@ jobs:
       - uses: conda-incubator/setup-miniconda@v3
         with:
           miniforge-version: latest      # conda-forge only: no defaults channel, no Terms of Service prompt
-          # (e) and (i) pin isabelle=2025.2=0, which only the online channel serves; past a rehearsal's local
-          # isabelle they reach it only under flexible priority (local-channel's build-0 guard rests on it too)
+          # (e) and (i) pin non_pristine_build, which only the online channel serves; past a rehearsal's local
+          # isabelle they reach it only under flexible priority
           channel-priority: flexible
           auto-activate-base: true
           activate-environment: ""
       - name: "Index the local channel"
         env:
+          V: ${{ inputs.isabelle_version }}
           B: ${{ inputs.isabelle_build }}
-        run: bash tool/tools/local-channel "$RUNNER_TEMP/local" "$B" "$RUNNER_TEMP/pkgs" "$RUNNER_TEMP/pkgs-ci"
+        run: bash tool/tools/local-channel "$RUNNER_TEMP/local" "$V" "$B" "$RUNNER_TEMP/pkgs" "$RUNNER_TEMP/pkgs-ci"
       - name: "The component session (linux-64 and session_build_legs)"
         if: inputs.component == 'isabelle-light-locale' && (matrix.leg == 'linux-64' || contains(inputs.session_build_legs, matrix.leg))
         run: |
@@ -107,11 +115,13 @@ jobs:
           echo "SESSION_DIR=$d" >> "$GITHUB_ENV"
       - name: "tools/accept"
         env:
+          V: ${{ inputs.isabelle_version }}
           B: ${{ inputs.isabelle_build }}
           TOP: ${{ inputs.top }}
           COMPONENT: ${{ inputs.component }}
           OTHER: ${{ inputs.other_component }}
           OLD: ${{ inputs.old_build }}
+          NON_PRISTINE: ${{ inputs.non_pristine_build }}
           ONLINE: ${{ inputs.online_channel }}
           LEG: ${{ matrix.leg }}
           STRICT: ${{ inputs.strict }}
@@ -120,8 +130,8 @@ jobs:
           # the package cache on the environments' drive: conda hard-links, as on a user's machine ((a) checks it)
           export CONDA_PKGS_DIRS="$RUNNER_TEMP/conda-pkgs"
           local_url=$(python -c "import pathlib, sys; print(pathlib.Path(sys.argv[1]).resolve().as_uri())" "$RUNNER_TEMP/local")
-          args=(--isabelle-build "$B" --top "$TOP" --old-build "$OLD" --subdir "$LEG" --work "$RUNNER_TEMP/accept"
-                --channel "$local_url")
+          args=(--isabelle-version "$V" --isabelle-build "$B" --top "$TOP" --old-build "$OLD" --non-pristine-build "$NON_PRISTINE"
+                --subdir "$LEG" --work "$RUNNER_TEMP/accept" --channel "$local_url")
           [ -z "$ONLINE" ] || args+=(--channel "$ONLINE" --start-channel "$ONLINE" --start-channel conda-forge)
           args+=(--channel conda-forge)
           [ -z "$COMPONENT" ] || args+=(--component "$COMPONENT")
@@ -133,7 +143,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: accept-output-${{ inputs.artifact }}-${{ matrix.leg }}
+          name: accept-output-${{ inputs.artifact }}-${{ inputs.isabelle_version }}-${{ matrix.leg }}
           path: ${{ runner.temp }}/accept/*.txt
           if-no-files-found: ignore
           retention-days: 14

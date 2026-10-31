@@ -5,7 +5,7 @@ import sys
 from conftest import ROOT
 
 sys.path.insert(0, str(ROOT / "tools"))
-from common import Wanted, isabelle_pin, plan_builds  # noqa: E402
+from common import Wanted, isabelle_pin, isabelle_version, plan_builds  # noqa: E402
 
 TOOL = "isabelle-patch-control"
 TOOL_PREFIX = "pyh4616a5c"             # the build string of a noarch python package: py + a hash of the recipe
@@ -93,8 +93,14 @@ def test_empty_channel_builds_zero():
     assert plan == {TOOL: ("build", 0), "isabelle-expose-foreign": ("build", 0)}
 
 
+def test_the_isabelle_version_of_a_release_line():
+    assert isabelle_version("Isabelle2025_2") == "2025.2"
+    assert isabelle_version("Isabelle2026") == "2026"
+
+
 def test_the_pin_is_the_isabelle_dependency_a_recipe_writes():
     assert isabelle_pin("Isabelle2025_2", "1") == "isabelle ==2025.2 1"
+    assert isabelle_pin("Isabelle2026", "0") == "isabelle ==2026 0"
     assert feature("isabelle-light-locale", "2", "1").filename(3) == "isabelle-light-locale-2-Isabelle2025_2_3.conda"
 
 

@@ -40,6 +40,10 @@ on:
         description: "Legs besides linux-64 that also build the component session (linux-aarch64 osx-arm64 osx-64 win-64)"
         default: ""
         type: string
+      other_component:
+        description: "An Isabelle_RPC-style component package on the channel that installs on this isabelle version; empty skips the scenarios that use it"
+        default: isabelle-performant-ml
+        type: string
       publish:
         description: "Publish to conda.qiyuan.me when roundtrip and every accept leg are green"
         type: boolean
@@ -59,6 +63,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     outputs:
+      isabelle_version: ${{ steps.plan.outputs.isabelle_version }}
+      isabelle_non_pristine_build: ${{ steps.plan.outputs.isabelle_non_pristine_build }}
       isabelle_old_build: ${{ steps.plan.outputs.isabelle_old_build }}
       run_id: ${{ steps.inputs.outputs.run_id }}
       top: ${{ steps.check.outputs.top }}
@@ -110,13 +116,18 @@ jobs:
         env:
           B: ${{ inputs.isabelle_build }}
           FEATURES: ${{ inputs.features }}
+          RUN_ID: ${{ steps.inputs.outputs.run_id }}
         run: |
           set -euo pipefail
           read -r -a tags <<< "$FEATURES"
-          python3 tool/tools/release-plan --channel "$CHANNEL" --isabelle-build "$B" \
+          args=(--channel "$CHANNEL" --isabelle-build "$B")
+          [ -z "$RUN_ID" ] || args+=(--rehearsal)
+          python3 tool/tools/release-plan "${args[@]}" \
             --tool-version "${{ steps.tool.outputs.version }}" --tool-prefix "${{ steps.tool.outputs.prefix }}" \
             "${tags[@]}" > plan.json
           cat plan.json
+          echo "isabelle_version=$(jq -r .isabelle_version plan.json)" >> "$GITHUB_OUTPUT"
+          echo "isabelle_non_pristine_build=$(jq -r .isabelle_non_pristine_build plan.json)" >> "$GITHUB_OUTPUT"
           echo "isabelle_old_build=$(jq -r .isabelle_old_build plan.json)" >> "$GITHUB_OUTPUT"
 
       - name: "Download the packages the channel already serves (byte for byte)"
@@ -222,16 +233,18 @@ jobs:
           activate-environment: ""
       - name: "Index the local channel"
         env:
+          V: ${{ needs.build.outputs.isabelle_version }}
           B: ${{ inputs.isabelle_build }}
-        run: bash tool/tools/local-channel "$RUNNER_TEMP/local" "$B" "$RUNNER_TEMP/pkgs" "$RUNNER_TEMP/pkgs-ci"
+        run: bash tool/tools/local-channel "$RUNNER_TEMP/local" "$V" "$B" "$RUNNER_TEMP/pkgs" "$RUNNER_TEMP/pkgs-ci"
       - name: "Install isabelle and the tool, copy the tree, install the chain top"
         env:
+          V: ${{ needs.build.outputs.isabelle_version }}
           B: ${{ inputs.isabelle_build }}
           TOP: ${{ needs.build.outputs.top }}
         run: |
           set -euo pipefail
           ch=(--override-channels -c "file://$RUNNER_TEMP/local" -c "$CHANNEL" -c conda-forge)
-          conda create -q -y -p "$RUNNER_TEMP/env" "${ch[@]}" "isabelle=2025.2=$B" isabelle-patch-control
+          conda create -q -y -p "$RUNNER_TEMP/env" "${ch[@]}" "isabelle=$V=$B" isabelle-patch-control
           cp -a "$RUNNER_TEMP/env/isa" "$RUNNER_TEMP/pristine"
           conda install -q -y -p "$RUNNER_TEMP/env" "${ch[@]}" "$TOP"
       - name: "check-roundtrip with the installed tool and features.d (it fetches the two tags it compares)"
@@ -255,11 +268,13 @@ jobs:
       artifact: feature-packages
       ci_run_id: ${{ needs.build.outputs.run_id }}
       tool_ref: ${{ inputs.tool_ref }}
+      isabelle_version: ${{ needs.build.outputs.isabelle_version }}
       isabelle_build: ${{ inputs.isabelle_build }}
       old_build: ${{ needs.build.outputs.isabelle_old_build }}
+      non_pristine_build: ${{ needs.build.outputs.isabelle_non_pristine_build }}
       top: ${{ needs.build.outputs.top }}
       component: ${{ needs.build.outputs.component }}
-      other_component: isabelle-performant-ml      # an Isabelle_RPC-style component package on the channel
+      other_component: ${{ inputs.other_component }}
       online_channel: https://conda.qiyuan.me
       session_build_legs: ${{ inputs.session_build_legs }}
     secrets:
@@ -279,7 +294,8 @@ jobs:
   # After publishing, it can only report.  The first command is the README's install line, read
   # from the common text the renderer copies into every feature package (the key: the line that
   # starts with `conda create -n `; tests/test_docs.py uses the same key), so the documented
-  # command and the tested one cannot drift apart.
+  # command and the tested one cannot drift apart.  With a newer isabelle line on the channel it
+  # installs that line, as users get it; the batch's own line is checked by roundtrip and accept.
   smoke:
     name: "Smoke on ${{ matrix.os }}: the README's install command"
     needs: [build, publish]

@@ -9,6 +9,8 @@ import os
 import shlex
 from pathlib import Path
 
+from .dev import build_string_prefix, isabelle_version
+
 CHANNELS = "-c https://conda.qiyuan.me -c conda-forge"
 PREFIX = "isabelle-patch-control: "
 TOOL = "isabelle-patch-control"
@@ -176,9 +178,12 @@ def chain_broken(package: str, version: str, needs_package: str, needs_version: 
 
 
 def not_pristine(tree: Path, tree_id: str, directory: str, release: str, pristine_id: str) -> str:
+    """The update keeps the release line: `conda update --all` would move to the newest line the
+    channel serves.  `==`: `isabelle=2026` would match 2026.1 too."""
     return (f"{tree} is not the Isabelle build the feature packages were made for: they need the unmodified {release} build of "
             f"the isabelle package (this tree has etc/ISABELLE_ID {tree_id}; features.d/{directory} was made for {release} pristine "
-            f"{pristine_id}). To fix it, run: conda update -p {quoted(tree.parent)} --all {CHANNELS}")
+            f"{pristine_id}). To fix it, run: conda install -p {quoted(tree.parent)} --update-all "
+            f"\"isabelle=={isabelle_version(build_string_prefix(release))}\" {CHANNELS}")
 
 
 def chain_broken_removal(feature: str, package: str, error: str, tree: Path) -> str:

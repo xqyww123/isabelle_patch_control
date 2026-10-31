@@ -1,7 +1,8 @@
 """Shared code of the developer subcommands (new-tree, make-patches, check-signatures) and of the
 release scripts in tools/, which import it through tools/common.py: the developer's own git, and
 the formats of a release (patch files cut from a diff, a package's list files, build strings and
-pins).  Unlike engine.Git, git runs here with the user's configuration: it commits, tags and fetches."""
+pins); texts takes a release line's isabelle version from it for the update it advises.  Unlike
+engine.Git, git runs here with the user's configuration: it commits, tags and fetches."""
 from __future__ import annotations
 
 import re
@@ -124,6 +125,11 @@ def shipped_files(package: Path) -> list[str]:
 def build_string_prefix(release: str) -> str:
     """A release line's build string prefix: Isabelle2025-2 -> Isabelle2025_2 (conda refuses '-' there)."""
     return release.replace("-", "_")
+
+
+def isabelle_version(build_string_prefix: str) -> str:
+    """The `isabelle` package version of a release line: Isabelle2025_2 -> 2025.2, Isabelle2026 -> 2026."""
+    return build_string_prefix.removeprefix("Isabelle").replace("_", ".")
 
 
 def feature_pin(version: str, build_string_prefix: str) -> str:

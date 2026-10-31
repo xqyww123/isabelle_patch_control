@@ -146,7 +146,8 @@ def test_post_link_on_the_old_build(chain3, tmp_path):
     (p.tree / "etc" / "ISABELLE_ID").write_text("5533cd83156e\n")
     text = p.hook("post-link", pkg="isabelle-f3")
     assert text.startswith(texts.PREFIX + "the installed Isabelle feature packages were not applied: ")
-    assert f"To fix it, run: conda update -p {p.path} --all" in text and text.endswith("\nWhen this is fixed, run: isabelle-patch-control status\n")
+    assert f'To fix it, run: conda install -p {p.path} --update-all "isabelle==2025.2"' in text \
+        and text.endswith("\nWhen this is fixed, run: isabelle-patch-control status\n")
 
 
 def test_post_link_refusals_end_with_the_command_to_run(prefix):

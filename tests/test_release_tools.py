@@ -137,9 +137,44 @@ def test_the_old_build_is_the_highest_other_one_the_chain_top_pins(tmp_path):
     assert lower_only["isabelle_old_build"] == ""
 
 
+def test_the_isabelle_version_is_the_release_line_of_the_batch(tmp_path):
+    """2025.2's build 0 is not pristine (it carries expose_foreign); 2026 has no such build."""
+    url = channel(tmp_path, [])
+    old = rp.plan(url, "1", "1.0.0", "p", ["Isabelle2025-2/expose_foreign/1"])
+    assert (old["isabelle_version"], old["isabelle_non_pristine_build"]) == ("2025.2", "0")
+    new = rp.plan(url, "0", "1.0.0", "p", ["Isabelle2026/expose_foreign/1", "Isabelle2026/light_locale/1"])
+    assert (new["isabelle_version"], new["isabelle_non_pristine_build"]) == ("2026", "")
+    assert files_of(new)["isabelle-light-locale"] == ("build", "isabelle-light-locale-1-Isabelle2026_0.conda")
+
+
+def isabelle(version, build, subdir):
+    return f"isabelle-{version}-{build}.conda", {"name": "isabelle", "version": version, "build": build,
+                                                 "build_number": int(build), "depends": ["python"], "subdir": subdir}
+
+
+@pytest.mark.parametrize("transport", ["file", "http"])
+def test_a_rehearsal_is_refused_only_for_an_isabelle_build_the_channel_serves(tmp_path, over_http, transport, monkeypatch):
+    """One platform's repodata.json serves 2025.2-0; the other four platforms have none, which is no error."""
+    url = channel(tmp_path, [])
+    arm = tmp_path / "channel" / "linux-aarch64"
+    arm.mkdir()
+    (arm / "repodata.json").write_text(json.dumps({"packages": {}, "packages.conda": dict([isabelle("2025.2", "0", "linux-aarch64")])}))
+    if transport == "http":
+        url = over_http(url)
+    monkeypatch.setattr("sys.argv", ["release-plan", "--channel", url, "--isabelle-build", "0", "--tool-version", "1.0.0",
+                                     "--tool-prefix", "p", "--rehearsal", "Isabelle2025-2/light_locale/1"])
+    with pytest.raises(rp.Refused, match=r"serves isabelle 2025\.2 0 \(linux-aarch64\).*conda cannot tell the two apart"):
+        rp.cli()                                                                                # the workflow's path
+    assert rp.plan(url, "1", "1.0.0", "p", ["Isabelle2025-2/light_locale/1"], rehearsal=True)
+    assert rp.plan(url, "0", "1.0.0", "p", ["Isabelle2026/light_locale/1"], rehearsal=True)     # a new line's first build
+    assert rp.plan(url, "0", "1.0.0", "p", ["Isabelle2025-2/light_locale/1"])                   # not a rehearsal
+
+
 @pytest.mark.parametrize("tags, says", [(["light_locale/1"], "is not a release tag"),
                                         (["Isabelle2025-2/light_locale/0"], "is not a release tag"),
-                                        (["Isabelle2025-2/a/1", "Isabelle2025-2/a/2"], "names a feature twice")])
+                                        (["Isabelle2025-2/a/1", "Isabelle2025-2/a/2"], "names a feature twice"),
+                                        (["Isabelle2025-2/a/1", "Isabelle2026/b/1"],
+                                         "span the release lines Isabelle2025-2 and Isabelle2026: one batch is one isabelle version")])
 def test_plan_refusals(tmp_path, tags, says):
     with pytest.raises(rp.Refused, match=says):
         rp.plan(channel(tmp_path, []), "1", "1.0.0", "p", tags)

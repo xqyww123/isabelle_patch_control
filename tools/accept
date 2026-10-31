@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
-"""accept --isabelle-build <b> --top <package> [--component <package>] [options] --channel <url>...
+"""accept --isabelle-version <v> --isabelle-build <b> --top <package> [--component <package>] [options] --channel <url>...
 
 §6 of the patch tool plan on one platform leg (decision 11's accept job): every scenario starts from
 a new environment, and every package that must stay is asked for explicitly.  The channels are the
 batch's local channel, the online channel and conda-forge, in that order (--channel, repeated),
-with conda's flexible channel priority (the `=0` pins of (e) and (i) reach the online 2025.2-0 past
-a rehearsal's local isabelle only under it).  <package> names are conda package names; the feature
-that the CONFLICT scenarios (f1), (f2) and the removal (b) work on is --component when given (light
-locale today), else --top.  The files those scenarios touch are read from that feature's patch files
-in the package cache: (f1) replaces a file that only it changes, (f2) occupies a path it creates.
-The chain is the one (a) installs; (b), (f) and (i) take it from there.  --strict counts every
-skipped scenario as wrong (the toy channel's run, where every scenario can run).
+with conda's flexible channel priority (the --non-pristine-build pins of (e) and (i) reach the
+online channel's build past a rehearsal's local isabelle only under it).  <package> names are conda
+package names; the feature that the CONFLICT scenarios (f1), (f2) and the removal (b) work on is
+--component when given (light locale today), else --top.  The files those scenarios touch are read
+from that feature's patch files in the package cache: (f1) replaces a file that only it changes,
+(f2) occupies a path it creates.  The chain is the one (a) installs; (b), (f) and (i) take it from
+there.  --strict counts a skipped scenario as wrong unless an empty option asks for the skip
+(--other-component, --old-build, --non-pristine-build): the toy channels' runs, where every other
+scenario can run.
 
   (a) isabelle and the top: all applied, one applied line, one heap paragraph, no hook failure
       text, the component registered, the tool runs its own environment's git (win-64: with
@@ -20,15 +22,17 @@ skipped scenario as wrong (the toy channel's run, where every scenario can run).
       three pruning shapes; (k) after each.
   (c) --force-reinstall isabelle with --other-component installed: still all applied, both registered.
   (d) --clone gives the same state.
-  (e) from isabelle=2025.2=<--zero-build> with --other-component: installing the component moves
+  (e) from isabelle at --non-pristine-build with --other-component: installing the component moves
       isabelle to <b>, the chain is applied, the registration is rebuilt.
   (f1), (f2) CONFLICT: one complete diagnostic, the features below applied; --force-reinstall isabelle.
   (g) conda remove isabelle leaves no isa/ (win-64: no target of a patch, no isa.staging, only
       contrib/cygwin/ remains) and no user directory (one with heaps/ in it before); with and
       without feature packages.
   (h) with --old-build: from --start-channel (the online channel: decision 11's one exception) at that
-      isabelle build, update --all moves to <b>.
-  (i) a tool-only environment of the 2025.2-0 build: "no feature packages installed", then exit 3.
+      isabelle build, the update that keeps the release line (`conda install --update-all
+      "isabelle==<v>"`, the command texts.not_pristine gives users) moves to <b>.
+  (i) a tool-only environment at --non-pristine-build: "no feature packages installed", then exit 3
+      (the pristine builds of a version share one ISABELLE_ID; only that build has another).
   (j) (a) in an environment under a git work tree (on win-64 also GIT_CEILING_DIRECTORIES).
   (l) win-64: status and the tool's whole-chain apply after an unapply (what the post-link of
       --force-reinstall isabelle does under the lock) each hold the lock no longer than 30 s.
@@ -70,6 +74,16 @@ WINDOWS = os.name == "nt"
 CONDA = os.environ.get("CONDA_EXE", "conda")
 FD = Path("share") / "isabelle_patch_control" / "features.d"
 TOOL = "isabelle-patch-control"
+
+
+def isabelle_at(a, build: str) -> str:
+    """The spec of isabelle --isabelle-version at that build."""
+    return f"isabelle={a.isabelle_version}={build}"
+
+
+def isabelle_of(record: dict) -> str:
+    """isabelle_at's spec of an installed isabelle record."""
+    return f"isabelle={record['version']}={record['build']}"
 
 
 class Leg:
@@ -169,6 +183,13 @@ class Leg:
         if self.a.strict:
             self.failed.append(f"skipped under --strict: {what}")
 
+    def lacks(self, what: str, option: str) -> bool:
+        """An empty option asks for the skip; --strict lets it through."""
+        if getattr(self.a, option[2:].replace("-", "_")):
+            return False
+        print(f"skipped  {what}: no {option}")
+        return True
+
     def times(self, text: str) -> int:
         return self.out.count(text)
 
@@ -199,7 +220,7 @@ class Leg:
 
 
 def scenario_a(leg: Leg, a) -> tuple[Path | None, list[tuple[str, Path]]]:
-    e = leg.env("a", f"isabelle=2025.2={a.isabelle_build}", a.top)
+    e = leg.env("a", isabelle_at(a, a.isabelle_build), a.top)
     if not e:
         return None, []
     chain = leg.chain(e)
@@ -265,7 +286,7 @@ def scenario_b(leg: Leg, a, chain):
     names = [f for f, _ in chain]
     feature = feature_name(a.component or a.top)
     below = names[:names.index(feature)]
-    e = leg.env("b1", f"isabelle=2025.2={a.isabelle_build}", TOOL, *(package_name(f) for f in below), package_name(feature))
+    e = leg.env("b1", isabelle_at(a, a.isabelle_build), TOOL, *(package_name(f) for f in below), package_name(feature))
     if e:
         packages = [d for _, d in leg.chain(e)]
         user = leg.user_dir(e)
@@ -276,13 +297,13 @@ def scenario_b(leg: Leg, a, chain):
             leg.check(f"(b) {a.component} no longer registered", not leg.registered(e, a.component))
             leg.check("(b) the user directory is still there (isabelle was asked for)", bool(user and user.is_dir()))
         leg.bytes_ok(f"after removing {package_name(feature)}", e, below, packages)
-    e = leg.env("b2", f"isabelle=2025.2={a.isabelle_build}", *(package_name(f) for f in names))
+    e = leg.env("b2", isabelle_at(a, a.isabelle_build), *(package_name(f) for f in names))
     if e:
         packages = [d for _, d in leg.chain(e)]
         leg.conda("remove", e, a.top)
         leg.check("(b, pruning i) the lower packages asked for: only the top's pre-unlink ran", leg.times(" was undone") == 1)
         leg.bytes_ok("after pruning (i)", e, names[:-1], packages)
-    e = leg.env("b3", f"isabelle=2025.2={a.isabelle_build}", a.top)
+    e = leg.env("b3", isabelle_at(a, a.isabelle_build), a.top)
     if e:
         packages = [d for _, d in leg.chain(e)]
         leg.conda("remove", e, a.top)
@@ -291,7 +312,7 @@ def scenario_b(leg: Leg, a, chain):
                   and leg.times(" was undone") == len(names))
         leg.check("(b, pruning ii) the tool went too", TOOL not in leg.records(e))
         leg.bytes_ok("after pruning (ii)", e, [], packages)
-    e = leg.env("b4", f"isabelle=2025.2={a.isabelle_build}", a.top)
+    e = leg.env("b4", isabelle_at(a, a.isabelle_build), a.top)
     if e:
         packages = [d for _, d in leg.chain(e)]
         leg.conda("remove", e, "--force", a.top)
@@ -300,10 +321,9 @@ def scenario_b(leg: Leg, a, chain):
 
 
 def scenario_c(leg: Leg, a):
-    if not a.other_component:
-        leg.skip("(c): no --other-component")
+    if leg.lacks("(c)", "--other-component"):
         return
-    e = leg.env("c", f"isabelle=2025.2={a.isabelle_build}", a.top, a.other_component)
+    e = leg.env("c", isabelle_at(a, a.isabelle_build), a.top, a.other_component)
     if not e:
         return
     leg.check("(c) before: all applied", leg.all_applied(e))
@@ -324,15 +344,15 @@ def scenario_d(leg: Leg, a, e_a: Path | None):
 
 
 def scenario_e(leg: Leg, a):
-    if not a.other_component:
-        leg.skip("(e): no --other-component")
+    if leg.lacks("(e)", "--other-component") or leg.lacks("(e)", "--non-pristine-build"):
         return
     subject = a.component or a.top
-    e = leg.env("e", f"isabelle=2025.2={a.zero_build}", a.other_component)
+    e = leg.env("e", isabelle_at(a, a.non_pristine_build), a.other_component)
     if not e:
         return
     leg.conda("install", e, subject)
-    leg.check(f"(e) installing {subject} moved isabelle to build {a.isabelle_build}", leg.records(e)["isabelle"]["build"] == a.isabelle_build)
+    leg.check(f"(e) installing {subject} moved isabelle to {isabelle_at(a, a.isabelle_build)}",
+              isabelle_of(leg.records(e)["isabelle"]) == isabelle_at(a, a.isabelle_build))
     leg.check("(e) the chain applied", leg.all_applied(e))
     leg.check(f"(e) {a.other_component} registered again by the new post-link", leg.registered(e, a.other_component))
 
@@ -349,7 +369,7 @@ def scenario_f(leg: Leg, a, chain):
         if path is None:
             leg.skip(f"({case}): {package_name(feature)} has no {'created' if created else 'changed'} file of its own")
             continue
-        e = leg.env(case, f"isabelle=2025.2={a.isabelle_build}", *lower)
+        e = leg.env(case, isabelle_at(a, a.isabelle_build), *lower)
         if not e:
             continue
         p = e / "isa" / path
@@ -370,7 +390,7 @@ def scenario_f(leg: Leg, a, chain):
 
 def scenario_g(leg: Leg, a):
     for case, specs in (("g1", [a.top]), ("g2", [])):
-        e = leg.env(case, f"isabelle=2025.2={a.isabelle_build}", *specs)
+        e = leg.env(case, isabelle_at(a, a.isabelle_build), *specs)
         if not e:
             continue
         targets = [check_bytes.header(p)[0] for _, d in leg.chain(e) for p in (d / FD).glob("*/*.patch")]
@@ -391,15 +411,16 @@ def scenario_g(leg: Leg, a):
 
 
 def scenario_h(leg: Leg, a):
-    if not a.old_build:
-        leg.skip("(h): the chain top pins no other isabelle build on the channel")
+    if leg.lacks("(h)", "--old-build"):
         return
-    e = leg.env("h", f"isabelle=2025.2={a.old_build}", a.top, TOOL, channels=a.start_channel)
+    e = leg.env("h", isabelle_at(a, a.old_build), a.top, TOOL, channels=a.start_channel)
     if not e:
         return
-    leg.conda("update", e, "--all")
+    line = f"isabelle=={a.isabelle_version}"            # `update --all` would move to the newest release line
+    leg.conda("install", e, "--update-all", line)
     recs = leg.records(e)
-    leg.check(f"(h) update --all moved isabelle to build {a.isabelle_build}", recs["isabelle"]["build"] == a.isabelle_build)
+    leg.check(f"(h) install --update-all {line} moved isabelle to {isabelle_at(a, a.isabelle_build)}",
+              isabelle_of(recs["isabelle"]) == isabelle_at(a, a.isabelle_build))
     pins = []
     for feature, pkg in leg.chain(e):
         release = provenance_fields((pkg / FD / feature / "provenance.txt").read_text())["release_tag"].split("/")[0]
@@ -409,10 +430,12 @@ def scenario_h(leg: Leg, a):
 
 
 def scenario_i(leg: Leg, a, chain):
+    if leg.lacks("(i)", "--non-pristine-build"):
+        return
     if not chain:
         leg.skip("(i): no environment (a)")
         return
-    e = leg.env("i", f"isabelle=2025.2={a.zero_build}", TOOL)
+    e = leg.env("i", isabelle_at(a, a.non_pristine_build), TOOL)
     if not e:
         return
     rc, out = leg.tool(e, "status")
@@ -420,15 +443,17 @@ def scenario_i(leg: Leg, a, chain):
     bottom, unpacked = chain[0]                       # its base_tag is the pristine tag the tree is checked against
     shutil.copytree(unpacked / FD / bottom, e / FD / bottom)
     rc, out = leg.tool(e, "status")
-    leg.check("(i) a feature directory on the 2025.2-0 build: exit 3, update --all with both channels",
-              rc == 3 and "To fix it, run: conda update -p " in out and out.rstrip().endswith(f" --all {texts.CHANNELS}"), out)
+    leg.check(f"(i) a feature directory on build {a.non_pristine_build}: exit 3, the update that keeps isabelle "
+              f"{a.isabelle_version}, with both channels",
+              rc == 3 and "To fix it, run: conda install -p " in out
+              and out.rstrip().endswith(f' --update-all "isabelle=={a.isabelle_version}" {texts.CHANNELS}'), out)
 
 
 def scenario_j(leg: Leg, a):
     repo = leg.work / "worktree"
     repo.mkdir(exist_ok=True)
     subprocess.run(["git", "init", "-q", str(repo)], check=True)
-    e = leg.env("j", f"isabelle=2025.2={a.isabelle_build}", a.top, under=repo)
+    e = leg.env("j", isabelle_at(a, a.isabelle_build), a.top, under=repo)
     if e:
         leg.check("(j) under a git work tree: every feature applied", leg.all_applied(e))
         leg.bytes_ok("under a git work tree", e, [f for f, _ in leg.chain(e)])
@@ -458,7 +483,7 @@ def scenario_m(leg: Leg, a, chain):
     if WINDOWS:     # a negative exit code: decision 9's two-line errorlevel test, so far measured only under wine
         cases.append(("m3", "a tool that exits with an NTSTATUS code", "import os\nos._exit(-1073741819)\n", cannot_start))
     for case, what, init, post in cases:
-        e = leg.env(case, f"isabelle=2025.2={a.isabelle_build}", a.top)
+        e = leg.env(case, isabelle_at(a, a.isabelle_build), a.top)
         if not e:
             continue
         if init is None:
@@ -542,19 +567,21 @@ def describe() -> str:
 
 def cli():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--isabelle-version", required=True, help="the batch's isabelle version (release-plan's isabelle_version)")
     p.add_argument("--isabelle-build", required=True)
     p.add_argument("--top", required=True, help="the chain top's package")
     p.add_argument("--component", help="the feature package that ships an Isabelle component")
     p.add_argument("--other-component", help="an Isabelle_RPC-style component package for (c) and (e)")
     p.add_argument("--session-dir", help="a session directory using the component, built in (a)")
     p.add_argument("--old-build", default="", help="the build's isabelle_old_build output; empty skips (h)")
-    p.add_argument("--zero-build", default="0", help="the build string of isabelle 2025.2-0")
+    p.add_argument("--non-pristine-build", default="", help="the build of that version on the online channel that was not "
+                   "built from the pristine sources (2025.2: 0, which carries expose_foreign); empty skips (e) and (i)")
     p.add_argument("--channel", action="append", required=True, help="the accept channels, in order")
     p.add_argument("--start-channel", action="append", help="the channels of (h)'s first environment (decision 11's one exception)")
     p.add_argument("--work", help="where the environments go")
     p.add_argument("--only", nargs="*", help="run only these scenarios (a b c d e f g h i j l m n)")
     p.add_argument("--subdir", help="the leg's conda subdir; (a) checks its environment is of it")
-    p.add_argument("--strict", action="store_true", help="a skipped scenario is wrong")
+    p.add_argument("--strict", action="store_true", help="a skipped scenario is wrong, unless an empty option asks for the skip")
     a = p.parse_args()
     leg = Leg(a)
     print(describe())

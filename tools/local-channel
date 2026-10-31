@@ -1,18 +1,17 @@
 #!/usr/bin/env bash
-# local-channel <channel dir> <isabelle build> <feature-packages dir> [<conda-packages dir>]
+# local-channel <channel dir> <isabelle version> <isabelle build> <feature-packages dir> [<conda-packages dir>]
 #
 # The release workflow's local channel (patch tool plan decision 11): the batch's feature-packages
 # artifact (noarch/*.conda) and, in a rehearsal, the CI run's conda-packages artifact
 # (<subdir>/*.conda), indexed with conda-index into the base environment's python.  The rehearsal's
-# isabelle package must carry the build string the batch pins and must not be build 0, which would
-# shadow the channel's 2025.2-0.
+# isabelle packages must be exactly the batch's isabelle-<version>-<build>; that the online channel
+# does not serve this build yet, release-plan --rehearsal has checked.
 set -euo pipefail
-ch=$1 b=$2 features=$3 ci=${4-}
+ch=$1 v=$2 b=$3 features=$4 ci=${5-}
 conda install -q -y -n base -c conda-forge conda-index
 mkdir -p "$ch/noarch"
 find "$features" -name '*.conda' -exec cp {} "$ch/noarch/" \;
 if [ -n "$ci" ] && [ -d "$ci" ]; then
-  [ "$b" != 0 ] || { echo "::error::isabelle_build 0 in a rehearsal would shadow the channel's 2025.2-0"; exit 1; }
   # one loop over the files, quoted throughout: a Windows RUNNER_TEMP (D:\a\_temp) holds backslashes
   # that a second glob over the expanded path would read as escapes
   for f in "$ci"/*/*.conda; do
@@ -21,8 +20,8 @@ if [ -n "$ci" ] && [ -d "$ci" ]; then
     mkdir -p "$ch/$sub"
     cp "$f" "$ch/$sub/"
   done
-  found=$(find "$ch" -name 'isabelle-2025.2-*.conda' | sed 's|.*/isabelle-2025\.2-||; s|\.conda$||' | sort -u)
-  [ "$found" = "$b" ] || { echo "::error::the CI run's isabelle builds are '$found', the batch pins $b"; exit 1; }
+  found=$(find "$ch" -name 'isabelle-[0-9]*.conda' | sed 's|.*/||' | sort -u)
+  [ "$found" = "isabelle-$v-$b.conda" ] || { echo "::error::the CI run's isabelle packages are '$found', the batch pins isabelle-$v-$b.conda"; exit 1; }
 fi
 python -m conda_index "$ch" --no-zst --no-bz2 --channel-name local
 find "$ch" -name '*.conda' | sort

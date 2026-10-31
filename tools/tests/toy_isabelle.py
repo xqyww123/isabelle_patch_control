@@ -27,7 +27,8 @@ def cygwin(p: Path) -> str:
 
 
 def user_dir() -> Path:
-    return Path.home() / ".isabelle" / f"Isabelle2025-2-conda-{PREFIX.name}"
+    identifier = (HOME / "etc" / "ISABELLE_IDENTIFIER").read_text().strip()      # the release line, e.g. Isabelle2025-2
+    return Path.home() / ".isabelle" / f"{identifier}-conda-{PREFIX.name}"
 
 
 def components(verb: str, entry: str):

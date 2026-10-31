@@ -1,9 +1,10 @@
 # The tests of this repository on GitHub's runners (patch tool plan decision 15, "GitHub 上的测试").
 # Every job runs a harness that exists anyway: lint, actionlint over the workflows; unit, pytest
 # (Linux at the tool's declared floors, macOS at the latest) and tools/tests/run-all.sh;
-# toy-channel, tools/tests/toy-channel.sh with the release's own rattler-build; hooks, the
-# hook-layer test with real conda; accept, tools/accept on the toy channel on the five legs, through
-# accept.yml, the release's own accept job.
+# toy-channel, tools/tests/toy-channel.sh with the release's own rattler-build, two release lines in
+# one channel (Isabelle2025-2, and Isabelle2026, whose only isabelle build, 0, is pristine); hooks,
+# the hook-layer test with real conda; accept and accept-2026, tools/accept on that channel for each
+# line on the five legs, through accept.yml, the release's own accept job.
 name: tests
 
 on:
@@ -77,7 +78,7 @@ jobs:
           retention-days: 14
 
   toy-channel:
-    name: "The toy channel (tools/tests/toy-channel.sh)"
+    name: "The toy channel of two release lines (tools/tests/toy-channel.sh)"
     runs-on: ubuntu-latest
     timeout-minutes: 30
     outputs:
@@ -86,19 +87,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/build-tools      # rattler-build as $RATTLER_BUILD, and zstandard
-      - name: "Build the toy channels; check-packages on the build-2 batch"
-        run: bash tools/tests/toy-channel.sh "$RUNNER_TEMP/toy"
-      - name: "The chain top and the component, as the release's build job reads them"
+      - name: "Build the toy channels of Isabelle2025-2 and Isabelle2026; check-packages on each line's batch"
+        run: |
+          set -euo pipefail
+          bash tools/tests/toy-channel.sh "$RUNNER_TEMP/toy"
+          bash tools/tests/toy-channel.sh "$RUNNER_TEMP/toy-2026" Isabelle2026
+      - name: "The chain top and the component, as the release's build job reads them (the same on both lines)"
         id: summary
         run: |
           set -euo pipefail
           cat "$RUNNER_TEMP/toy/summary.json"
+          diff "$RUNNER_TEMP/toy/summary.json" "$RUNNER_TEMP/toy-2026/summary.json"      # accept-2026 reads them too
           echo "top=$(jq -r .top "$RUNNER_TEMP/toy/summary.json")" >> "$GITHUB_OUTPUT"
           echo "component=$(jq -r '.components[0] // ""' "$RUNNER_TEMP/toy/summary.json")" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
         with:
           name: toy-channel
-          path: ${{ runner.temp }}/toy/channel/noarch/*.conda      # only the main channel: local-channel copies every .conda it finds
+          # only the main channels (local-channel copies every .conda it finds): both lines in one channel,
+          # as the online one serves them after the first Isabelle2026 publish; the tool once, both lines
+          # build it under one file name
+          path: |
+            ${{ runner.temp }}/toy/channel/noarch/*.conda
+            ${{ runner.temp }}/toy-2026/channel/noarch/*.conda
+            !${{ runner.temp }}/toy-2026/channel/noarch/isabelle-patch-control-*.conda
           if-no-files-found: error
           retention-days: 14
 
@@ -135,8 +146,25 @@ jobs:
     uses: ./.github/workflows/accept.yml
     with:
       artifact: toy-channel
+      isabelle_version: "2025.2"
       isabelle_build: "2"
       old_build: "1"
+      non_pristine_build: "0"
+      top: ${{ needs.toy-channel.outputs.top }}
+      component: ${{ needs.toy-channel.outputs.component }}
+      other_component: toy-component
+      strict: true
+
+  # the first pristine build of a new line: (e), (h) and (i) are skipped by their empty inputs, nothing else may skip
+  accept-2026:
+    needs: toy-channel
+    uses: ./.github/workflows/accept.yml
+    with:
+      artifact: toy-channel
+      isabelle_version: "2026"
+      isabelle_build: "0"
+      old_build: ""
+      non_pristine_build: ""
       top: ${{ needs.toy-channel.outputs.top }}
       component: ${{ needs.toy-channel.outputs.component }}
       other_component: toy-component
