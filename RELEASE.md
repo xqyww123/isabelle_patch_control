@@ -46,7 +46,10 @@ Before a feature can be released, its package directory holds, committed:
   `<path> <SIGNATURE NAME> <keyword> <name>` (gate (d), `isabelle-patch-control check-signatures`);
   empty if none.
 - `tools/required_sessions.txt`: the sessions to build before a release; at least one, for example
-  `Pure` and `HOL`.
+  `Pure` and `HOL`. The feature's `tools/release_build.sh` builds them.
+- `tools/release_build.sh`, unless the feature has none: how the feature is built before a release, by
+  the author and by the batch release workflow's `sessions` job; what it should do is in the SKILL
+  `isabelle-patch-feature`, 3.4 step 4.
 - `tools/component_files.txt`, only for a package that also ships an Isabelle component (today
   light locale: `ROOT`, `Light_Locale.thy`, `README.md`, `LICENSE`): the files to ship under
   `share/<package>/`; they must be committed. Nothing refuses a package that lacks this file: it
@@ -121,7 +124,6 @@ Inputs:
 | `isabelle_from` | `channel` (the build is on conda.qiyuan.me) or `run:<isabelle-packaging-ci run id>` (rehearsal against that run's `conda-packages` artifact, which must carry `isabelle_build` of the batch's `isabelle` version (`local-channel` refuses otherwise), a build the channel does not serve yet (`release-plan --rehearsal` refuses otherwise)) |
 | `tool_ref` | the tag of this repository to build the tool from (default: the triggering ref) |
 | `features` | the explicit list of feature release tags to publish, bottom first: the first one built on pristine, each next one built on the one before (`check-packages` refuses any other list); no default. Two features built on the same base go into separate batches, each from the bottom up to its own feature; the later batch reuses the lower packages the earlier one published. The tags are all of one release line `<R>` (`release-plan` refuses a batch that spans two). When every feature package is republished for a new `isabelle` build of `<R>`, take, for each feature package with builds of `<R>` on the channel (build string `<build string prefix>_<n>`, for example `Isabelle2025_2_3`), the release tag `<R>/<feature>/<version>` of its highest version among those builds (`git tag --list` would also bring in tags not yet published), and split these tags into batches as above: one batch for each of them that no other is built on, listing it and the features below it, bottom first |
-| `session_build_legs` | legs besides linux-64 that also build the component session |
 | `other_component` | an Isabelle_RPC-style component package on the channel that installs on this `isabelle` version, for the `accept` scenarios that install a second component (plan §6 (c), (e)); default `isabelle-performant-ml`; on an `isabelle` version that no record of it installs on (a new release line before the component is ported), (c) fails at creating its environment: name another component, or give it empty to skip (c) and (e) |
 | `publish` | default `false`; `publish=true` together with `isabelle_from=run:…` fails at once |
 
@@ -131,18 +133,24 @@ file already on the channel or to build a new one and with which build number
 (`tools/common.py: plan_builds`: reuse what is on the channel and is exactly what this batch wants,
 skip served files that are not, build the rest with the next number; a feature package is exactly
 what the batch wants when it pins this batch's `isabelle` build, `common.isabelle_pin`), checks out
-the feature repositories at their tags, renders each recipe (`tools/render-feature-recipe`: version,
-base pin, `isabelle` pin, build string `<build string prefix>_<n>`, hooks, the common README text, the
-component payload if `tools/component_files.txt` exists), builds everything into one local channel,
-checks each `.conda` (hooks present, `.bat` CRLF, `.sh` LF), uploads one artifact
-`feature-packages` containing only `noarch/*.conda`. **roundtrip** (linux-64) installs `isabelle`
+every feature of the batch at its tag, renders each recipe to build (`tools/render-feature-recipe`:
+version, base pin, `isabelle` pin, build string `<build string prefix>_<n>`, hooks, the common README
+text, the component payload if `tools/component_files.txt` exists), builds everything into one local
+channel, checks each `.conda` (hooks present, `.bat` CRLF, `.sh` LF), uploads the artifact
+`feature-packages` containing only `noarch/*.conda`, and uploads the feature repositories as the
+artifact `feature-sources`: each repository once, at the tag of its highest feature in the batch, under
+its directory name in MLML's `contrib/`. **roundtrip** (linux-64) installs `isabelle`
 and the tool into a fresh environment, copies its `isa/` as the pristine tree, installs the top
 feature, and runs `tools/check-roundtrip` against the installed tool and `features.d`. **accept**
 (linux-64, linux-aarch64, osx-arm64, osx-64 on an Intel runner, win-64; defined once in the reusable
 `.github/workflows/accept.yml`, which `tests.yml` also runs on the toy channel) installs the batch
 into a fresh environment and checks, through `status` and the bytes of every touched file, that the batch
 is applied, that removing a package reverses it, and that `--force-reinstall isabelle` re-applies
-it (plan §6). `roundtrip` and `accept` stop the batch. **publish** (only `publish=true`) calls
+it (plan §6). **sessions** (the same five legs) installs the batch into a fresh environment, builds
+HOL, and runs each feature's `tools/release_build.sh` in its package directory, in the order of the
+batch (a feature without one gets only HOL). `roundtrip`, `accept` and `sessions` stop the batch; a
+failure whose fix changes a feature's tagged files costs that feature's version number. **publish**
+(only `publish=true`) calls
 `xqyww123/isabelle-packaging-ci/.github/workflows/publish-conda.yml@main` once with the artifact and
 the two R2 secrets. **smoke** (linux-64, win-64) runs the install command read from the copied
 common README text and installs `qiyuan-dev-patches` on top, then `status`; it runs after

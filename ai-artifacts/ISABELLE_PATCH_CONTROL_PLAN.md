@@ -158,7 +158,8 @@
     `-d` 目录多记一行（该仓库顶层、HEAD、未提交的文件），构建期间这些行变了就不写记录；`make-patches` 的门禁 (e) 对带 `tools/component_files.txt`
     的包只接受"随包发出的文件在记录里无未提交改动、且在记录的 HEAD 与要发布的 commit 之间 `git diff --quiet -- <这些文件>` 为真"的记录
     （按内容比较，light 仓库里无关的 commit 不逼重跑构建）。这修订迁移方案对 tested 记录的定义（glossary 与 `run-tree` 的说明），记为
-    迁移方案 §0 第 32 条。另外不论此条，批量发布 workflow 在 linux-64 上总是构建装好的带组件载荷的 session（评审 C10）。
+    迁移方案 §0 第 32 条。另外不论此条，批量发布 workflow 在 linux-64 上总是构建装好的带组件载荷的 session（评审 C10；已由第 43 条的 `sessions`
+    任务取代）。
     **2026-10-25 措辞收窄**（代码评审一轮 C4、C36，作者自决，第 38 条）："位于 git 工作树里"改为"属于某 git 工作树（未被它忽略：在该目录里
     `git check-ignore -q .` 不成功）"——MLML 忽略 `/contrib`，AFP 检出在那下面，原措辞会把 AFP 目录绑到 MLML 整个仓库上；"未提交的文件"改为
     "已跟踪文件的未提交改动"（`git status --porcelain --untracked-files=no`）——未跟踪文件对门禁 (e) 的安全性没有贡献（随包发出的文件构建时若未跟踪，
@@ -415,11 +416,27 @@
     - 发布工作流的验收（`accept.yml`）在五个平台的全新环境里装好这一批包后，编译 HOL 与这一批每个 feature 的 `tools/required_sessions.txt` 所列
       session，全部通过才发布（"每个平台都通过才发布"这条今天已有）。今天它只在 light_locale 时于 linux-64（另可选几个平台）编一个建在
       Light_Locale 上的小 session，只改 Pure、没有组件的包从没编过 HOL。工作流今天不读 `required_sessions.txt`，要加。（作者估计每个平台多几十
-      分钟、Windows 更慢，未实测；补丁工具仓库 `xqyww123/isabelle_patch_control` 是公开仓库，标准 runner 不收费。）
+      分钟、Windows 更慢，未实测；补丁工具仓库 `xqyww123/isabelle_patch_control` 是公开仓库，标准 runner 不收费。）**这一点已由第 43 条修订，
+      做在决定 11（`sessions` 任务）；它取代第 35 条那个组件小 session。**
     - tested 记录（Git 迁移方案 §0 第 32 条、§5.1 门 (e)、`advance-daily` 的记录检查、glossary 的词条）整个去掉：`run-tree` 写记录的逻辑与
       `-d` 仓库状态那一套（`dir_states`、`repo_state`、`tracked_mtimes`）、`Repo.tested_records`、`make-patches` 的门 (e)（连同组件文件的核对）、
       `advance-daily` 的覆盖检查与 session 参数、相关测试；`run-tree` 只剩"用对的环境在树里跑 Isabelle"。daily 里已有的 9 条 `refs/notes/tested`
       留着不动（GitHub 上同样）。在 Git 迁移的第 (ii) 步一起做；本计划决定 16 里提到门 (e) 的地方随之作废。
+43. **发布前怎么编由各 feature 自己的脚本决定**（2026-11-01，修订第 42 条第一点；设计与三轮评审记录在 `ai-artifacts/RELEASE_SESSION_BUILD_DESIGN.md`）。
+    用户"两类都编"（HOL，加上每个 feature 需要编的）；"只要这个 feature 是我的依赖项我就可以用呀"（一个 feature 可以用它所建在的 feature 的 session）；
+    作者前几稿写死了 `-d` 规则、AFP 输入、Python 场景与玩具 Isabelle，用户："为什么不能有 AFP？…你设置这种局限是不是毫无收益？""需要这个框架吗？"
+    "你不能只假设已开发的 features 啊还有未来的 features 啊""既然是在 Github worker 上执行 isabelle build，那有很多配置方法啊，把这些放开交给具体的
+    feature 仓库去配置不就好了。你最多给一个指导性的原则不好吗？"；"你不能在 SKILL 里假设一个链式的结构啊"（10-30："设计上是可以允许分叉的"）；
+    "确认 C1"（一个 feature 的 session 在建在它上面的 feature 也装上时编）；只交代价给用户批（"我只想知道你给整个流程带来的代价，需要我批准"），
+    代价答复："全都接受"，"A 发布时间不需要考虑"（派发两次照旧），"B 你在 SKILL 里写清就够了。但要允许别人有特殊情况，就是不写构建脚本。你要灵活啊，
+    别死脑筋只想着攻防！…在我们场景里所有一切都是可信任的！"，"C 无所谓"（下载计数器暂停更久），"D 可接受"（每个 feature 一个脚本），"E 可接受"
+    （开新 feature 要在 release-features.yml 的表里加一行）。于是：
+    - `release-features.yml` 新任务 `sessions`（五平台、360 分钟）：在装好整批的新环境里 `isabelle build -b HOL`，再按这一批的顺序在每个 feature
+      的包目录里跑 `tools/release_build.sh`（`ISABELLE` 指环境的 Isabelle）；没有脚本的 feature 只编 HOL、打印一行；`publish` 等它。
+    - build 任务检出这一批每个 feature，每个仓库按这一批里它最高那个 feature 的 tag 打成 tar（`feature-sources`，按 MLML `contrib/` 名并排放，
+      `batch.txt` 记顺序与包目录）；仓库表加第三列 contrib 名、补齐五行。
+    - 编什么、`-d` 给哪些、要不要 AFP，全由脚本定；脚本（不是工作流）读 `required_sessions.txt`。指导原则只写在 SKILL 3.4 第 4 步。
+    - 验收里只认 light_locale 的组件小 session 与输入 `session_build_legs` 删去（第 35 条那一项由此取代）。
 
 作者 2026-10-24 对用户的更正（第二轮评审 C16、C22 与第三轮 C4 查出）：
 - 作者 2026-10-23 04:46 对用户说"问题 10 后半（内置 feature 出新版）消失了"是错的；该问题以问题 3 重新提出，由第 22 条解决。
@@ -1007,10 +1024,11 @@ README 已有 "Working in the Isabelle source repository" 一节。都未提交�
   `isabelle_non_pristine_build` 起、为空就跳过；(h) 的更新留在本线（`conda install --update-all "isabelle==<V>"`，用户 2026-10-31 "赞同 judge"），工具的
   exit 3 建议同改；`--strict` 只放过选项真为空要求的跳过；CI 的玩具渠道同时有 Isabelle2025-2 与 Isabelle2026 两条线】；需要一个对 `isabelle-packaging-ci` 有 `actions:read` 的 token，run token 的权限不能放宽，
   `publish-conda.yml:69-74`）；`tool_ref`（工具仓库的 tag，默认触发的 ref）；`features`（**显式**的发布 tag 列表，没有默认值）；
-  `session_build_legs`（除 linux-64 之外还要跑 session 构建的腿，默认空）；`publish`（默认 false）。**没有** `build_number` 输入（决定 10 推出）、
+  `publish`（默认 false）（`session_build_legs` 已由 §0 第 43 条删去）。**没有** `build_number` 输入（决定 10 推出）、
   **没有** `roundtrip_checked`（(b2) 是 workflow 里的门禁 job）。**第一步就失败**的组合：`publish=true` 与 `isabelle_from=run:…` 同时给
   （不能只靠 `publish` job 的 `if:`，那会静默跳过发布）。
-- 固定表 `feature → (GitHub 仓库, 子目录)` 写在 workflow 里；`isabelle-base-features` 的两个 feature 共用一个仓库、不同子目录。
+- 固定表 `feature → (GitHub 仓库, 子目录, MLML contrib/ 下的目录名)` 写在 workflow 里；`isabelle-base-features` 的几个 feature 共用一个仓库、
+  不同子目录（第三列由 §0 第 43 条加入）。
 - 作业：
   1. **`build`**（`ubuntu-latest`，唯一取 `rattler-build` 的 job，asset `rattler-build-x86_64-unknown-linux-musl` 0.69.1）：读线上
      `noarch/repodata.json`，按决定 10 的 `plan_builds` 决定每个包复用还是新建、新建的 build 号；复用的**直接下载**进本地渠道、不重建
@@ -1023,7 +1041,9 @@ README 已有 "Working in the Isabelle source repository" 一节。都未提交�
      链顶：rev 6 取"任何要发的 (F, v)"，链顶第一次发布在某次重建之后时，下层记录给出的旧构建上根本没有链顶，(h) 的起始环境解不出来（代码评审
      三轮 plan-4 在玩具渠道上复现；第 39 条）。钉死只按 `isabelle_pin` 的写法读（`tools/common.py` 的 `pinned_build` 是它的逆）。不下载 `isabelle` 包、不核对它的
      post-link（第 33 条后它里面没有工具的东西）。理由：验收过的字节就是发布的字节，和 `build.yml` Job F/G/H 一样（§2.3）。rev 3 把构建放进五条腿
-     是错的：五份不同的字节，Windows 腿的 checkout 还会把 `.patch` 变成 CRLF。
+     是错的：五份不同的字节，Windows 腿的 checkout 还会把 `.patch` 变成 CRLF。§0 第 43 条起：按 tag 检出这一批**每个** feature（复用的也检出），
+     只渲染、构建要新建的；每个仓库按这一批里它最高那个 feature 的 tag 打成 tar（`git archive --prefix=<contrib 名>/`），连同按这一批顺序写的
+     `batch.txt`（每行 `<contrib 名>/<包目录>`）上传为第二个 artifact `feature-sources`（30 天）；`feature-packages` 仍是唯一发布的 artifact。
   2. **`roundtrip`**（linux-64，`needs: build`）：用 `accept` 的渠道列表建一个环境，装 `isabelle 2025.2 <b>` 与 `isabelle-patch-control`；
      `cp -a` 它的 `isa/` 作原版树；再往同一环境装链顶 feature 包（精确钉死把整条链拉进来）；跑决定 17 的 `check-roundtrip`，
      `--features-dir $ENV/share/isabelle_patch_control/features.d`、`--tool $ENV/bin/isabelle-patch-control`——测的就是发出去的字节和发出去的工具；
@@ -1037,10 +1057,12 @@ README 已有 "Working in the Isabelle source repository" 一节。都未提交�
      放在 `RUNNER_TEMP` 下、与环境同一个盘，conda 才像用户的单盘机器那样硬链接（§6 (a) 核它）。所有环境用
      `--override-channels -c file://<本地渠道> -c https://conda.qiyuan.me -c conda-forge`（线上渠道没有 python 和 git），channel priority
      **显式设为 flexible**（setup-miniconda 的 `channel-priority: flexible`，不依赖 Miniforge 的默认）：rehearsal 里本地渠道有 `isabelle` 包，
-     (e)、(i) 的 `isabelle=2025.2=0` 要越过它拿到线上的 build 0，strict 下是 LibMambaUnsatisfiableError（代码评审三轮实测；第 39 条）。批次里有带组件载荷的
-     feature 时，**linux-64 总是**跑 §6 (a) 的 session 构建（超时照 `build.yml:498`），`session_build_legs` 只加别的腿（它们的超时照
-     `build.yml:583,677`）。
-  4. **`publish`**（`needs: [build, roundtrip, accept]`，仅 `publish=true`）：对 `feature-packages` **调一次**
+     (e)、(i) 的 `isabelle=2025.2=0` 要越过它拿到线上的 build 0，strict 下是 LibMambaUnsatisfiableError（代码评审三轮实测；第 39 条）。（原先批次里有
+     带组件载荷的 feature 时 linux-64 还跑 §6 (a) 的 session 构建、`session_build_legs` 加别的腿；§0 第 43 条删去，由下一项取代。）
+  3b. **`sessions`**（§0 第 43 条；`needs: build`，与 `accept` 同五条腿，360 分钟）：建一个装好整批的新环境（本地渠道同 `roundtrip`，Windows 上路径用
+     `cygpath -m` 形式），解开 `feature-sources`，`isabelle build -b HOL`，再按 `batch.txt` 的顺序在每个包目录里跑 `tools/release_build.sh`（`ISABELLE`
+     指环境的 Isabelle）；没有脚本的只编 HOL、打印一行；失败时上传源码目录（golden 的 `.actual` 在里面）。编什么由脚本定，指导原则在 SKILL 3.4 第 4 步。
+  4. **`publish`**（`needs: [build, roundtrip, accept, sessions]`，仅 `publish=true`）：对 `feature-packages` **调一次**
      `xqyww123/isabelle-packaging-ci/.github/workflows/publish-conda.yml@main`（第 27 条），显式传 `CONDA_R2_ACCESS_KEY_ID`、
      `CONDA_R2_SECRET_ACCESS_KEY`，不用 `secrets: inherit`。
   5. **`smoke`**（`needs: publish`；linux-64 与 win-64）：第一条命令**从渲染器复制的那份统一 README 文本文件里读出安装命令那一行**（选行的键：
@@ -1260,7 +1282,7 @@ Performant_Isabelle_ML `release-conda.yml:423-425,527-529` 与 auto_sledgehammer
   - `accept`：调发布用的同一个可复用 workflow `accept.yml`（决定 11），五条腿对玩具渠道跑 `tools/accept`（`--isabelle-build 2`、旧构建 1、
     只有本地渠道加 conda-forge），带 `--strict`：任何"跳过"都算 WRONG。`toy-channel` 与 `hooks` 用发布 `build` job 的同一个 rattler-build 安装
     action。
-  玩具渠道上跑不到、只在 §5 第 7 步排练与第 8 步发布里跑的：要真 `isabelle` 包或线上渠道的部分——(a) 的 session 构建、(l) 作数的数字、
+  玩具渠道上跑不到、只在 §5 第 7 步排练与第 8 步发布里跑的：要真 `isabelle` 包或线上渠道的部分——`sessions` 任务（§0 第 43 条）、(l) 作数的数字、
   经 Cygwin 的 `isabelle.bat version -i`、(g) 的 `contrib/cygwin` 残留、(e)/(i) 对线上 build 0、真组件、真重跑 post-link、`build`/`roundtrip`/
   `publish`/`smoke` 本身（玩具渠道不得与线上渠道混用：它的 `isabelle-2025.2-0` 与线上的同名）。留在本地、一次性、不提交的：新 pytest 测试的
   变异检查；钩子层分段规则在归档输出与一个改坏的输出上的验证；`accept` 的两个反对照（"坏工具"渠道下 (a) 必须报 WRONG；去掉 `||` 那句的钩子
@@ -1505,8 +1527,8 @@ situation" 的第一条（第 41 条"赞同 1"）——源码归 conda 管、不
 - 五个平台腿、本地渠道（`isabelle_from=run:…` 时它里面还有那次运行的 `isabelle` 包）加线上的原版构建加 conda-forge（决定 11），每个场景从新环境开始、
   所有该留下的包都显式要求过：
   (a) `conda create -n t isabelle=2025.2=<b> isabelle-light-locale` → `status` 全 applied；conda 输出恰一条 applied 行、一次 heap 提示；
-  `etc/components` 列出 `share/isabelle-light-locale`；linux-64 上（以及 `session_build_legs` 里的腿上）一个 `imports Light_Locale.Light_Locale`
-  并使用 `light_locale` 命令的 theory 能通过检查；工具用的 `git` 是本环境自己的（win-64 上 `Library\bin\git.exe`，其他腿 `bin/git`；决定 15
+  `etc/components` 列出 `share/isabelle-light-locale`（用组件的 session 能编，改由 `sessions` 任务里各 feature 的脚本查，§0 第 43 条）；
+  工具用的 `git` 是本环境自己的（win-64 上 `Library\bin\git.exe`，其他腿 `bin/git`；决定 15
   的 Windows 腿检查，第 39 条）；win-64 上 `core.longpaths` 的探针（决定 15）；
   (b) `conda remove isabelle-light-locale` → light 反打干净、新建文件消失、下层 feature 不动、`etc/components` 不再列它；剪枝三例（决定 15）；
   每例之后跑 (k)；

@@ -45,9 +45,6 @@ on:
         description: "https://conda.qiyuan.me for a batch; empty for the toy channel, which must never meet the online one"
         default: ""
         type: string
-      session_build_legs:
-        default: ""
-        type: string
       strict:
         description: "A skipped scenario is wrong unless an empty input asks for the skip (the toy channels, where every other scenario can run)"
         default: false
@@ -104,15 +101,6 @@ jobs:
           V: ${{ inputs.isabelle_version }}
           B: ${{ inputs.isabelle_build }}
         run: bash tool/tools/local-channel "$RUNNER_TEMP/local" "$V" "$B" "$RUNNER_TEMP/pkgs" "$RUNNER_TEMP/pkgs-ci"
-      - name: "The component session (linux-64 and session_build_legs)"
-        if: inputs.component == 'isabelle-light-locale' && (matrix.leg == 'linux-64' || contains(inputs.session_build_legs, matrix.leg))
-        run: |
-          set -euo pipefail
-          d="$RUNNER_TEMP/session"; mkdir -p "$d"
-          printf '%s\n' 'session Accept_Light_Locale = Light_Locale +' '  theories Accept_Light_Locale' > "$d/ROOT"
-          printf '%s\n' 'theory Accept_Light_Locale' '  imports Light_Locale.Light_Locale' 'begin' \
-            'light_locale Accept = fixes S :: "nat set" assumes "finite S"' 'end' > "$d/Accept_Light_Locale.thy"
-          echo "SESSION_DIR=$d" >> "$GITHUB_ENV"
       - name: "tools/accept"
         env:
           V: ${{ inputs.isabelle_version }}
@@ -136,7 +124,6 @@ jobs:
           args+=(--channel conda-forge)
           [ -z "$COMPONENT" ] || args+=(--component "$COMPONENT")
           [ -z "$OTHER" ] || args+=(--other-component "$OTHER")
-          [ -z "${SESSION_DIR-}" ] || args+=(--session-dir "$SESSION_DIR")
           [ "$STRICT" != true ] || args+=(--strict)
           python -u tool/tools/accept "${args[@]}"
       - name: "Keep conda's output of every command"

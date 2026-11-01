@@ -4,11 +4,14 @@
 # One build makes every package of the batch, the bytes accepted are the bytes published: `build`
 # plans with tools/release-plan (reuse what the channel already serves and is exactly what the batch
 # wants, build the rest with the next number), renders and builds the rest, looks inside every
-# package and uploads ONE artifact, feature-packages, with noarch/*.conda only.  `roundtrip` runs
+# package and uploads feature-packages, noarch/*.conda only, the one artifact published; it also
+# clones every feature of the batch and uploads its repositories as feature-sources.  `roundtrip` runs
 # tools/check-roundtrip against the installed packages and tool; `accept` runs tools/accept (§6) on
 # five legs through accept.yml, the reusable workflow tests.yml also runs on the toy channel;
-# `publish` calls publish-conda.yml once for the whole batch; `smoke` installs from the channel what
-# the README tells users to install.
+# `sessions` installs the batch on the same five legs, builds HOL and runs each feature's
+# tools/release_build.sh (SKILL isabelle-patch-feature, 3.4 step 4); `publish` calls
+# publish-conda.yml once for the whole batch; `smoke` installs from the channel what the README tells
+# users to install.
 #
 # Secrets (set on this repository, never `secrets: inherit`): CONDA_R2_ACCESS_KEY_ID and
 # CONDA_R2_SECRET_ACCESS_KEY (publish-conda.yml); ISABELLE_PATCHED_READ_TOKEN, Contents: read on
@@ -36,16 +39,12 @@ on:
         description: "Every feature release tag of the chain, bottom first, space-separated (lower features included)"
         required: true
         type: string
-      session_build_legs:
-        description: "Legs besides linux-64 that also build the component session (linux-aarch64 osx-arm64 osx-64 win-64)"
-        default: ""
-        type: string
       other_component:
         description: "An Isabelle_RPC-style component package on the channel that installs on this isabelle version; empty skips the scenarios that use it"
         default: isabelle-performant-ml
         type: string
       publish:
-        description: "Publish to conda.qiyuan.me when roundtrip and every accept leg are green"
+        description: "Publish to conda.qiyuan.me when every check job is green"
         type: boolean
         default: false
 
@@ -148,31 +147,48 @@ jobs:
             "$RATTLER_BUILD" build --recipe tool/conda/recipe.yaml --output-dir out -c conda-forge
           [ -f "out/noarch/$file" ] || { echo "::error::the tool package is not the planned out/noarch/$file"; ls out/noarch; exit 1; }
 
-      # The fixed table feature -> (GitHub repository, package directory in it).  local_type_abbrev,
-      # localized_record and local_datatype get their rows when their repositories exist.
-      - name: "Check out, render and build the feature packages to build"
+      # The fixed table feature -> (GitHub repository, package directory in it, the repository's
+      # directory under MLML's contrib/: the feature repositories sit side by side under these names
+      # in feature-sources, as in MLML, so a feature's build script reaches the others the same way).
+      - name: "Check out every feature; render and build the packages to build; the sources of the sessions job"
         env:
           B: ${{ inputs.isabelle_build }}
           TOKEN: ${{ secrets.ISABELLE_PATCHED_READ_TOKEN }}
         run: |
           set -euo pipefail
           declare -A REPO=(
-            [expose_foreign]="xqyww123/isabelle-base-features expose_foreign"
-            [future_assign_interrupt]="xqyww123/isabelle-base-features future_assign_interrupt"
-            [light_locale]="xqyww123/Light_Locale ."
-            [dev_patches]="xqyww123/qiyuan_dev_patches ."
+            [expose_foreign]="xqyww123/isabelle-base-features expose_foreign isabelle-base-features"
+            [future_assign_interrupt]="xqyww123/isabelle-base-features future_assign_interrupt isabelle-base-features"
+            [fast_abbrev_printing]="xqyww123/isabelle-base-features fast_abbrev_printing isabelle-base-features"
+            [light_locale]="xqyww123/Light_Locale . light_locale"
+            [local_type_abbrev]="xqyww123/Local_Type_Abbrev . local_type_abbrev"
+            [localized_record]="xqyww123/Localized_Record . localized_record"
+            [local_datatype]="xqyww123/Local_Datatype . local_datatype"
+            [dot_syntax]="xqyww123/Dot_Syntax . dot_syntax"
+            [dev_patches]="xqyww123/qiyuan_dev_patches . qiyuan_dev_patches"
           )
-          jq -r '.packages[] | select(.tag and .action == "build") | "\(.tag) \(.feature) \(.file) \(.build_number)"' plan.json \
-          | while read -r tag feature file n; do
+          declare -A HIGHEST=()      # contrib name -> its highest feature in the batch (the plan is in batch order)
+          mkdir sources
+          features=$(jq -r '.packages[] | select(.tag) | "\(.tag) \(.feature) \(.file) \(.build_number) \(.action)"' plan.json)
+          while read -r tag feature file n action; do
             [ -n "${REPO[$feature]-}" ] || { echo "::error::no repository for $feature in the table"; exit 1; }
-            read -r repo dir <<< "${REPO[$feature]}"
+            read -r repo dir name <<< "${REPO[$feature]}"
             url="https://github.com/$repo.git"
             [ -z "$TOKEN" ] || url="https://x-access-token:$TOKEN@github.com/$repo.git"
             git -c advice.detachedHead=false clone -q --depth 1 --branch "$tag" "$url" "src/$feature"
+            HIGHEST[$name]=$feature
+            line=$name/$dir
+            echo "${line%/.}" >> sources/batch.txt
+            [ "$action" = build ] || continue
             python3 tool/tools/render-feature-recipe "src/$feature/$dir" --isabelle-build "$B" --build-number "$n" -o "recipes/$feature"
             "$RATTLER_BUILD" build --recipe "recipes/$feature/recipe.yaml" --output-dir out --no-test
             [ -f "out/noarch/$file" ] || { echo "::error::$tag did not build the planned out/noarch/$file"; ls out/noarch; exit 1; }
+          done <<< "$features"
+          # a tar keeps file modes and dotfiles, which an artifact of plain files loses
+          for name in "${!HIGHEST[@]}"; do
+            git -C "src/${HIGHEST[$name]}" archive --prefix="$name/" -o "$PWD/sources/$name.tar" HEAD
           done
+          cat sources/batch.txt
 
       - name: "Look inside every package; the batch is the whole chain (tools/check-packages)"
         id: check
@@ -197,6 +213,13 @@ jobs:
           name: feature-packages
           # **: the path after it is kept, so the artifact is laid out as noarch/*.conda
           path: out/**/*.conda
+          if-no-files-found: error
+          retention-days: 30
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: feature-sources
+          path: sources/
           if-no-files-found: error
           retention-days: 30
 
@@ -276,12 +299,98 @@ jobs:
       component: ${{ needs.build.outputs.component }}
       other_component: ${{ inputs.other_component }}
       online_channel: https://conda.qiyuan.me
-      session_build_legs: ${{ inputs.session_build_legs }}
     secrets:
       PACKAGING_CI_ACTIONS_READ_TOKEN: ${{ secrets.PACKAGING_CI_ACTIONS_READ_TOKEN }}
 
+  sessions:
+    name: "Sessions on ${{ matrix.leg }}: HOL, then every feature's tools/release_build.sh"
+    needs: build
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {leg: linux-64, os: ubuntu-latest}
+          - {leg: linux-aarch64, os: ubuntu-24.04-arm}
+          - {leg: osx-arm64, os: macos-15}
+          - {leg: osx-64, os: macos-15-intel}       # native Intel: under Rosetta Isabelle picks its arm64 programs
+          - {leg: win-64, os: windows-latest}
+    defaults:
+      run:
+        shell: bash -l {0}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tool_ref }}           # empty: the dispatched commit (github.sha), in every job
+          path: tool
+      - uses: actions/download-artifact@v4
+        with:
+          name: feature-packages
+          path: ${{ runner.temp }}/pkgs
+      - name: "The rehearsal's isabelle package"
+        if: needs.build.outputs.run_id != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: conda-packages
+          path: ${{ runner.temp }}/pkgs-ci
+          repository: xqyww123/isabelle-packaging-ci
+          run-id: ${{ needs.build.outputs.run_id }}
+          github-token: ${{ secrets.PACKAGING_CI_ACTIONS_READ_TOKEN }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: feature-sources
+          path: ${{ runner.temp }}/sources
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-version: latest      # conda-forge only: no defaults channel, no Terms of Service prompt
+          auto-activate-base: true
+          activate-environment: ""
+      - name: "Index the local channel"
+        env:
+          V: ${{ needs.build.outputs.isabelle_version }}
+          B: ${{ inputs.isabelle_build }}
+        run: bash tool/tools/local-channel "$RUNNER_TEMP/local" "$V" "$B" "$RUNNER_TEMP/pkgs" "$RUNNER_TEMP/pkgs-ci"
+      - name: "Install isabelle and the batch's top feature"
+        env:
+          V: ${{ needs.build.outputs.isabelle_version }}
+          B: ${{ inputs.isabelle_build }}
+          TOP: ${{ needs.build.outputs.top }}
+        run: |
+          set -euo pipefail
+          t=$RUNNER_TEMP
+          [ "$RUNNER_OS" != Windows ] || t=$(cygpath -m "$RUNNER_TEMP")      # D:/a/_temp: a form both bash and conda read
+          echo "T=$t" >> "$GITHUB_ENV"
+          local_url=$(python -c "import pathlib, sys; print(pathlib.Path(sys.argv[1]).resolve().as_uri())" "$t/local")
+          conda create -q -y -p "$t/env" --override-channels -c "$local_url" -c "$CHANNEL" -c conda-forge "isabelle=$V=$B" "$TOP"
+      - name: "HOL, then every feature's tools/release_build.sh"
+        run: |
+          set -euo pipefail
+          isabelle=$T/env/isa/bin/isabelle
+          [ "$RUNNER_OS" != Windows ] || isabelle+=.bat
+          cd "$T/sources"
+          for f in *.tar; do tar -xf "$f"; done      # relative names: on Windows, GNU tar reads D: as a host name
+          "$isabelle" build -b HOL
+          for d in $(cat batch.txt); do
+            if [ -f "$d/tools/release_build.sh" ]; then
+              echo "::group::$d: tools/release_build.sh"
+              (cd "$d" && ISABELLE=$isabelle bash tools/release_build.sh)
+              echo "::endgroup::"
+            else
+              echo "$d has no tools/release_build.sh: only HOL is built for it"
+            fi
+          done
+      - name: "Keep the sources: what the scripts wrote there (golden .actual files)"
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sessions-sources-${{ matrix.leg }}
+          path: ${{ runner.temp }}/sources
+          if-no-files-found: ignore
+          retention-days: 14
+
   publish:
-    needs: [build, roundtrip, accept]
+    needs: [build, roundtrip, accept, sessions]
     if: inputs.publish
     uses: xqyww123/isabelle-packaging-ci/.github/workflows/publish-conda.yml@main
     with:

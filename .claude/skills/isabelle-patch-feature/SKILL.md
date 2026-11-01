@@ -63,10 +63,9 @@ CLAUDE.md's bans on `git stash`, `git checkout`, `git reset --hard` and `git cle
   `git bisect`. To read another revision use `git show <rev>:<path>` or the stock tree.
 - Never create, delete or rename a branch or a tag, and never add, move or remove a tree, except in
   the steps of section 3 that do so, on the owner's order.
-- Stage only your own changes, by explicit path. Commit only when the owner says so. Never amend,
-  squash or rewrite a commit; never rebase, force-push, cherry-pick, or `git revert -m` a merge.
-- Push when you judge it right; it needs no order from the owner. Push only to `origin`. The tools
-  never push.
+- Stage only your own changes, by explicit path. Commit and push only when the owner says so; the
+  tools never push. Never amend, squash or rewrite a commit; never rebase, force-push, cherry-pick,
+  or `git revert -m` a merge.
 - Take in other work only by: merging your base (3.3); `git pull --ff-only` of your own branch (3.2);
   on a newer line, merging the same feature's branch of the older line (3.9). Never merge a newer
   line into an older one.
@@ -132,7 +131,7 @@ Before you start:
 If a pull says it cannot fast-forward, the branch moved on two machines and only a merge commit can
 join them: ask the owner. While a merge of yours in the private tree (3.3, 3.9) waits for its commit,
 pull the private tree after that commit. `init.sh` moves the stock tree when a merge of the base came
-in. Then edit in the private tree, build on order, commit on order, push when it is right.
+in. Then edit in the private tree, build on order, commit on order, push on order.
 
 ### 3.3 Merging the base
 
@@ -143,7 +142,7 @@ From an empty `git -C <private tree> status`:
 
 (A plain `git merge` would commit at once.) Resolve conflicts by editing; build and test on order;
 commit on order; `bash <feature repository>/init.sh`, which moves the stock tree to the new merge
-base; push when it is right. Until that commit and that `init.sh`, the stock tree stays at the old
+base; push on order. Until that commit and that `init.sh`, the stock tree stays at the old
 merge base, so comparison runs and golden recordings against the new one come after them; if a test
 cannot pass without them, tell the owner.
 
@@ -200,57 +199,72 @@ Any new commit on the branch (a fix for a checklist point or for the build) star
 
    Correct `signature_additions.txt` until `check-signatures` exits 0. Formats: RELEASE.md,
    "First-time setup of a feature repository".
-4. **Build**, on order:
+4. **Build**, on order, by running the feature's build script in its package directory:
 
-       <private tree>/bin/isabelle build -b -d <dir> ... <the sessions of <package dir>/tools/required_sessions.txt>
+       (export ISABELLE=$PWD/<private tree>/bin/isabelle; cd <package dir> && bash tools/release_build.sh)
 
-   with one `-d` for each directory whose ROOT defines a session the build needs: a listed one, or
-   one a listed session names as parent or under `sessions` (light_locale:
-   `-d contrib/light_locale -d contrib/light_locale/tests`).
+   Every feature should have `tools/release_build.sh`; one that needs nothing built beyond HOL may go
+   without it and build the sessions of `tools/required_sessions.txt` by hand. The script runs
+   `"$ISABELLE" build -b ...` on what must build before the release, at least the sessions of
+   `tools/required_sessions.txt` (read the list, skipping its `#` comment lines, rather than repeat
+   it); anything else it needs (the AFP, options) it brings itself. The release workflow (step 8) runs
+   it too, also when a feature built on this one is released, and a failure there stops that release:
+   - Commit the script and every file it reads, on order, before step 5: the workflow takes the
+     feature repository at its release tag, without `.git`, so the script cannot call git.
+   - There the feature repositories sit side by side under their `contrib/` names, as in MLML: reach
+     another one, and give every `-d`, by a relative path such as `../light_locale/tests` (Isabelle
+     refuses Windows paths).
+   - The packages released with it are installed there, so Isabelle already knows every session they
+     ship as an Isabelle component; give a `-d` for such a session only when Isabelle does not know
+     it yet: `dirs=; "$ISABELLE" sessions Light_Locale >/dev/null 2>&1 || dirs="-d ."`.
+   - macOS has Apple's bash 3.2 and BSD tools, Windows Git Bash (`$ISABELLE` is `isabelle.bat`), and
+     the machines are slow (HOL takes about an hour on macOS): give session `timeout`s and ML
+     `Timeout.apply` room, for example with `-o timeout_scale=<n>`.
 5. **Release:** `isabelle-patch-control make-patches -C <private tree> --package <package dir> <F> <v>`.
    Rerun it after a failure.
-6. **Push:** `git -C <private tree> push origin <R>/<F> <R>/<F>/<v>` and
+6. **Push**, on order: `git -C <private tree> push origin <R>/<F> <R>/<F>/<v>` and
    `git -C <feature repository> push origin main <R>/<F>/<v>`.
 7. **The features on this one:** `grep -l 'base = <R>/<F>$' contrib/*/.gitmodules`. Tell the owner;
    each of them merges this release (3.3) and is released in turn, in its own private tree.
 8. **Publishing to the conda channel**, on order. Pause the download counter while you release
    (isabelle-packaging-ci's `RELEASE_CHECKLIST.md`, "The channel host"). Dispatch the patch tool's
-   `release-features.yml` with `publish=false`; when its `roundtrip` job and its five `accept` legs are
-   green, dispatch it again with `publish=true`. Its `features` input lists release tags bottom first,
-   as RELEASE.md, "The batch release workflow", says. When the `isabelle` conda package gets a
-   new build, every feature package is re-released the same way, with the same versions. The inputs,
-   jobs and recovery: RELEASE.md, "The batch release workflow".
+   `release-features.yml` with `publish=false`; when its `roundtrip` job, its five `accept` legs and
+   its five `sessions` legs are green, dispatch it again with `publish=true`. Its `features` input
+   lists release tags, each feature after the one it is built on. When the `isabelle` conda package
+   gets a new build, every feature package is re-released the same way, with the same versions. The
+   inputs, jobs and recovery: RELEASE.md, "The batch release workflow".
 
 ### 3.5 Moving `daily` (on the owner's order)
 
-1. Build the sessions of `contrib/qiyuan_dev_patches/tools/required_sessions.txt` (until that file
-   exists, the owner names them) in dev_patches' private tree, on order, with its HEAD equal to
-   `origin/<R>/dev_patches` and an empty `git status`.
+1. Build dev_patches as in 3.4 step 4 (until it has a `tools/required_sessions.txt`, the sessions the
+   owner names) in its private tree, on order, with its HEAD equal to `origin/<R>/dev_patches` and an
+   empty `git status`.
 2. Notify every session.
 3. `git -C contrib/<R> fetch`, then `git -C contrib/<R> merge --ff-only origin/<R>/dev_patches`.
    On another machine: `git -C contrib/<R> pull --ff-only`.
 4. Rebuild the shared tree's heaps with the owner's authorization.
-5. Push `daily` when it is right: `git -C contrib/<R> push origin <R>/daily`.
+5. Push `daily` on order: `git -C contrib/<R> push origin <R>/daily`.
 
 ### 3.6 Opening a new feature (on the owner's order)
 
 1. The owner creates the GitHub repository; clone it as `<feature repository>`, directly in `contrib/`
    next to `contrib/<R>` (new-tree looks for the shared tree there).
 2. `isabelle-patch-control new-tree --home <feature repository> --base <R>/<base> <R>/<F>`
-3. At once: `git -C <private tree> push -u origin <R>/<F>`. Features opened on this one, and other
-   machines, need the branch on GitHub.
+3. Push the new branch on order: `git -C <private tree> push -u origin <R>/<F>`. Ask for that order
+   at once: features opened on this one, and other machines, need the branch on GitHub.
 4. Add the files the first release needs: `init.sh` (the two lines `#!/usr/bin/env bash` and
    `isabelle-patch-control new-tree "$(dirname "$0")"`), `tools/patched_files.txt` and
    `tools/signature_additions.txt` (made as in 3.4 step 3), `tools/required_sessions.txt`,
-   `tools/component_files.txt` if the package also ships an Isabelle component (light_locale does),
-   `.gitattributes` (`*.patch -text`), a README. Formats: RELEASE.md, "First-time setup of a feature
-   repository".
+   `tools/release_build.sh` (3.4 step 4), `tools/component_files.txt` if the package also ships an
+   Isabelle component (light_locale does), `.gitattributes` (`*.patch -text`), a README. Formats:
+   RELEASE.md, "First-time setup of a feature repository". Add the feature's row to the table in the
+   patch tool's `.github/workflows/release-features.yml`, on order.
 5. The registration commit, on order:
 
        git -C <feature repository> add -- <the new files>
        git -C <feature repository> commit -- .gitmodules worktrees/<R>-<F> worktrees/<R>-<F>-stock <the new files>
 
-   (new-tree has staged `.gitmodules` and the two trees), then push the feature repository.
+   (new-tree has staged `.gitmodules` and the two trees), then push the feature repository on order.
 6. Registering in MLML, on order: `git submodule add -f <url> <feature repository>`.
 
 ### 3.7 Changing a feature's base (on the owner's order)
@@ -263,7 +277,7 @@ then F's base changes from A to N.
    base lacks, F's release patches would carry them, and `make-patches` does not notice: ask the
    owner.
 2. In F's feature repository: `git config -f .gitmodules submodule.worktrees/<R>-<F>.base <R>/<new
-   base>`; commit `.gitmodules` on order; push.
+   base>`; commit `.gitmodules` on order; push on order.
 3. Merge the new base into F's private tree as in 3.3. F can be released only once the last merged
    commit of N is a release of N.
 4. Rerun `<feature repository>/init.sh`: the stock tree moves to the new merge base.
@@ -304,9 +318,10 @@ is new branches in isabelle-patched. Other machines get `contrib/<R2>` by 3.1.
 Each feature's agent does this for its feature, a base before the features on it. Before you start,
 the foundation (3.8) exists, and your base on the new line has its `<R2>` branch on GitHub.
 1. `isabelle-patch-control new-tree --home <feature repository> --base <R2>/<base> <R2>/<F>`
-2. At once: `git -C <feature repository>/worktrees/<R2>-<F> push -u origin <R2>/<F>`.
+2. Push the new branch on order, and ask for that order at once:
+   `git -C <feature repository>/worktrees/<R2>-<F> push -u origin <R2>/<F>`.
 3. The registration commit, on order: `git -C <feature repository> commit -- .gitmodules
-   worktrees/<R2>-<F> worktrees/<R2>-<F>-stock`; push the feature repository.
+   worktrees/<R2>-<F> worktrees/<R2>-<F>-stock`; push the feature repository on order.
 4. Bring your work over; decide with the owner:
    - **Merge the old line's branch.** Wait until, after `git fetch`, `git merge-base --is-ancestor
      origin/<R>/<base> origin/<R2>/<base>` exits 0 (your base's `<R2>` branch has merged its old
@@ -320,7 +335,7 @@ the foundation (3.8) exists, and your base on the new line has its `<R2>` branch
      expose_foreign and future_assign_interrupt). Remove by editing what the new line does not carry;
      `make-patches` does not notice what is left. `git diff --cached --stat` shows what came in.
    - **Or implement the feature afresh** on the new line.
-5. Build and test on order; commit on order; push.
+5. Build and test on order; commit on order; push on order.
 6. Release by 3.4 once your base has released on the new line.
 
 Later fixes of the old line come over by the same merge.

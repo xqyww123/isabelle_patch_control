@@ -17,7 +17,7 @@ scenario can run.
   (a) isabelle and the top: all applied, one applied line, one heap paragraph, no hook failure
       text, the component registered, the tool runs its own environment's git (win-64: with
       core.longpaths in effect), conda hard-linked the tree from the package cache, the environment
-      is of --subdir, --session-dir builds (when given), (k) bytes.
+      is of --subdir, (k) bytes.
   (b) removing the component package (the user directory stays: isabelle was asked for), then the
       three pruning shapes; (k) after each.
   (c) --force-reinstall isabelle with --other-component installed: still all applied, both registered.
@@ -244,9 +244,6 @@ def scenario_a(leg: Leg, a) -> tuple[Path | None, list[tuple[str, Path]]]:
               os.path.samefile(e / untouched, leg.isabelle_dir(e) / untouched))
     if a.subdir:
         leg.check(f"(a) the environment is {a.subdir}", leg.records(e)["python"]["subdir"] == a.subdir)
-    if a.session_dir:
-        r = subprocess.run([str(leg.isabelle(e)), "build", "-D", a.session_dir], capture_output=True, text=True)
-        leg.check("(a) the session using the component builds", r.returncode == 0, r.stdout + r.stderr)
     leg.bytes_ok("after (a)", e, names)
     return e, chain
 
@@ -572,7 +569,6 @@ def cli():
     p.add_argument("--top", required=True, help="the chain top's package")
     p.add_argument("--component", help="the feature package that ships an Isabelle component")
     p.add_argument("--other-component", help="an Isabelle_RPC-style component package for (c) and (e)")
-    p.add_argument("--session-dir", help="a session directory using the component, built in (a)")
     p.add_argument("--old-build", default="", help="the build's isabelle_old_build output; empty skips (h)")
     p.add_argument("--non-pristine-build", default="", help="the build of that version on the online channel that was not "
                    "built from the pristine sources (2025.2: 0, which carries expose_foreign); empty skips (e) and (i)")
