@@ -1,5 +1,10 @@
 # Releasing
 
+How to release a feature is in the SKILL
+[`isabelle-patch-feature`](.claude/skills/isabelle-patch-feature/SKILL.md) (section 3.4); this file
+is its reference: why each step and each checklist point is there, the files of the package
+directory, and the batch release workflow.
+
 **Status today: no feature package can be released.** This repository's batch release workflow
 `.github/workflows/release-features.yml` is written (with the recipe renderer
 `tools/render-feature-recipe` and the tool's own `conda/recipe.yaml`; plan §5 step 5, specified in
@@ -14,148 +19,97 @@ one exact `isabelle` build (`isabelle ==<isabelle version> <build string>`, for 
 `isabelle ==2025.2 1`), so every new `isabelle` build is followed by a re-release of every feature
 package: same version, build number plus one, new pin.
 
-Words used below. The *owner* is the person who owns the Isabelle source repository and the
-channel; every build and release below runs on the owner's order. The *Isabelle source repository*
-is the owner's git repository of Isabelle's sources (`contrib/Isabelle2025-2` and its worktrees
-`contrib/Isabelle2025-2-*` in the owner's checkout; README.md, section *Working in the Isabelle
-source repository*); the commands below run from that checkout's root unless they say otherwise. A
-*feature* is one patch package; its branch `<R>/<feature>` (for example
-`Isabelle2025-2/light_locale`) is checked out in its *private tree* `contrib/<R>-<feature>`, the
-only place where it is edited and built. Its *base* is the branch it is built on; a *release tag*
-`<R>/<feature>/<version>` marks a released commit (versions are positive integers: 1, 2, 3, …), and
-the *base tag* is the base's release tag at the merge base. A release line `<R>` has a *build string
-prefix*, `<R>` with `-` turned into `_` (`Isabelle2025_2`), and an *`isabelle` version*, the prefix
-without `Isabelle` and with `_` turned into `.` (`2025.2`; `Isabelle2026` gives `2026`). A *feature
-repository* is the git repository that holds the feature's *package directory* (`make-patches
---package <dir>`), which holds the `tools/` lists and receives `patches/<R>/` (the patch files, one
-per changed path under a *flat name*: the path with `/` replaced by `-`, plus `.patch`; and
-`provenance.txt`). For light locale the package directory is the repository itself,
-`contrib/light_locale`; `isabelle-base-features` holds two, `expose_foreign/` and
-`future_assign_interrupt/`, so there `--package` names the subdirectory. A *level* is the tool's
-reading of one file on a user's machine: the number of the highest feature whose change the file
-carries (0 for the pristine content); a file that fits two levels reads as `CONFLICT`.
+Words. This file uses the SKILL's words (feature, feature repository, base, base tag, release line,
+shared tree, private tree, stock tree; its section 1), and these. The *owner* is the person who owns
+isabelle-patched, the feature repositories and the channel. A *release tag*
+`<R>/<feature>/<version>` marks a released commit (versions are positive integers: 1, 2, 3, …). A
+release line `<R>` has a *build string prefix*, `<R>` with `-` turned into `_` (`Isabelle2025_2`),
+and an *`isabelle` version*, the prefix without `Isabelle` and with `_` turned into `.` (`2025.2`;
+`Isabelle2026` gives `2026`). The *package directory* (`make-patches --package <dir>`) holds the
+`tools/` lists and receives `patches/<R>/` (the patch files, one per changed path under a *flat
+name*: the path with `/` replaced by `-`, plus `.patch`; and `provenance.txt`). For light locale the
+package directory is the feature repository itself, `contrib/light_locale`;
+`contrib/isabelle-base-features` holds several features, one subdirectory each (`expose_foreign/`,
+`future_assign_interrupt/`, `fast_abbrev_printing/`; its `golden/` is the test harness they share,
+not a package), so there `--package` names the subdirectory. A *level* is the tool's reading of one
+file on a user's machine: the number of the highest feature whose change the file carries (0 for
+the pristine content); a file that fits two levels reads as `CONFLICT`.
 
 ## First-time setup of a feature repository
 
-Before a feature can be released, its repository holds, committed:
+Before a feature can be released, its package directory holds, committed:
 
 - `tools/patched_files.txt`: every path the feature changes, relative to the Isabelle tree, one per
   line in any order (`make-patches` gate (f) requires the set to equal the output of
-  `git diff-tree -r --no-renames --name-only <base tag> <tip>`; generate the file with that command).
+  `git diff-tree -r --no-renames --name-only <base tag> <tip>`, which is how the SKILL makes it).
 - `tools/signature_additions.txt`: every signature entry the feature adds to an `.ML` file, as
-  `<path> <SIGNATURE NAME> <keyword> <name>` (gate (d), `tools/check-signatures`); empty if none.
-- `tools/required_sessions.txt`: the sessions a tested build must have covered (gate (e)); at
-  least one, for example `Pure` and `HOL`.
+  `<path> <SIGNATURE NAME> <keyword> <name>` (gate (d), `isabelle-patch-control check-signatures`);
+  empty if none.
+- `tools/required_sessions.txt`: the sessions to build before a release; at least one, for example
+  `Pure` and `HOL`.
 - `tools/component_files.txt`, only for a package that also ships an Isabelle component (today
   light locale: `ROOT`, `Light_Locale.thy`, `README.md`, `LICENSE`): the files to ship under
-  `share/<package>/`; they must be committed, and the tested build must have used `-d <this
-  repository>` (gate (e)).
-- `.gitattributes` with `*.patch -text`, so that a checkout on Windows does not CRLF-convert the
-  patch files (the tool applies them byte for byte). Never hand-edit `patches/`: `make-patches`
+  `share/<package>/`; they must be committed. Nothing refuses a package that lacks this file: it
+  simply ships no component.
+- `.gitattributes` with `*.patch -text`, in the package directory or at the top of the feature
+  repository (`contrib/isabelle-base-features` has one there for all its features), so that a
+  checkout on Windows does not CRLF-convert the patch files (the tool applies them byte for byte). Never hand-edit `patches/`: `make-patches`
   rewrites it on every release, one patch file per changed path.
 - `README.md`: the feature's own README; the package's `share/doc/<package>/README.md` is this
-  repository's `common-readme.md` followed by it.
+  repository's `common-readme.md` followed by it. It also carries the one line that tells others how
+  to get a release's sources: `git clone --recurse-submodules -b <R>/<feature>/<version> <url of the
+  feature repository>`, or in a clone `git checkout <R>/<feature>/<version>` followed by
+  `git submodule update --init` (a plain checkout leaves the two trees where they were).
 
-A feature's place in the chain is its branch's base in the Isabelle source repository (`new-tree
---base`, owner only); its package depends on the base's package at the exact version of the base
-tag (`==<version> <build string prefix>_*`, for example `==1 Isabelle2025_2_*`), which
-`make-patches` writes into `provenance.txt` as `base_pin` and the recipe renderer computes from
-`base_tag` the same way.
+A feature's base is recorded as `base =` in the feature repository's `.gitmodules` (SKILL, section
+1); its package depends on the base's package at the exact version of the base tag
+(`==<version> <build string prefix>_*`, for example `==1 Isabelle2025_2_*`), which `make-patches`
+writes into `provenance.txt` as `base_pin` and the recipe renderer computes from `base_tag` the same
+way.
 
-## Before releasing a feature (checklist)
+## Why the release steps are in this order
 
-`make-patches` checks the repository-side gates (base tag, own commits, changed files, signatures,
-tested record, round trip through the tool). The points below are about the *content* of the
-feature and are not checked by code: feature packages are trusted, and the person releasing goes
-through this list **before** the build and before `make-patches`: a failed point means a new commit,
-and the tested record must be for that new commit; `make-patches` tags the release, so a failed
-point after it would cost the version number. Every point is a question about
-`git diff-tree -r --no-renames <base tag> HEAD` in the feature's private tree; `<base tag>` is
-`git tag --points-at $(git merge-base <base branch> HEAD) --list '<R>/<base>/*'`, and the diff
-itself is `git diff-tree -r -p --no-renames <base tag> HEAD > /tmp/f.diff`. Each point says why it
-matters and how to check it. Points 1 and 4 are checked by nobody but you; points 2 and 3 are
-checked by `make-patches` for your own feature's files, but not for files that features below yours
-change.
+The checklist comes before the build and before `make-patches`: a failed point means a new commit,
+and `make-patches` tags the release, so a failed point after it would cost the version number.
+`make-patches` checks the repository-side gates (base tag, changed files, signatures, round trip
+through the tool) before it writes anything; then each of its write steps can be rerun after a
+failure, and the tag in the private tree comes last: it marks the release as done. The features
+built on a released feature merge the release and are released in turn, because each package pins
+its base's package at one exact version.
 
-- [ ] **No file is changed back to exactly what it was at some lower feature's release** (this
-      includes deleting a file a lower feature created, or renaming it). The tool tells "which
-      features are applied" from the bytes of each file alone; two points of the chain with
-      identical bytes cannot be told apart. Changing a lower feature's file further, or editing lines
-      a lower feature added, is fine. Check, with `<lower tags>` = every release tag of a feature
-      below yours plus the pristine tag (`git tag --list '<R>/*/*'` lists them all; the ones below
-      yours are the base tag and, recursively, its base's tags, read from each `provenance.txt`):
-      ```
-      for p in $(git diff-tree -r --no-renames --name-only <base tag> HEAD); do
-        for t in <lower tags>; do
-          [ "$(git rev-parse -q --verify "$t:$p" 2>/dev/null)" = "$(git rev-parse HEAD:$p)" ] && echo "$p equals $t"
-        done
-      done
-      for p in $(git diff-tree -r --no-renames --diff-filter=D --name-only <base tag> HEAD); do
-        git cat-file -e "<pristine tag>:$p" 2>/dev/null || echo "$p was created by a lower feature"
-      done
-      ```
-      Both loops must print nothing.
-- [ ] **Every hunk's context occurs only once in the file it changes.** Otherwise the forward patch
-      can apply a second time at another place, the file then fits two levels, and `status` reads
-      `CONFLICT`. Add a few more lines of context that are unique. Check: extract `git archive HEAD`
-      into an empty directory and, in it, run `git apply --check --include=<p> /tmp/f.diff` for every
-      changed path `p`; every run must *fail* (re-applying a hunk to the file that already carries
-      it can only succeed when its context occurs elsewhere). `make-patches` gate (c) refuses this
-      case too (the patches do not reverse cleanly), so for your own feature this point is also
-      checked by code; for files that a feature below yours changes it is not.
-- [ ] **Only regular files, mode `100644` or `100755`; no change of mode alone.** No symbolic links,
-      no gitlinks, no file turned into a directory. The tool replays and installs plain file bytes,
-      taking the mode from the patch header: a symbolic link cannot be installed, and a change of mode
-      alone leaves the bytes the same and reads as `CONFLICT` (the file fits two levels). Check: in
-      `git diff-tree -r --no-renames <base tag> HEAD` every line's two modes are `100644`, `100755`
-      or `000000`, and no line has equal blob hashes. (`make-patches` refuses mode changes, renames
-      and binary diffs when it cuts the patch files.)
-- [ ] **`etc/ISABELLE_ID` is not changed.** The tool locks on it. Check:
-      `git diff-tree -r --name-only <base tag> HEAD | grep -x etc/ISABELLE_ID` prints nothing.
-- [ ] **The longest new patch file's path in the package cache stays within 198 characters** on
-      Windows: `<package>-99-Isabelle2025_2_99/share/isabelle_patch_control/features.d/<feature>/<flat name>.patch`
-      (version 99 and build 99 for the estimate). Check: `git diff-tree -r --name-only --no-renames
-      <base tag> HEAD | sed 's,/,-,g'`, prefix each name with that path and count.
+## Before releasing a feature: why each checklist point matters
 
-The workflow's `roundtrip` and `accept` jobs run `status` on the whole installed chain before
-anything is published, so a file that fits two levels *at the chain top* shows up there as
-`CONFLICT` and stops the batch (the version number is then spent: release v+1); `smoke` repeats the
-check after publishing, on what the README's command installs, and can only report. The states
-*between* two releases of the chain (a user who has only the lower packages installed) are protected
-by this list alone.
+The commands are in the SKILL, section 3.4 step 2. These points are about the *content* of the
+feature and are not checked by code: feature packages are trusted. Points 1 and 4 are checked by
+nobody but you; points 2 and 3 are checked by `make-patches` for your own feature's files, but not
+for files that features below yours change.
 
-## Releasing a feature
+1. **No file is changed back to exactly what it was at some lower feature's release** (this includes
+   deleting a file a lower feature created, or renaming it). The tool tells "which features are
+   applied" from the bytes of each file alone; a file whose bytes with your feature equal its bytes
+   at a lower release fits two levels and reads as `CONFLICT`. Changing a lower feature's file further, or editing lines a lower feature added, is fine.
+2. **Every hunk's context occurs only once in the file it changes.** Otherwise the forward patch can
+   apply a second time at another place, the file then fits two levels, and `status` reads
+   `CONFLICT`. Add a few more lines of context that are unique. `make-patches` gate (c) refuses this
+   case too (the patches do not reverse cleanly), so for your own feature this point is also checked
+   by code; for files that a feature below yours changes it is not.
+3. **Only regular files, mode `100644` or `100755`; no change of mode.** No symbolic links, no
+   gitlinks, no file turned into a directory. The tool replays and installs plain file bytes, taking
+   the mode from the patch header: a symbolic link cannot be installed, and a change of mode alone
+   leaves the bytes the same and reads as `CONFLICT` (the file fits two levels). `make-patches`
+   refuses any change of mode, renames and binary diffs when it cuts the patch files, but only after
+   the build.
+4. **`etc/ISABELLE_ID` is not changed.** The tool locks on it.
+5. **The longest new patch file's path in the package cache stays within 198 characters** on
+   Windows: `<package>-99-<build string prefix>_99/share/isabelle_patch_control/features.d/<feature>/<flat name>.patch`
+   (version 99 and build 99 for the estimate).
 
-Example values, for light locale's first release on Isabelle2025-2: `<R>` = `Isabelle2025-2`,
-feature `light_locale`, base branch `Isabelle2025-2/future_assign_interrupt`, base tag
-`Isabelle2025-2/future_assign_interrupt/1`, version `1`, private tree
-`contrib/Isabelle2025-2-light_locale`, feature repository `contrib/light_locale`.
-
-1. Go through the checklist above on the commit you want to release. A failed point means a new
-   commit on the feature's branch; start again from here.
-2. In the feature's private tree, on the owner's order, build the sessions `tools/required_sessions.txt`
-   names through `run-tree`, which writes the tested record when the build exits 0 with an empty
-   `git status` and an unmoved HEAD (for a package with component files, the build must pass `-d
-   <feature repository>`):
-   ```
-   tools/run-tree contrib/Isabelle2025-2-light_locale build -d contrib/light_locale -b HOL
-   ```
-3. On the owner's order, release: it runs the gates on the tested commit, writes the package's
-   `patches/<R>/` and `provenance.txt`, commits them in the feature repository, tags both
-   repositories (the Isabelle source repository last: that tag marks the release as done), and can be
-   rerun after any failure:
-   ```
-   tools/make-patches -C contrib/Isabelle2025-2-light_locale --package contrib/light_locale light_locale 1
-   ```
-   (`make-patches --help` lists the gates it runs.)
-4. For every feature above this one in the chain: merge the new release into its branch, then do
-   steps 1 to 3 for it with its next version (for example 1 becomes 2).
-5. Push the feature repositories' branches and tags and the Isabelle source repository's tags.
-6. Pause the download counter while you release (isabelle-packaging-ci's `RELEASE_CHECKLIST.md`,
-   "The channel host"). Dispatch `release-features.yml` with `publish=false`, then, when the
-   `roundtrip` job and the five `accept` legs are green, with `publish=true` (see below). Its
-   `features` input names every feature release tag the channel should end up with, lower features
-   included; packages already on the channel with this `isabelle` pin are reused, not rebuilt.
+The workflow's `roundtrip` and `accept` jobs run `status` with the whole batch installed before
+anything is published, so a file that fits two levels with every feature installed shows up there
+as `CONFLICT` and stops the batch (the version number is then spent: release v+1); `smoke` repeats
+the check after publishing, on what the README's command installs, and can only report. The states
+*between* two releases (a user who has only the lower packages installed) are protected by this list
+alone.
 
 ## The batch release workflow
 
@@ -166,7 +120,7 @@ Inputs:
 | `isabelle_build` | the build string of the pristine `isabelle` build to pin (required) |
 | `isabelle_from` | `channel` (the build is on conda.qiyuan.me) or `run:<isabelle-packaging-ci run id>` (rehearsal against that run's `conda-packages` artifact, which must carry `isabelle_build` of the batch's `isabelle` version (`local-channel` refuses otherwise), a build the channel does not serve yet (`release-plan --rehearsal` refuses otherwise)) |
 | `tool_ref` | the tag of this repository to build the tool from (default: the triggering ref) |
-| `features` | the explicit list of feature release tags to publish, the whole chain (lower features included); no default. The tags are all of one release line `<R>` (`release-plan` refuses a batch that spans two). When every feature package is republished for a new `isabelle` build of `<R>`, the list is, for each feature package with builds of `<R>` on the channel (build string `<build string prefix>_<n>`, for example `Isabelle2025_2_3`), the release tag `<R>/<feature>/<version>` of its highest version among those builds (`git tag --list` would also bring in tags not yet published) |
+| `features` | the explicit list of feature release tags to publish, bottom first: the first one built on pristine, each next one built on the one before (`check-packages` refuses any other list); no default. Two features built on the same base go into separate batches, each from the bottom up to its own feature; the later batch reuses the lower packages the earlier one published. The tags are all of one release line `<R>` (`release-plan` refuses a batch that spans two). When every feature package is republished for a new `isabelle` build of `<R>`, take, for each feature package with builds of `<R>` on the channel (build string `<build string prefix>_<n>`, for example `Isabelle2025_2_3`), the release tag `<R>/<feature>/<version>` of its highest version among those builds (`git tag --list` would also bring in tags not yet published), and split these tags into batches as above: one batch for each of them that no other is built on, listing it and the features below it, bottom first |
 | `session_build_legs` | legs besides linux-64 that also build the component session |
 | `other_component` | an Isabelle_RPC-style component package on the channel that installs on this `isabelle` version, for the `accept` scenarios that install a second component (plan §6 (c), (e)); default `isabelle-performant-ml`; on an `isabelle` version that no record of it installs on (a new release line before the component is ported), (c) fails at creating its environment: name another component, or give it empty to skip (c) and (e) |
 | `publish` | default `false`; `publish=true` together with `isabelle_from=run:…` fails at once |
@@ -182,11 +136,11 @@ base pin, `isabelle` pin, build string `<build string prefix>_<n>`, hooks, the c
 component payload if `tools/component_files.txt` exists), builds everything into one local channel,
 checks each `.conda` (hooks present, `.bat` CRLF, `.sh` LF), uploads one artifact
 `feature-packages` containing only `noarch/*.conda`. **roundtrip** (linux-64) installs `isabelle`
-and the tool into a fresh environment, copies its `isa/` as the pristine tree, installs the chain
-top, and runs `tools/check-roundtrip` against the installed tool and `features.d`. **accept**
+and the tool into a fresh environment, copies its `isa/` as the pristine tree, installs the top
+feature, and runs `tools/check-roundtrip` against the installed tool and `features.d`. **accept**
 (linux-64, linux-aarch64, osx-arm64, osx-64 on an Intel runner, win-64; defined once in the reusable
 `.github/workflows/accept.yml`, which `tests.yml` also runs on the toy channel) installs the batch
-into a fresh environment and checks, through `status` and the bytes of every touched file, that the chain
+into a fresh environment and checks, through `status` and the bytes of every touched file, that the batch
 is applied, that removing a package reverses it, and that `--force-reinstall isabelle` re-applies
 it (plan §6). `roundtrip` and `accept` stop the batch. **publish** (only `publish=true`) calls
 `xqyww123/isabelle-packaging-ci/.github/workflows/publish-conda.yml@main` once with the artifact and
@@ -213,7 +167,7 @@ rebuilds the channel index, so two publishes at once would overwrite each other'
 
 - This repository enters `PUBLISH_REPOS` and the channel's `RELEASE_CHECKLIST.md`; two R2 secrets
   (`CONDA_R2_ACCESS_KEY_ID`, `CONDA_R2_SECRET_ACCESS_KEY`), a read-only token
-  `ISABELLE_PATCHED_READ_TOKEN` (Contents: read on `isabelle-patched`, which is private, and on any
-  private feature repository), an `actions:read` token `PACKAGING_CI_ACTIONS_READ_TOKEN` on
+  `ISABELLE_PATCHED_READ_TOKEN` (Contents: read on any private feature repository; `isabelle-patched`
+  itself is public since 2026-10-30), an `actions:read` token `PACKAGING_CI_ACTIONS_READ_TOKEN` on
   `isabelle-packaging-ci` (rehearsals only); `.gitattributes` with `*.sh text eol=lf`, `*.bat -text`,
   `*.patch -text`.

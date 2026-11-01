@@ -17,7 +17,7 @@ TOOL = "isabelle-patch-control"
 APPLY = f"{TOOL} apply"
 NO_FEATURES = "No feature packages are installed, so there is nothing to apply."
 CREATED = "(created by a feature)"
-UPDATE_LINE = ("If you are updating or reinstalling, for example conda update --all: "
+UPDATE_LINE = ("If you are updating or reinstalling, for example conda install --update-all: "
                "when it finishes, run isabelle-patch-control status.")
 
 

@@ -846,7 +846,7 @@ README 已有 "Working in the Isabelle source repository" 一节。都未提交�
   ```sh
   "$PREFIX/bin/python" -I -X utf8 -m isabelle_patch_control conda-hook pre-unlink <feature> \
     || { echo "isabelle-patch-control could not run, so <feature> may still be applied to Isabelle (files under $PREFIX/isa may still carry its changes)."
-         echo "If you are updating or reinstalling, for example conda update --all: when it finishes, run isabelle-patch-control status."
+         echo "If you are updating or reinstalling, for example conda install --update-all: when it finishes, run isabelle-patch-control status."
          echo "If you are removing <feature>, run these three commands in order, adding to the second and third every other feature package this command removed, at the versions conda listed above:"
          echo "  conda install -p '$PREFIX' -c https://conda.qiyuan.me -c conda-forge --force-reinstall isabelle-patch-control"
          echo "  conda install -p '$PREFIX' -c https://conda.qiyuan.me -c conda-forge <包名>=<版本>"
@@ -859,7 +859,7 @@ README 已有 "Working in the Isabelle source repository" 一节。都未提交�
   "%PREFIX%\python.exe" -I -X utf8 -m isabelle_patch_control conda-hook pre-unlink <feature>
   if not errorlevel 1 if errorlevel 0 goto :end
   echo isabelle-patch-control could not run, so <feature> may still be applied to Isabelle (files under "%PREFIX%\isa" may still carry its changes).>> "%PREFIX%\.messages.txt"
-  echo If you are updating or reinstalling, for example conda update --all: when it finishes, run isabelle-patch-control status.>> "%PREFIX%\.messages.txt"
+  echo If you are updating or reinstalling, for example conda install --update-all: when it finishes, run isabelle-patch-control status.>> "%PREFIX%\.messages.txt"
   echo If you are removing <feature>, run these three commands in order, adding to the second and third every other feature package this command removed, at the versions conda listed above:>> "%PREFIX%\.messages.txt"
   echo   conda install -p "%PREFIX%" -c https://conda.qiyuan.me -c conda-forge --force-reinstall isabelle-patch-control>> "%PREFIX%\.messages.txt"
   echo   conda install -p "%PREFIX%" -c https://conda.qiyuan.me -c conda-forge <包名>=<版本>>> "%PREFIX%\.messages.txt"
@@ -913,9 +913,11 @@ README 已有 "Working in the Isabelle source repository" 一节。都未提交�
     情况下、在临时目录里算（每次写树都是单个 `os.replace`/`os.unlink`，不持锁读是安全的）。pre-unlink **永不写** "Retry later"。
   - **卸载/替换规则**（评审五 C1；每段 pre-unlink 文本都遵守）：pre-unlink 分不清自己是在被卸掉还是被替换——conda 先跑完本次命令里全部
     pre-unlink 再卸任何文件，脚本环境里只有 `ROOT_PREFIX`、`PREFIX`、`PKG_NAME`、`PKG_VERSION`、`PKG_BUILDNUM`（`link.py:938-947,1630-1634`）；
-    而 `conda update --all`（README 的更新命令）、换 `isabelle` 构建、feature 出新版、`--force-reinstall` 都是替换：旧包的 pre-unlink 跑过之后，
+    而 `conda update --all`（README 的更新命令；**2026-11-01 起 README 改成留在本线的 `conda install --update-all "isabelle==<version>"`**）、换
+    `isabelle` 构建、feature 出新版、`--force-reinstall` 都是替换：旧包的 pre-unlink 跑过之后，
     新包的 post-link 会把链重新打上。所以每段 pre-unlink 文本都分两支、用读者自己的话标：**先写常见、安全的一支** "If you are updating or
-    reinstalling, for example conda update --all: when it finishes, run isabelle-patch-control status"（不承诺链已重新打上——锁可能仍被占、
+    reinstalling, for example conda install --update-all: when it finishes, run isabelle-patch-control status"（2026-11-01 用户"按你建议来"：例子从
+    `conda update --all` 改成 `conda install --update-all`，与 README 一致；不承诺链已重新打上——锁可能仍被占、
     CONFLICT 可能仍在）；再写 "If you are removing <feature>: …"，凡只对卸载成立的步骤——装回再卸、删新建文件、删 `heaps/`——都在这一支里。
     残留块、两段 `||` 文本、heap 行都按此规则；替换时"该照哪一块做"的问题不存在。
   - **文案的写法**（2026-10-24 三位独立 reader 校读后定，§8）：从读者站的地方写，不从工具内部写——不出现 pre-unlink hook、level、feature
@@ -995,7 +997,14 @@ README 已有 "Working in the Isabelle source repository" 一节。都未提交�
 - 工具仓库 `.github/workflows/release-features.yml`，手动触发，workflow 级 `concurrency` 组（照 `Isabelle_RPC/release-conda.yml:39-41`）。输入：
   `isabelle_build`（原版构建的 build string，必填）；`isabelle_from` = `channel` 或 `run:<isabelle-packaging-ci 的 run id>`（后者下载那次运行的
   `conda-packages` artifact 作为**第二份** artifact 供 `roundtrip` 与 `accept` 并进本地渠道，断言其 build string 等于 `isabelle_build` 且不为 0
-  ——build 0 会遮住线上的 `2025.2-0`、让 §6 (e) 失真；需要一个对 `isabelle-packaging-ci` 有 `actions:read` 的 token，run token 的权限不能放宽，
+  ——build 0 会遮住线上的 `2025.2-0`、让 §6 (e) 失真【**更正 2026-10-31**：这条只对 2025.2 成立，却写成了对所有发行线的规矩——新发行线的第一个
+  原版 build 就是 0。改为：`release-plan --rehearsal` 只在线上渠道已有同版本同 build 的 `isabelle` 时拒绝（同名同版本同 build 的两个包 conda 分不清，
+  这才是原规矩的理由）；版本从批次的 release tag 来，验收的 `isabelle=2025.2=…` 全改成该版本；(e)(i) 用的"非原版 build"（2025.2 是 0）只记在
+  `release-plan` 的一张表里，别的版本为空、(e)(i) 跳过。设计与经过见 Git 迁移方案 §12 执行状态"另记"里 conda 会话那一条。落地（c8b17aa，两轮评审）
+  后本决定其余各处照此读：输入多一个 `other_component`（默认 `isabelle-performant-ml`，它只装在 2025.2 上）；build 任务多输出 `isabelle_version` 与
+  `isabelle_non_pristine_build`；roundtrip 装 `isabelle <isabelle_version> <b>`；§6 的 (a)(h) 等装 `isabelle=<isabelle_version>=…`，(e)(i) 从
+  `isabelle_non_pristine_build` 起、为空就跳过；(h) 的更新留在本线（`conda install --update-all "isabelle==<V>"`，用户 2026-10-31 "赞同 judge"），工具的
+  exit 3 建议同改；`--strict` 只放过选项真为空要求的跳过；CI 的玩具渠道同时有 Isabelle2025-2 与 Isabelle2026 两条线】；需要一个对 `isabelle-packaging-ci` 有 `actions:read` 的 token，run token 的权限不能放宽，
   `publish-conda.yml:69-74`）；`tool_ref`（工具仓库的 tag，默认触发的 ref）；`features`（**显式**的发布 tag 列表，没有默认值）；
   `session_build_legs`（除 linux-64 之外还要跑 session 构建的腿，默认空）；`publish`（默认 false）。**没有** `build_number` 输入（决定 10 推出）、
   **没有** `roundtrip_checked`（(b2) 是 workflow 里的门禁 job）。**第一步就失败**的组合：`publish=true` 与 `isabelle_from=run:…` 同时给
@@ -1367,7 +1376,7 @@ ISABELLE_HOME_USER); Isabelle then uses the original heaps again instead of rebu
 pre-unlink 成功反打、树回到链底时写的是（决定 9 的卸载/替换规则，常见的一支在前）：
 ```
 light_locale was undone; Isabelle sources under $PREFIX/isa are back to the original.
-If you are updating or reinstalling, for example conda update --all: when it finishes, run isabelle-patch-control status.
+If you are updating or reinstalling, for example conda install --update-all: when it finishes, run isabelle-patch-control status.
 If you are removing light_locale: you may delete heaps/ in this environment's Isabelle user directory (isabelle getenv -b ISABELLE_HOME_USER); Isabelle then uses the original heaps again instead of rebuilding them on first use (several minutes).
 ```
 树没回到链底时第一行是 "light_locale was undone in the Isabelle sources under $PREFIX/isa, and with it local_type_abbrev."（上面没有一起反打的
@@ -1422,7 +1431,7 @@ light_locale could not be fully undone (reason: a file was changed by something 
 These files under $PREFIX/isa still carry its changes:
   src/Pure/Isar/locale.ML
   src/Pure/Isar/light_locale_axiom_facts.ML   (created by a feature)
-If you are updating or reinstalling, for example conda update --all: when it finishes, run isabelle-patch-control status.
+If you are updating or reinstalling, for example conda install --update-all: when it finishes, run isabelle-patch-control status.
 If you are removing light_locale, clean up now (nothing will remind you later): first delete every file marked "(created by a feature)" in these messages; then reinstall the isabelle package.
 <重装说明 texts.reinstall_steps 的其余几行，与 CONFLICT 诊断第四到八行逐字相同>
 ```
@@ -1503,6 +1512,7 @@ situation" 的第一条（第 41 条"赞同 1"）——源码归 conda 管、不
   (c) `conda install --force-reinstall isabelle` → 重跑直接依赖者的 post-link：`status` 不变，`etc/components` 仍列出 light 与一个
   Isabelle_RPC 式的组件，conda 输出一次重打记录；
   (d) `conda create --clone` → 新环境 `status` 与原环境相同；
+  【2026-10-31：(e) 与 (i) 用的是该版本在线上的"非原版 build"（2025.2 是 0），别的版本没有就跳过，见决定 11 的更正。】
   (e) 在装着 `isabelle-2025.2-0`（线上）加一个组件包的环境里 `conda install isabelle-light-locale` → solver 把 `isabelle` 升到原版构建、链打好、
   组件登记由新 post-link 重建（第 22、26 条）；
   (f1) 把一个 light 要改的跟踪文件**换成一个新文件**（`sed -i`，或写临时文件再 `mv`；**永不**用 `>`/`>>` 或就地写入的编辑器——那会穿过硬链接写进

@@ -22,7 +22,7 @@ For the developers of feature packages (`<command> --help` says more):
 Exit codes: 0 `status` found everything asked for applied, or `apply`/`unapply` found nothing in its
 way (also: no feature packages installed); 1 something is not applied, a file could not be moved,
 or the lock is busy; 2 no Isabelle tree where expected, git missing or older than 2.43, or a wrong
-command line; 3 refused: the installed packages do not link into one chain,
+command line; 3 refused: the installed packages do not fit together,
 the tree is another build than they were made for, it has a .git, a patch target is a symbolic
 link, a patch file cannot be read, a name is unknown, the prefix is not a conda environment and no
 --features-dir is given, or --features-dir is not a directory.  conda-hook exits 0 whenever it wrote

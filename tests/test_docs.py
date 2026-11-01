@@ -22,7 +22,7 @@ def test_common_text_has_the_install_command_on_its_own_line():
     lines = (ROOT / "common-readme.md").read_text().splitlines()
     installs = [l for l in lines if l.startswith("conda create -n ")]     # the recovery's `conda create -p` is not it
     assert installs == ["conda create -n isabelle -c https://conda.qiyuan.me -c conda-forge isabelle isabelle-light-locale"]
-    assert "conda update --all -c https://conda.qiyuan.me -c conda-forge" in lines
+    assert 'conda install --update-all "isabelle==<version>" -c https://conda.qiyuan.me -c conda-forge' in lines
 
 
 def test_pyproject_names_the_new_tool_only():

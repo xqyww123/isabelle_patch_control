@@ -35,7 +35,8 @@ Every command runs the same sequence; `status` and `--dry-run` stop before the l
    file that does not exist), one `os.replace` into the tree; or one `os.unlink` and the removal of
    emptied directories.
 
-`git` runs in exactly one place, `engine.Git.run`, with a whitelisted environment (`PATH` and, on
+Outside the developer subcommands (`new-tree`, `make-patches`, `check-signatures`, which run git
+through `dev.git`), `git` runs in exactly one place, `engine.Git.run`, with a whitelisted environment (`PATH` and, on
 Windows, `SystemRoot`, `TEMP`, `TMP`), `GIT_CONFIG_NOSYSTEM`, `GIT_CONFIG_GLOBAL=/dev/null`,
 `GIT_ATTR_NOSYSTEM`, `LC_ALL=C`, `GIT_CEILING_DIRECTORIES` at the work directory's parent, and the
 fixed `-c core.autocrlf=false -c core.attributesFile=/dev/null`; umask 022. It never runs in the
@@ -58,37 +59,40 @@ isabelle_patch_control/
   api.py         status, apply, unapply, apply_to, unapply_from; Status, Moves  (never exits)
   texts.py       the plan's texts (§4, decision 9) and every frame a conda hook writes
   cli.py         argument parsing, output, exit codes
+  dev.py         what the developer subcommands share: run/git, merge_base, patch_blocks, ...
+  new_tree.py    new-tree: the trees a feature repository registers, and their build products
+  make_patches.py  make-patches: the release gates, the package files, the commits and tags
+  check_signatures.py  check-signatures: release gate (d)
   conda_hook.py  conda-hook post-link / pre-unlink
   hooks/         the hook texts the feature packages ship: post-link.sh/.bat (the fragment every
                  feature package's post-link copies verbatim), pre-unlink.sh/.bat (templates with
                  <feature>, <package>, <version> for the renderer); the .bat files are CRLF
   AGENTS.md      symlink to ../AGENTS.md; `help` prints it
 common-readme.md the text every feature package's README starts with; README.md embeds it
-tools/           the Isabelle source repository's scripts (make-patches, run-tree, ...) and their
-                 toy tests, see README.md "Working in the Isabelle source repository";
-                 check-roundtrip (plan decision 17: the tool against GNU patch on a copy of a
+tools/           check-roundtrip (plan decision 17: the tool against GNU patch on a copy of a
                  pristine tree); common.py also holds plan_builds, isabelle_pin, feature_pin
                  (decision 10) and conda_archive, and imports package_name from the Python package.
                  The release workflow's pieces (decisions 10, 11, 15, §6): render-feature-recipe
                  (the one recipe of every feature package), release-plan (reuse or build, which
-                 number), check-packages (inside every .conda; the batch is the whole chain),
+                 number), check-packages (inside every .conda; the batch's release tags bottom first, each on the one before),
                  local-channel, check-bytes (the byte oracle), accept (§6 on one leg)
 conda/recipe.yaml the tool's own package (noarch python; TOOL_VERSION and TOOL_BUILD_NUMBER from
                  the workflow)
 .github/workflows/release-features.yml  the batch release (RELEASE.md)
+tools/tests/     the toy runs of the developer subcommands (harness.sh, test_trees.sh,
+                 test_make_patches.sh, test_signatures.sh; run-all.sh runs them), the hook layer
+                 against real conda (test_conda_hooks.sh) and the toy channel (toy-channel.sh)
 tests/           pytest (the tool; also plan_builds, check-roundtrip, the renderer, check-bytes,
                  release-plan and check-packages)
+.claude/skills/isabelle-patch-feature/SKILL.md  how to develop, release and upgrade a feature
 ```
 
 `make-patches` runs gate (c) through `api.apply_to` / `api.unapply_from` on `git archive <base tag>`,
 writes the package only after every gate passed, and then commits by name, checks the commit to tag,
-tags the feature repository and last the Isabelle repository (decision 16 point 8; each step can be
+tags the feature repository and last the private tree (decision 16 point 8; each step can be
 rerun after a failure, and the toy test makes each write fail by holding git's own lock file for it).
-The diff is cut into patch files by `common.patch_blocks`, in bytes, so CRs and non-UTF-8 bytes
-survive; the test fixtures use the same function. `run-tree` records the state of every `-d`
-directory that a git worktree covers (does not ignore) in the tested record (`dir:` lines: top
-directory, HEAD, tracked files with uncommitted changes) and writes no record when a tracked file of
-one of them changed during the build (migration plan §0 item 32).
+The diff is cut into patch files by `dev.patch_blocks`, in bytes, so CRs and non-UTF-8 bytes
+survive; the test fixtures use the same function.
 
 Texts: `texts.py` holds the plan's texts (§4, decision 9) and every frame a conda hook writes; a
 frame quotes the refusal's own sentence, which is written next to its check (features.py, engine.py,
@@ -104,7 +108,7 @@ passing; change the plan's §4 first.
 
 ```
 python -m pytest            # about 35 seconds; needs the zstandard module (the tools also use Python 3.14's own zstd)
-tools/tests/run-all.sh      # the toy runs of tools/ (make-patches, run-tree, ...), about a minute
+tools/tests/run-all.sh      # the toy runs of new-tree, make-patches and check-signatures, about a minute
 RATTLER_BUILD=<rattler-build 0.69.1> CONDA_EXE=<conda> HOOKS_TEST_CACHE=<dir kept between runs> \
   tools/tests/test_conda_hooks.sh [<scratch dir>] [<scenario>...]   # the hook layer, real conda
 ```
@@ -173,19 +177,21 @@ Windows-specific behaviour, which `tools/accept` checks on the win-64 leg: the `
 `.bat` hooks including a negative exit code, the git the tool runs, and `core.longpaths` taking
 effect (a patch and its target over 260 characters apply, and fail with the flag turned off).
 
-A check against the real chain, done once by hand: build `features.d` from the Isabelle source
-repository's branches with `git diff-tree` (read-only), extract the touched files of the official
+A check against the real features, done once by hand: build `features.d` from the feature branches
+of isabelle-patched with `git diff-tree` (read-only), extract the touched files of the official
 tarball, run `status`, `apply`, `status`, `unapply`, and compare every file with
 `git rev-parse <tip>:<path>` / `git hash-object`. All 34 paths of expose_foreign +
 future_assign_interrupt + light_locale round-tripped byte for byte, each command in 0.2 s.
 
 ## Making feature packages
 
-Feature packages are not made here. `tools/make-patches` (run on the owner's order in the Isabelle
-source repository) writes a feature's `patches/<release>/*.patch` and `provenance.txt` into the
-feature's own repository and tags the release; the release workflow of this repository renders a
+Feature packages are not made here. `isabelle-patch-control make-patches` (run on the owner's order
+in a feature's private tree) writes a feature's `patches/<release>/*.patch` and `provenance.txt` into
+the feature's own repository and tags the release; the release workflow of this repository renders a
 conda recipe from them, builds all packages into one channel, runs the acceptance on five
-platforms, and publishes. See [RELEASE.md](RELEASE.md). The workflow, the renderer
+platforms, and publishes. How to do it: the SKILL
+[`isabelle-patch-feature`](.claude/skills/isabelle-patch-feature/SKILL.md); the reference behind it:
+[RELEASE.md](RELEASE.md). The workflow, the renderer
 `tools/render-feature-recipe` and the conda recipe of the tool itself (`conda/recipe.yaml`, noarch
 python, `run: python >=3.12, git >=2.43`) are plan §5 step 5; the hook layer is tested locally
 against the toy channel, the workflow itself runs for the first time in the rehearsal of plan §5

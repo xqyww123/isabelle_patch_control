@@ -35,24 +35,29 @@ editor files and subdirectories without a `provenance.txt` are not looked at. Th
 read from `etc/ISABELLE_IDENTIFIER`, the build from `etc/ISABELLE_ID`; the tool never runs
 `isabelle` and reads neither `ISABELLE_HOME` nor `CONDA_PREFIX`.
 
-## The chain and the levels
+## How the installed features fit together, and the levels
 
-The installed feature directories must link into one chain: the bottom is the tree's own tag
+The installed feature directories must fit together in one order: the bottom is the tree's own tag
 `<release>/pristine/<etc/ISABELLE_ID>`; at each step exactly one directory's `base_tag` equals the
-current tag, and its `release_tag` is the next. A directory whose base is a pristine tag of another
-release or build means the tree is not the build the packages were made for (the `conda install
---update-all` command the message gives fixes it); this is reported first, whatever else is wrong.
-Otherwise a directory whose base no installed directory releases means the chain is broken (install
-matching versions), and the refusal names that directory. Both are exit 3. No feature directory at
-all is `No feature packages are installed, so there is nothing to apply.`, exit 0, whatever the
-build.
+current tag, and its `release_tag` is the next. So every feature package needs its base's package,
+and two feature packages built on the same base do not work together: conda installs both, and the
+tool refuses them. A directory whose
+base is a pristine tag of another release or build means the tree is not the build the packages
+were made for (the `conda install --update-all` command the message gives fixes it); this is
+reported first, whatever else is wrong. Otherwise a directory whose base no installed directory
+releases means that its base is not installed at the version it needs (`… Install matching
+versions of these packages.`, naming the package, its version and the base version it needs); two
+directories made for the same base are refused too (`… cannot be installed together`, naming both;
+AGENTS.md says which one to remove). All three are exit 3. No
+feature directory at all is `No feature packages are installed, so there is nothing to apply.`,
+exit 0, whatever the build.
 
 Every patch file changes exactly one path. A file that features `t1 < … < tm` change is *at level L*
 (L one of `0, t1, …, tm`) when, on a copy of its current content, reversing the patches of the
 features `≤ L` from the top down succeeds step by step, and forward-applying the patches of the
 features `> L` from the bottom up succeeds step by step. Exactly one such L is the file's level; none
-or several is `CONFLICT` (a file that fits two levels is one whose content is the same at two points
-of the chain, which the release checklist in [RELEASE.md](RELEASE.md) rules out for released
+or several is `CONFLICT` (a file that fits two levels is one whose content is the same at two levels,
+which the release checklist in [RELEASE.md](RELEASE.md) rules out for released
 features; a hand edit is the usual cause of fitting none). A file that does not exist is a content
 like any other, so a created file is at its creator's level when present with that content and one
 level lower when absent.
@@ -66,8 +71,8 @@ A feature's state follows from its files: `applied` when all are at or above its
 
 ### `status [--feature F]`
 
-Prints the tree it checked and the number of feature packages, then one sentence per feature in
-chain order, ``Feature `<name>` <phrase>…``, where the phrase gives the state: `is applied`
+Prints the tree it checked and the number of feature packages, then one sentence per feature,
+bottom first, ``Feature `<name>` <phrase>…``, where the phrase gives the state: `is applied`
 (`applied`; it goes on with ``, but `<feature>` below it is not`` when a feature below it is not
 applied), `is not applied yet` (`not-applied`), `is only partly applied` (`half-applied`, with how
 many of its files lack its changes), `cannot be applied` (`CONFLICT`, naming the files). The last
@@ -91,7 +96,7 @@ is refused (exit 3) before the lock is taken and before anything is printed.
 
 ### `apply [--feature F] [--dry-run]`
 
-Moves every file whose level is below its target up to it. The target is the top of the chain, or F,
+Moves every file whose level is below its target up to it. The target is the top feature, or F,
 and always below the lowest feature that owns a CONFLICT file: that feature and the ones above it are
 left alone. A file's own target is the highest level `≤` that target among the levels the file can
 have, so a file no feature in range changes is not touched, and on a fully applied tree nothing
@@ -128,7 +133,7 @@ not listed, and does not change the exit code.
 
 The directory interface: `<dir>` is the tree and `<feature dir>` the only feature; no provenance
 file is read, no lock is taken, the copies live in a temporary directory next to `<dir>`. Used by
-the release gates (`tools/make-patches`) on an archive of the base release. Prints the moves under
+the release gates (`make-patches`) on an archive of the base release. Prints the moves under
 `-v` and the CONFLICT sentence as `apply` does, without the `status` hint, nothing else: success is
 exit 0 and silence (the texts about heaps and the conda environment do not apply to an arbitrary
 directory). Exit 1 on a CONFLICT.
@@ -142,15 +147,15 @@ report only through `$PREFIX/.messages.txt`, which conda prints; every paragraph
 feature packages always exit 0, so conda never rolls a transaction back because of them:
 `conda-hook` exits 0 whenever it wrote its own message, and when it cannot finish (a crash, or
 pre-unlink cannot tell which files still carry the feature's changes) it writes nothing and exits
-non-zero, and the hook script's own fallback line speaks instead. post-link applies the whole chain;
+non-zero, and the hook script's own fallback line speaks instead. post-link applies every installed feature;
 a hook writes only what its run changed, and the complete diagnostic of a CONFLICT is written by the
 hook of the top feature package only (the others write one line); any refusal is reported with the
 command to run afterwards. pre-unlink reverses the feature and everything above it and never
 applies; when some of the feature's files still carry its changes afterwards (a CONFLICT, the lock
 held by another run, a file that could not be written) it writes which files, why, and what to do,
 with separate instructions for the case that the package is being updated and for the case that it
-is being removed. When the installed packages do not link into a chain it reverses nothing and
-writes the chain's message with those same two cases.
+is being removed. When the installed packages do not fit together it reverses nothing and writes
+the refusal's message with those same two cases.
 
 ### `help`
 
@@ -174,7 +179,7 @@ Prints [AGENTS.md](AGENTS.md).
 | 0 | success; `status` with everything applied; no feature packages installed |
 | 1 | `status` found a feature not applied yet, only partly applied, or one that cannot be applied (`not-applied`, `half-applied`, `CONFLICT`), or applied above one that is not; `apply`/`unapply` could not move a file; git could not write a copy; the tree, the lock file or a work directory could not be written or read (a read-only file system, a full disk); the lock was busy for 60 s |
 | 2 | no tree where expected; `git` missing or older than 2.43; a wrong command line |
-| 3 | refused: chain does not link, tree is another build than the packages were made for, tree has a `.git`, a target is a symbolic link, a patch file cannot be read or changes other than one path, a feature directory has no patch file, `--features-dir` does not exist, not a conda environment and no `--features-dir`, unknown `--feature` name |
+| 3 | refused: the installed packages do not fit together, tree is another build than the packages were made for, tree has a `.git`, a target is a symbolic link, a patch file cannot be read or changes other than one path, a feature directory has no patch file, `--features-dir` does not exist, not a conda environment and no `--features-dir`, unknown `--feature` name |
 
 `conda-hook` exits 0 whenever it wrote its own message (see above).
 

@@ -12,7 +12,7 @@
 #
 # Secrets (set on this repository, never `secrets: inherit`): CONDA_R2_ACCESS_KEY_ID and
 # CONDA_R2_SECRET_ACCESS_KEY (publish-conda.yml); ISABELLE_PATCHED_READ_TOKEN, Contents: read on
-# xqyww123/isabelle-patched (private) and on any private feature repository;
+# any private feature repository (xqyww123/isabelle-patched itself is public since 2026-10-30);
 # PACKAGING_CI_ACTIONS_READ_TOKEN, Actions: read on xqyww123/isabelle-packaging-ci (rehearsals only).
 name: release-features
 

@@ -1,6 +1,6 @@
 "$PREFIX/bin/python" -I -X utf8 -m isabelle_patch_control conda-hook pre-unlink <feature> \
   || { echo "isabelle-patch-control could not run, so <feature> may still be applied to Isabelle (files under $PREFIX/isa may still carry its changes)."
-       echo "If you are updating or reinstalling, for example conda update --all: when it finishes, run isabelle-patch-control status."
+       echo "If you are updating or reinstalling, for example conda install --update-all: when it finishes, run isabelle-patch-control status."
        echo "If you are removing <feature>, run these three commands in order, adding to the second and third every other feature package this command removed, at the versions conda listed above:"
        echo "  conda install -p '$PREFIX' -c https://conda.qiyuan.me -c conda-forge --force-reinstall isabelle-patch-control"
        echo "  conda install -p '$PREFIX' -c https://conda.qiyuan.me -c conda-forge <package>=<version>"

@@ -257,7 +257,7 @@ def test_pre_unlink_names_the_features_undone_with_it(prefix):
     prefix.hook("post-link")
     assert prefix.hook("pre-unlink", "f2") == (
         f"isabelle-patch-control: f2 was undone in the Isabelle sources under {prefix.tree}, and with it f3.\n"
-        "If you are updating or reinstalling, for example conda update --all: when it finishes, run isabelle-patch-control status.\n")
+        "If you are updating or reinstalling, for example conda install --update-all: when it finishes, run isabelle-patch-control status.\n")
 
 
 def test_pre_unlink_never_applies(prefix):
@@ -275,7 +275,7 @@ def test_pre_unlink_residue_after_a_conflict(prefix):
         "installed feature packages).\n"
         f"These files under {prefix.tree} still carry its changes:\n"
         "  src/Pure/new1.ML   (created by a feature)\n"
-        "If you are updating or reinstalling, for example conda update --all: when it finishes, run isabelle-patch-control status.\n"
+        "If you are updating or reinstalling, for example conda install --update-all: when it finishes, run isabelle-patch-control status.\n"
         "If you are removing f3, clean up now (nothing will remind you later): first delete every file marked "
         "\"(created by a feature)\" in these messages; then run: isabelle-patch-control apply (if that command is no longer "
         "found, no feature package is left and you are done)\n")
@@ -330,7 +330,7 @@ def test_pre_unlink_residue_deletes_created_files_before_the_reinstall(prefix, m
         "  README\n"
         "  bin/new2   (created by a feature)\n"
         "  src/Pure/b.ML\n"
-        "If you are updating or reinstalling, for example conda update --all: when it finishes, run isabelle-patch-control status.\n"
+        "If you are updating or reinstalling, for example conda install --update-all: when it finishes, run isabelle-patch-control status.\n"
         "If you are removing f2, clean up now (nothing will remind you later): first fix what stopped the write (for "
         "example, free disk space); then delete every file marked \"(created by a feature)\" in these messages; then "
         "reinstall the isabelle package.\n"
