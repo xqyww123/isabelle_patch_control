@@ -265,12 +265,10 @@ def developer(subs):
     s.add_argument("--base", metavar="<R>/<base>", help="the base of the feature --home registers")
     s.add_argument("target", metavar="<feature repo> | <R>/<feature>")
     s = add("make-patches")
-    s.add_argument("-C", metavar="dir", default=".", help="the private tree (pristine: a directory in the repository)")
-    s.add_argument("--package", metavar="dir", type=Path, help="the feature's package directory")
-    s.add_argument("--hg", metavar="repo", type=Path, help="pristine: the Isabelle hg repository")
-    s.add_argument("--tarball", metavar="file", type=Path, help="pristine: the official release tarball")
+    s.add_argument("-C", metavar="dir", default=".", help="the private tree")
+    s.add_argument("--package", metavar="dir", type=Path, required=True, help="the feature's package directory")
     s.add_argument("feature", metavar="[<R>/]<feature>")
-    s.add_argument("version", metavar="<version>|<hg id>")
+    s.add_argument("version", metavar="<version>")
     s = add("check-signatures")
     s.add_argument("-C", metavar="dir", default=".", help="a directory inside the repository")
     s.add_argument("base", metavar="<base rev>")
@@ -288,14 +286,7 @@ def developer_run(args) -> int:
             new_tree.set_up_all(new_tree.feature_home(Path(args.target)))
         return 0
     if args.command == "make-patches":
-        if args.feature.rsplit("/", 1)[-1] == "pristine":
-            if not (args.hg and args.tarball):
-                args.usage.error("pristine needs --hg <repo> and --tarball <file>")
-            make_patches.pristine_release(Path(args.C), args.feature, args.version, args.hg, args.tarball)
-        else:
-            if not args.package:
-                args.usage.error("a feature release needs --package <dir>")
-            make_patches.feature_release(Path(args.C), args.feature, args.version, args.package.resolve())
+        make_patches.feature_release(Path(args.C), args.feature, args.version, args.package.resolve())
         return 0
     heads = listed(args.additions)
     problems = check_signatures.check(Path(args.C), args.base, args.rev, heads, str(args.additions))

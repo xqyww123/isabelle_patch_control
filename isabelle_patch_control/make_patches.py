@@ -1,5 +1,4 @@
 """make-patches [-C <tree>] --package <dir> [<R>/]<feature> <version>
-make-patches [-C <dir>] --hg <repo> --tarball <file> [<R>/]pristine <hg id>
 
 Release of a feature, run on the owner's order in the feature's private tree <tree> (default:
 the current directory).  No network, nothing pushed.
@@ -31,22 +30,17 @@ commit; the commit to tag (the new one, or the one an existing tag of this versi
 checked to hold exactly the generated files, the gates' component files and those gitlinks; the
 annotated tag <R>/<feature>/<version> is created in H; and last in the private tree, whose tag
 marks the release as done.
-
-`pristine <hg id>` runs check (a) only, in the repository of <dir>: the tip of
-<R>/pristine equals the hg tag <R> minus Admin/, README_REPOSITORY and .hg*, plus the five release
-text files of the official tarball and the commit's own .gitignore; then tags <R>/pristine/<hg id>.
 """
 # This docstring is what `make-patches --help` prints.  Gate numbers 7, 0 and the letters (f), (d),
-# (c) are MLML's ai-artifacts/ISABELLE_GIT_MIGRATION_PLAN.md §5.1's, check (a) its §5.2 (gates 1 and
-# (e) are gone since §12's fourth draft, item 6); the write steps are the patch tool plan's decision
-# 16 point 8.
+# (c) are MLML's ai-artifacts/ISABELLE_GIT_MIGRATION_PLAN.md §5.1's (gates 1 and (e) are gone since
+# §12's fourth draft, item 6; check (a) of §5.2 since 2026-11-01: a release line's pristine is the
+# official release committed as it is); the write steps are the patch tool plan's decision 16 point 8.
 from __future__ import annotations
 
 import os
 import re
 import shutil
 import subprocess
-import tarfile
 import tempfile
 from pathlib import Path
 
@@ -57,12 +51,9 @@ from .dev import (build_string_prefix, exists, feature_pin, git, head_branch, li
 from .errors import Refused
 from .new_tree import registrations
 
-# paths git tracks that an hg checkout of the release does not have, or has differently; the CI
-# build assertion hashes its hg checkout minus Admin/, README_REPOSITORY and .hg* and compares
+# paths git tracks that an hg checkout of the release does not have, or has differently
 TREE_HASH_EXCLUDES = [".gitignore", "Isabelle.options", "etc/ISABELLE_ID", "etc/ISABELLE_TAGS",
                       "etc/components", "lib/scripts/Isabelle_app"]
-RELEASE_FILES = ["etc/ISABELLE_ID", "etc/ISABELLE_TAGS", "etc/components", "lib/scripts/Isabelle_app", "Isabelle.options"]
-HG_ONLY = ["Admin", "README_REPOSITORY", ".hg_archival.txt", ".hgignore", ".hgtags"]
 
 
 # --- the repository of a tree
@@ -300,53 +291,3 @@ def feature_release(where: Path, feature: str, version: str, package: Path):
     # write step (f): the private tree's tag, last: its existence marks the release as done
     git("tag", "-a", "-m", f"{branch} release {version}\n\n" + "\n".join(provenance), tag, tip, cwd=tree)
     print(f"release tag {tag} created in {tree} at {tip[:12]}")
-
-
-def pristine_release(where: Path, feature: str, hg_id: str, hg_repo: Path, tarball: Path):
-    tree = toplevel(where)
-    branch = resolve_branch(tree, feature)
-    release = split_branch(branch)[0]
-    if not exists(tree, branch):
-        raise Refused(f"{branch} does not exist")
-    tip = rev(tree, branch)
-    tag = f"{branch}/{hg_id}"
-    node = run(["hg", "-R", hg_repo, "log", "-r", f"tag('{release}')", "--template", "{node|short}"]).stdout.strip()
-    tags = run(["hg", "-R", hg_repo, "log", "-r", f"tag('{release}')", "--template", "{tags}"]).stdout.strip()
-    if node != hg_id:
-        raise Refused(f"hg tag {release} is changeset {node}, not {hg_id}")
-    with tempfile.TemporaryDirectory(prefix="make-patches-") as tmp:
-        expected = Path(tmp) / "expected"
-        run(["hg", "-R", hg_repo, "archive", "-r", f"tag('{release}')", "-t", "files", expected])
-        for p in HG_ONLY:
-            path = expected / p
-            if path.is_dir():
-                shutil.rmtree(path)
-            elif path.exists():
-                path.unlink()
-        with tarfile.open(tarball) as tf:
-            for f in RELEASE_FILES:
-                try:
-                    member = tf.getmember(f"{release}/{f}")
-                except KeyError:
-                    raise Refused(f"{tarball} has no {release}/{f}")
-                (expected / f).parent.mkdir(parents=True, exist_ok=True)
-                (expected / f).write_bytes(tf.extractfile(member).read())
-                os.chmod(expected / f, member.mode & 0o777)   # the executable bit is part of the tree hash
-        (expected / ".gitignore").write_text(run(["git", "show", f"{tip}:.gitignore"], cwd=tree).stdout)
-        for f, want in (("etc/ISABELLE_ID", node), ("etc/ISABELLE_TAGS", tags)):
-            got = (expected / f).read_text().strip()
-            if got != want:
-                raise Refused(f"check (a): the tarball's {f} is {got!r}, hg says {want!r}")
-        got, want = tree_hash_of_dir(tree, expected), git("rev-parse", f"{tip}^{{tree}}", cwd=tree)
-    if got != want:
-        raise Refused(f"check (a): {branch} ({tip[:12]}) has tree {want}; hg tag {release} plus the release files "
-                      f"of {tarball.name} has tree {got}")
-    print(f"check (a): {branch} at {tip[:12]} equals hg {release} ({node}) plus the five release text files "
-          f"of {tarball.name} and .gitignore")
-    if exists(tree, tag):
-        if rev(tree, tag) != tip:
-            raise Refused(f"{tag} exists but points at {rev(tree, tag)[:12]}, not {tip[:12]}")
-        print(f"release tag {tag} already exists at {tip[:12]}")
-    else:
-        git("tag", "-a", "-m", f"{release} pristine, hg changeset {hg_id}", tag, tip, cwd=tree)
-        print(f"release tag {tag} created at {tip[:12]}")

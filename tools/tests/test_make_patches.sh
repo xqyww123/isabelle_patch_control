@@ -5,11 +5,10 @@
 # registers R/feat's two trees (new-tree --home); every gate from both sides; the release commit by
 # path with .gitmodules and the gitlinks, and what an outsider gets from the tag; the write order
 # with a failure after each write (a held git lock file makes the next write fail; files ref
-# backend) and the rerun completing (decision 16 point 8); then check (a) for pristine against a toy
-# hg repository and tarball.  Usage: test_make_patches.sh [<scratch dir>]
+# backend) and the rerun completing (decision 16 point 8).  Usage: test_make_patches.sh [<scratch dir>]
 set -euo pipefail
 . "$(dirname "$0")/harness.sh" "$@"
-cd "$work"; export HGUSER=t
+cd "$work"
 mp() { isabelle-patch-control make-patches "$@"; }
 new_tip() { git -C "$t" commit -q --allow-empty -m "$1"; }   # a new commit on the feature branch, same content
 tags() { git -C "$1" tag -l "R/feat/$2" | wc -l; }
@@ -49,39 +48,21 @@ write_order() {  # write_order <package> <first version>: a failure after each w
   check "Isabelle tag at the tip" "[[ \$(git -C '$t' rev-parse R/feat/$v^{commit}) == \$(git -C '$t' rev-parse R/feat) ]]"
 }
 
-# the toy line: hg "upstream" first, so that pristine can be checked against it
-hg init hgrepo; cd hgrepo; mkdir -p Admin src/Pure etc lib/scripts
-echo admin > Admin/x; echo repo > README_REPOSITORY; echo 'syntax: glob' > .hgignore
-printf 'signature A =\nsig\n  val a: int\nend\n' > src/Pure/a.ML
-printf 'signature B =\nsig\n  val b: int\nend\n' > src/Pure/b.ML
-echo 'init_component built-in' > etc/components; echo x > etc/x; echo script > lib/scripts/getsettings
-printf 'crlf 1\r\ncrlf 2\r\n' > etc/crlf.txt      # a CRLF file, as the release has a few
-hg add -q; hg commit -q -m pristine; hg tag -q R; node=$(hg log -r "tag('R')" --template '{node|short}')
-cd "$work"
-mkdir -p rel/R/etc rel/R/lib/scripts
-echo "$node" > rel/R/etc/ISABELLE_ID; echo R > rel/R/etc/ISABELLE_TAGS
-printf 'init_component built-in\ninit_component bundled\n' > rel/R/etc/components
-echo app > rel/R/lib/scripts/Isabelle_app; echo opts > rel/R/Isabelle.options
-tar -czf R_linux.tar.gz -C rel R
-
-# "GitHub", and the clone where pristine is made and the base is developed
+# "GitHub", and the clone where pristine is made (the release, committed and tagged as the SKILL's
+# 3.8 does) and the base is developed
+id=0123456789ab
 git init -q --bare hub.git; git -C hub.git symbolic-ref HEAD refs/heads/R/pristine
 seed=$work/seed; git init -q -b R/pristine "$seed"; cd "$seed"; git remote add origin "$URL"
-hg -R ../hgrepo archive -r "tag('R')" -t files . >/dev/null; rm -rf Admin README_REPOSITORY .hg_archival.txt .hgignore .hgtags
-cp ../rel/R/etc/ISABELLE_ID ../rel/R/etc/ISABELLE_TAGS ../rel/R/etc/components etc/; cp ../rel/R/lib/scripts/Isabelle_app lib/scripts/; cp ../rel/R/Isabelle.options .
+mkdir -p src/Pure etc lib/scripts
+printf 'signature A =\nsig\n  val a: int\nend\n' > src/Pure/a.ML
+printf 'signature B =\nsig\n  val b: int\nend\n' > src/Pure/b.ML
+echo x > etc/x; echo script > lib/scripts/getsettings
+printf 'crlf 1\r\ncrlf 2\r\n' > etc/crlf.txt      # a CRLF file, as the release has a few
+echo "$id" > etc/ISABELLE_ID; echo R > etc/ISABELLE_TAGS
+printf 'init_component built-in\ninit_component bundled\n' > etc/components
+echo app > lib/scripts/Isabelle_app; echo opts > Isabelle.options
 printf '/contrib\n/heaps\n/lib/classes\n/src/Tools/Demo/lib\n/etc/ISABELLE_IDENTIFIER\n' > .gitignore
-git add -A; git commit -q -m pristine
-
-echo "--- check (a) for pristine"
-expect ok      "pristine equals hg + release files"              -- mp -C . --hg ../hgrepo --tarball ../R_linux.tar.gz R/pristine "$node"
-check "tag R/pristine/$node created" "git rev-parse -q --verify refs/tags/R/pristine/$node >/dev/null"
-expect ok      "check (a) again with the tag in place"           -- mp -C . --hg ../hgrepo --tarball ../R_linux.tar.gz R/pristine "$node"
-saw "says the tag exists" "already exists"
-expect refused "wrong hg id"                                     -- mp -C . --hg ../hgrepo --tarball ../R_linux.tar.gz R/pristine 0000000abcde
-git switch -q -c R/wrong_pristine; echo changed >> src/Pure/b.ML; git commit -q -am oops
-git branch -f R/pristine R/wrong_pristine 2>/dev/null; git switch -q R/pristine; git branch -D -q R/wrong_pristine
-expect refused "a pristine that differs from hg"                 -- mp -C . --hg ../hgrepo --tarball ../R_linux.tar.gz R/pristine "$node"
-git reset -q --hard "R/pristine/$node"   # toy repository only
+git add -A; git commit -q -m pristine; git tag -a -m "R pristine" "R/pristine/$id"
 
 # the base and the feature, on GitHub
 git switch -q -c R/base; echo "(* base fix *)" >> src/Pure/b.ML; git commit -q -am "base fix"; git tag -a -m v1 R/base/1
@@ -90,7 +71,7 @@ printf 'signature A =\nsig\n  val a: int\n  val a2: string -> int\nend\n' > src/
 printf 'signature NEW =\nsig\n  val n: int\nend\n' > src/Pure/new.ML; mkdir -p bin; printf '#!/bin/sh\necho tool\n' > bin/tool; chmod +x bin/tool
 printf 'crlf 1\r\ncrlf 2\r\ncrlf 3\r\n' > etc/crlf.txt; printf 'new\r\n' > etc/new_crlf.txt
 git rm -q etc/x; git add -A; git commit -q -m "feature"
-git push -q origin R/pristine R/base R/feat "R/pristine/$node" R/base/1; git switch -q R/base
+git push -q origin R/pristine R/base R/feat "R/pristine/$id" R/base/1; git switch -q R/base
 base1=$(git rev-parse R/base)
 mkdir -p "$work/contrib/R/contrib" "$work/contrib/R/lib/classes" "$work/contrib/R/src/Tools/Demo/lib"   # the shared tree's products
 
