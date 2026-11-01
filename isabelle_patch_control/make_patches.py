@@ -51,10 +51,6 @@ from .dev import (build_string_prefix, exists, feature_pin, git, head_branch, li
 from .errors import Refused
 from .new_tree import registrations
 
-# paths git tracks that an hg checkout of the release does not have, or has differently
-TREE_HASH_EXCLUDES = [".gitignore", "Isabelle.options", "etc/ISABELLE_ID", "etc/ISABELLE_TAGS",
-                      "etc/components", "lib/scripts/Isabelle_app"]
-
 
 # --- the repository of a tree
 
@@ -76,16 +72,6 @@ def tree_hash_of_dir(tree: Path, directory: Path) -> str:
                "GIT_WORK_TREE": str(directory)}
         run(["git", "add", "-f", "-A", "."], cwd=directory, env=env)
         return run(["git", "write-tree"], cwd=directory, env=env).stdout.strip()
-
-
-def tree_hash_excluding(tree: Path, commit: str, excludes: list[str]) -> str:
-    """The tree hash of commit's tracked files minus the excluded paths."""
-    with tempfile.TemporaryDirectory(prefix="index-") as tmp:
-        env = {**os.environ, "GIT_INDEX_FILE": f"{tmp}/index"}
-        run(["git", "read-tree", commit], cwd=tree, env=env)
-        if excludes:
-            run(["git", "update-index", "--force-remove", "--", *excludes], cwd=tree, env=env)
-        return run(["git", "write-tree"], cwd=tree, env=env).stdout.strip()
 
 
 def archive(tree: Path, commit: str, into: Path):
@@ -195,7 +181,6 @@ def feature_release(where: Path, feature: str, version: str, package: Path):
     print(f"gate (d): signature sections: every entry of {base_tag} unchanged, {len(heads)} additions as listed")
 
     # provenance
-    tree_hash = tree_hash_excluding(tree, tip, TREE_HASH_EXCLUDES)
     build_prefix = build_string_prefix(release)
     base_version = base_tag.rsplit("/", 1)[1]
     base_is_pristine = split_branch(base)[1] == "pristine"
@@ -208,8 +193,6 @@ def feature_release(where: Path, feature: str, version: str, package: Path):
         f"base_package_version: {'none (the base is pristine)' if base_is_pristine else base_version}",
         f"base_pin: {'none' if base_is_pristine else feature_pin(base_version, build_prefix)}",
         f"build_string_prefix: {build_prefix}",
-        f"tree_hash: {tree_hash}",
-        f"tree_hash_excludes: {' '.join(TREE_HASH_EXCLUDES)}",
     ]
 
     with tempfile.TemporaryDirectory(prefix="make-patches-") as tmp:

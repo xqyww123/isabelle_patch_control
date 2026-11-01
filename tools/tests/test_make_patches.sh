@@ -119,7 +119,6 @@ check "the release commit records the gitlinks: the tip and the base tag's commi
 check "the release commit holds the staged registration" '[[ $(git -C "$H" show R/feat/1:.gitmodules | /usr/bin/grep -c "path = worktrees/R-feat") == 2 ]]'
 check "feature repository tag R/feat/1 at its HEAD" '[[ $(git -C "$H" rev-parse R/feat/1^{commit}) == $(git -C "$H" rev-parse HEAD) ]]'
 check "tag R/feat/1 at the tip, in the private tree" '[[ $(git rev-parse R/feat/1^{commit}) == "$tip1" ]]'
-check "tree hash excludes the release files" '[[ $(/usr/bin/grep "^tree_hash: " "$H/patches/R/provenance.txt" | cut -d" " -f2) != $(git rev-parse R/feat^{tree}) ]]'
 git push -q origin R/feat
 git clone -q --recurse-submodules -b R/feat/1 "$H" "$work/outsider" 2>/dev/null
 check "an outsider's clone of the tag has both trees at the release's commits" '[[ $(git -C "$work/outsider/worktrees/R-feat" rev-parse HEAD) == "$tip1" && $(git -C "$work/outsider/worktrees/R-feat-stock" rev-parse HEAD) == "$base1" ]]'

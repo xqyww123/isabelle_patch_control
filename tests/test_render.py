@@ -29,8 +29,7 @@ def git(cwd: Path, *args: str) -> str:
 
 def provenance(feature: str, version: str, base_tag: str) -> str:
     return (f"feature: {R}/{feature}\nrelease_tag: {R}/{feature}/{version}\ncommit: 0\nbase_tag: {base_tag}\n"
-            f"base_commit: 0\nbase_package_version: x\nbase_pin: x\nbuild_string_prefix: Isabelle2025_2\n"
-            f"tree_hash: 0\ntree_hash_excludes: etc/ISABELLE_ID\n")
+            f"base_commit: 0\nbase_package_version: x\nbase_pin: x\nbuild_string_prefix: Isabelle2025_2\n")
 
 
 def package(repo: Path, subdir: str = ".", feature: str = "light_locale", version: str = "2",

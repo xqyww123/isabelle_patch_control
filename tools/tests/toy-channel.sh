@@ -89,7 +89,7 @@ for name, change in FEATURES:
         f"base_commit: {git(src, 'rev-parse', base)}",
         f"base_package_version: {'none (the base is pristine)' if pristine else base_version}",
         f"base_pin: {'none' if pristine else feature_pin(base_version, PREFIX)}",
-        f"build_string_prefix: {PREFIX}", "tree_hash: x", "tree_hash_excludes: etc/ISABELLE_ID"]) + "\n")
+        f"build_string_prefix: {PREFIX}"]) + "\n")
     write(pkg, "README.md", f"# {name}\n\nA toy feature of the hook-layer tests.\n")
     if name == "t_two":
         write(pkg, "tools/component_files.txt", "ROOT\nT_Two.thy\n")

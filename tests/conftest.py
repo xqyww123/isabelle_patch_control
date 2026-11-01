@@ -105,8 +105,7 @@ class Toy:
         (d / "provenance.txt").write_text(
             f"feature: {RELEASE}/{name}\nrelease_tag: {tag}\ncommit: {self.git('rev-parse', tag).strip()}\n"
             f"base_tag: {base}\nbase_commit: {self.git('rev-parse', base).strip()}\n"
-            f"base_package_version: none\nbase_pin: none\nbuild_string_prefix: Isabelle2025_2\n"
-            f"tree_hash: x\ntree_hash_excludes: x\n")
+            f"base_package_version: none\nbase_pin: none\nbuild_string_prefix: Isabelle2025_2\n")
         self.tags.append(tag)
         self.names.append(name)
         return d

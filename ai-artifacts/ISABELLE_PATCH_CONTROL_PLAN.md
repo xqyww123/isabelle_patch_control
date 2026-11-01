@@ -648,7 +648,8 @@ README 已有 "Working in the Isabelle source repository" 一节。都未提交�
 ### 决定 3：来历文件与按精确 tag 的链
 
 - 来历文件 `provenance.txt` 的字段就是 `make-patches` 今天写的：`feature`（`<R>/<feature>`）、`release_tag`、`commit`、`base_tag`、
-  `base_commit`、`base_package_version`、`base_pin`、`build_string_prefix`、`tree_hash`、`tree_hash_excludes`。工具读 `release_tag`、
+  `base_commit`、`base_package_version`、`base_pin`、`build_string_prefix`（`tree_hash`、`tree_hash_excludes` 写到 2026-11-01 为止：没有读者——为之设计的
+  CI 构建断言从未建成；用户"provenance 里那两个没人读的字段可以删除"；已发布的来历文件里仍有这两行，照常可读）。工具读 `release_tag`、
   `base_tag`（feature 名取 `release_tag` 的第二段，版本取第三段），其余给渲染器与人看。（rev 6 还读 `feature` 字段并核它的 `<R>` 等于树的发行版名；
   代码评审一轮 C35 后不读：名字和发行版都已在 `release_tag` 里，发行版不配由下一点的"树不是原版构建"判据统一覆盖。`make-patches` 照旧写
   `feature` 字段，输出格式不变。）
