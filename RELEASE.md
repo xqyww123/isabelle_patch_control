@@ -171,13 +171,13 @@ the artifact exists (30 days).
 
 Before `publish=true`, two conditions: the pristine `isabelle` build is published and green on the
 channel, and no other publish is running in any repository that publishes to the channel
-(`PUBLISH_REPOS` in `isabelle-packaging-ci`'s `RELEASE_CHECKLIST.md` lists them; `publish-conda.yml`
+(`PUBLISH_REPOS` in `isabelle-packaging-ci`'s `scripts/sweep-old-versions.py` lists them; `publish-conda.yml`
 rebuilds the channel index, so two publishes at once would overwrite each other's index).
 
 ## One-time setup still to do (by the owner)
 
-Done 2026-11-02: this repository is in `PUBLISH_REPOS` and the channel's `RELEASE_CHECKLIST.md`;
-`.gitattributes`. Left, because they need values only the owner has:
+Done 2026-11-02: this repository is in `PUBLISH_REPOS` (`isabelle-packaging-ci`'s
+`scripts/sweep-old-versions.py`); `.gitattributes`. Left, because they need values only the owner has:
 
 - the two R2 secrets: `gh secret set CONDA_R2_ACCESS_KEY_ID -R xqyww123/isabelle_patch_control` and
   `gh secret set CONDA_R2_SECRET_ACCESS_KEY -R xqyww123/isabelle_patch_control` (each asks for the

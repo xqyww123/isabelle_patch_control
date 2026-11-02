@@ -2,7 +2,7 @@
 """check-packages [--chain <release tag>... --summary <file>] <file.conda>...
 
 The build job's look inside every package of a batch before anything is installed (patch tool plan
-decision 11; isabelle-packaging-ci RELEASE_CHECKLIST.md §4): every file is noarch; a feature package
+decision 11): every file is noarch; a feature package
 has both hook sets, its .sh hooks are LF, its .bat hooks are CRLF throughout, its feature directory
 holds provenance.txt and patch files, its README is there, and when it ships a component the
 post-link names that component's directory literally; the tool package ships its hook fragments.

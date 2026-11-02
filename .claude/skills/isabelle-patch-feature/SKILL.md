@@ -229,7 +229,7 @@ Any new commit on the branch (a fix for a checklist point or for the build) star
 7. **The features on this one:** `grep -l 'base = <R>/<F>$' contrib/*/.gitmodules`. Tell the owner;
    each of them merges this release (3.3) and is released in turn, in its own private tree.
 8. **Publishing to the conda channel**, on order. Pause the download counter while you release
-   (isabelle-packaging-ci's `RELEASE_CHECKLIST.md`, "The channel host"). Dispatch the patch tool's
+   (the SKILL conda-release, "4. Before: pause the download counter"). Dispatch the patch tool's
    `release-features.yml` with `publish=false`; when its `roundtrip` job, its five `accept` legs and
    its five `sessions` legs are green, dispatch it again with `publish=true`. Its `features` input
    lists release tags, each feature after the one it is built on. When the `isabelle` conda package
