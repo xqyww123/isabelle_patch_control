@@ -174,11 +174,16 @@ channel, and no other publish is running in any repository that publishes to the
 (`PUBLISH_REPOS` in `isabelle-packaging-ci`'s `RELEASE_CHECKLIST.md` lists them; `publish-conda.yml`
 rebuilds the channel index, so two publishes at once would overwrite each other's index).
 
-## One-time setup still to do (on the owner's order)
+## One-time setup still to do (by the owner)
 
-- This repository enters `PUBLISH_REPOS` and the channel's `RELEASE_CHECKLIST.md`; two R2 secrets
-  (`CONDA_R2_ACCESS_KEY_ID`, `CONDA_R2_SECRET_ACCESS_KEY`), a read-only token
-  `ISABELLE_PATCHED_READ_TOKEN` (Contents: read on any private feature repository; `isabelle-patched`
-  itself is public since 2026-10-30), an `actions:read` token `PACKAGING_CI_ACTIONS_READ_TOKEN` on
-  `isabelle-packaging-ci` (rehearsals only); `.gitattributes` with `*.sh text eol=lf`, `*.bat -text`,
-  `*.patch -text`.
+Done 2026-11-02: this repository is in `PUBLISH_REPOS` and the channel's `RELEASE_CHECKLIST.md`;
+`.gitattributes`. Left, because they need values only the owner has:
+
+- the two R2 secrets: `gh secret set CONDA_R2_ACCESS_KEY_ID -R xqyww123/isabelle_patch_control` and
+  `gh secret set CONDA_R2_SECRET_ACCESS_KEY -R xqyww123/isabelle_patch_control` (each asks for the
+  value);
+- for rehearsals only (`isabelle_from=run:…`): a token with Actions: read on
+  `xqyww123/isabelle-packaging-ci`, set as `PACKAGING_CI_ACTIONS_READ_TOKEN` the same way.
+
+`ISABELLE_PATCHED_READ_TOKEN` is needed only when a feature repository is private; every one is
+public today.

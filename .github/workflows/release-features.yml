@@ -166,6 +166,7 @@ jobs:
             [local_datatype]="xqyww123/Local_Datatype . local_datatype"
             [dot_syntax]="xqyww123/Dot_Syntax . dot_syntax"
             [dev_patches]="xqyww123/qiyuan_dev_patches . qiyuan_dev_patches"
+            [bicompose_rename_fix]="xqyww123/Bicompose_Rename_Fix . bicompose_rename_fix"
           )
           declare -A HIGHEST=()      # contrib name -> its highest feature in the batch (the plan is in batch order)
           mkdir sources
