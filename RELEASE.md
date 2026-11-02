@@ -62,11 +62,12 @@ Before a feature can be released, its package directory holds, committed:
   checkout on Windows does not CRLF-convert the patch files (the tool applies them byte for byte). Never hand-edit `patches/`: `make-patches`
   rewrites it on every release, one patch file per changed path.
 - `README.md`: the feature's own README; the package's `share/doc/<package>/README.md` is this
-  repository's `common-readme.md` followed by it. It also carries the one line that tells others how
-  to get a release's sources: `git clone --recurse-submodules -b <R>/<feature>/<m> <url of the
-  feature repository>`, or in a clone `git checkout <R>/<feature>/<m>` followed by
-  `git submodule update --init` (a plain checkout leaves the two trees where they were); `<m>` is the
-  last number of the package's version.
+  repository's `common-readme.md` followed by it. It also says where a release's sources are, by the
+  tag only, no command: "The Isabelle sources a version of this package was made from, with this
+  feature and the ones it is built on, are a tag of isabelle-patched named
+  `<Isabelle release>/<feature>/<m>`, where `<m>` is the last number of the package's version:
+  version `2026.0.1` was made from `Isabelle2026/<feature>/1`." Write `<m>`, not `<version>`:
+  `common-readme.md` uses `<version>` for the `isabelle` version.
 
 A feature's base is recorded as `base =` in the feature repository's `.gitmodules` (SKILL, section
 1); its package depends on the base's package at exactly that package's version (`==<version>`,
