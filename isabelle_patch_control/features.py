@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import names, texts
+from .dev import package_version
 from .errors import ChainBroken, NotFound, Refused
 
 FEATURES_D = Path("share/isabelle_patch_control/features.d")
@@ -52,7 +53,7 @@ class FeatureDir:
     are all the tool reads of it."""
     dir: Path
     name: str           # the <name> of release_tag
-    release_tag: str    # <R>/<name>/<version>
+    release_tag: str    # <R>/<name>/<m>
     base_tag: str       # the tag of the feature below, or <R>/pristine/<id>
 
     @classmethod
@@ -69,7 +70,7 @@ class FeatureDir:
 
     @property
     def version(self) -> str:
-        return self.release_tag.rsplit("/", 1)[1]
+        return package_version(self.release_tag)
 
     @property
     def package(self) -> str:
@@ -115,10 +116,10 @@ def link_chain(tree: Tree, dirs: list[FeatureDir]) -> list[FeatureDir]:
     if left := [fd for fds in by_base.values() for fd in fds]:
         released = {fd.release_tag for fd in dirs}
         fd = min(left, key=lambda d: d.base_tag in released)        # one whose base no directory releases
-        needs_name, needs_version = fd.base_tag.split("/")[1:3]
+        needs_name = fd.base_tag.split("/")[1]       # a release tag: a pristine base was refused or used above
         installed = [d for d in dirs if d.name == needs_name]
         raise ChainBroken(texts.chain_broken(
-            fd.package, fd.version, names.package_name(needs_name), needs_version,
+            fd.package, fd.version, names.package_name(needs_name), package_version(fd.base_tag),
             " and ".join(d.package + " " + d.version for d in installed) or None))
     return chain
 

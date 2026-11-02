@@ -16,7 +16,7 @@ Not for hand use:
 For the developers of feature packages (`<command> --help` says more):
   new-tree      <feature repo>         put the trees that the feature repository registers in place
   new-tree      --home <feature repo> --base <R>/<base> <R>/<feature>     register a feature's two trees
-  make-patches  --package <dir> [<R>/]<feature> <version>                 release a feature, in its private tree
+  make-patches  --package <dir> [<R>/]<feature> <m>                       release a feature, in its private tree
   check-signatures  <base rev> <rev> <additions file>                     release gate (d) on its own
 
 Exit codes: 0 `status` found everything asked for applied, or `apply`/`unapply` found nothing in its
@@ -268,7 +268,7 @@ def developer(subs):
     s.add_argument("-C", metavar="dir", default=".", help="the private tree")
     s.add_argument("--package", metavar="dir", type=Path, required=True, help="the feature's package directory")
     s.add_argument("feature", metavar="[<R>/]<feature>")
-    s.add_argument("version", metavar="<version>")
+    s.add_argument("m", metavar="<m>")
     s = add("check-signatures")
     s.add_argument("-C", metavar="dir", default=".", help="a directory inside the repository")
     s.add_argument("base", metavar="<base rev>")
@@ -286,7 +286,7 @@ def developer_run(args) -> int:
             new_tree.set_up_all(new_tree.feature_home(Path(args.target)))
         return 0
     if args.command == "make-patches":
-        make_patches.feature_release(Path(args.C), args.feature, args.version, args.package.resolve())
+        make_patches.feature_release(Path(args.C), args.feature, args.m, args.package.resolve())
         return 0
     heads = listed(args.additions)
     problems = check_signatures.check(Path(args.C), args.base, args.rev, heads, str(args.additions))

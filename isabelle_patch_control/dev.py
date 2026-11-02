@@ -1,8 +1,9 @@
 """Shared code of the developer subcommands (new-tree, make-patches, check-signatures) and of the
 release scripts in tools/, which import it through tools/common.py: the developer's own git, and
 the formats of a release (patch files cut from a diff, a package's list files, build strings and
-pins); texts takes a release line's isabelle version from it for the update it advises.  Unlike
-engine.Git, git runs here with the user's configuration: it commits, tags and fetches."""
+package versions); texts takes a release line's isabelle version from it for the update it advises,
+and features a package's version.  Unlike engine.Git, git runs here with the user's configuration:
+it commits, tags and fetches."""
 from __future__ import annotations
 
 import re
@@ -120,7 +121,7 @@ def shipped_files(package: Path) -> list[str]:
     return [COMPONENT_LIST, *listed(package / COMPONENT_LIST)] if (package / COMPONENT_LIST).is_file() else []
 
 
-# --- build strings and pins
+# --- build strings and package versions
 
 def build_string_prefix(release: str) -> str:
     """A release line's build string prefix: Isabelle2025-2 -> Isabelle2025_2 (conda refuses '-' there)."""
@@ -132,9 +133,11 @@ def isabelle_version(build_string_prefix: str) -> str:
     return build_string_prefix.removeprefix("Isabelle").replace("_", ".")
 
 
-def feature_pin(version: str, build_string_prefix: str) -> str:
-    """A feature package's pin on the package of its base, e.g. `==1 Isabelle2025_2_*`: that version,
-    any build of the release line.  make-patches writes it as base_pin; the renderer computes it from
-    base_tag (base_pin of releases cut before 2026-10-28 reads `==1=Isabelle2025_2_*`, which conda
-    reads the same way and rattler-build refuses)."""
-    return f"=={version} {build_string_prefix}_*"
+def package_version(release_tag: str) -> str:
+    """The version of the package built from a release tag <R>/<feature>/<m>: the release line's
+    isabelle version with a second number (0 when it has none), then m.  Isabelle2026/light_locale/1 ->
+    2026.0.1, Isabelle2025-2/light_locale/1 -> 2025.2.1: three numbers, so lines never share a version
+    and a newer line's are higher."""
+    release, _, m = release_tag.split("/")
+    y, _, k = isabelle_version(build_string_prefix(release)).partition(".")
+    return f"{y}.{k or 0}.{m}"

@@ -70,8 +70,8 @@ isabelle_patch_control/
   AGENTS.md      symlink to ../AGENTS.md; `help` prints it
 common-readme.md the text every feature package's README starts with; README.md embeds it
 tools/           check-roundtrip (plan decision 17: the tool against GNU patch on a copy of a
-                 pristine tree); common.py also holds plan_builds, isabelle_pin, feature_pin
-                 (decision 10) and conda_archive, and imports package_name from the Python package.
+                 pristine tree); common.py also holds plan_builds, isabelle_pin (decision 10) and
+                 conda_archive, and imports package_name and package_version from the Python package.
                  The release workflow's pieces (decisions 10, 11, 15, §6): render-feature-recipe
                  (the one recipe of every feature package), release-plan (reuse or build, which
                  number), check-packages (inside every .conda; the batch's release tags bottom first, each on the one before),
@@ -195,6 +195,7 @@ platforms, and publishes. How to do it: the SKILL
 `tools/render-feature-recipe` and the conda recipe of the tool itself (`conda/recipe.yaml`, noarch
 python, `run: python >=3.12, git >=2.43`) are plan §5 step 5; the hook layer is tested locally
 against the toy channel, the workflow itself runs for the first time in the rehearsal of plan §5
-step 7. The pins are written the way rattler-build accepts them, `isabelle ==2025.2 <b>` and
-`<base package> ==<version> Isabelle2025_2_*` (`common.isabelle_pin`, `common.feature_pin`); conda
-reads them exactly as the older `isabelle 2025.2 <b>` and `==1=Isabelle2025_2_*`.
+step 7. The pins are written the way rattler-build accepts them, `isabelle ==2025.2 <b>`
+(`common.isabelle_pin`) and `<base package> ==<version>`, the base's package version
+(`dev.package_version`, computed by the renderer); conda reads the first exactly as the older
+`isabelle 2025.2 <b>`.

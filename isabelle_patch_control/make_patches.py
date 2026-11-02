@@ -1,7 +1,7 @@
-"""make-patches [-C <tree>] --package <dir> [<R>/]<feature> <version>
+"""make-patches [-C <tree>] --package <dir> [<R>/]<feature> <m>
 
-Release of a feature, run on the owner's order in the feature's private tree <tree> (default:
-the current directory).  No network, nothing pushed.
+Release <m> (1, 2, 3, ...) of a feature, run on the owner's order in the feature's private tree
+<tree> (default: the current directory).  No network, nothing pushed.
 <R> defaults to the release line of the branch checked out there.  The package directory <dir>
 lies in the feature repository H that registers the tree (new-tree --home) and holds
 tools/patched_files.txt, tools/signature_additions.txt and tools/required_sessions.txt (see
@@ -26,9 +26,9 @@ Gates, in order, all before anything is written or tagged:
 Then, each step repeatable after a failure: the package's
 patches/<R>/ receives the files and the provenance file; H's release commit is made by path, of
 those files, .gitmodules and the two trees, whose gitlinks record the tip and the base tag's
-commit; the commit to tag (the new one, or the one an existing tag of this version points at) is
+commit; the commit to tag (the new one, or the one an existing tag of this number points at) is
 checked to hold exactly the generated files, the gates' component files and those gitlinks; the
-annotated tag <R>/<feature>/<version> is created in H; and last in the private tree, whose tag
+annotated tag <R>/<feature>/<m> is created in H; and last in the private tree, whose tag
 marks the release as done.
 """
 # This docstring is what `make-patches --help` prints.  Gate numbers 7, 0 and the letters (f), (d),
@@ -46,8 +46,8 @@ from pathlib import Path
 
 from . import check_signatures
 from .api import apply_to, unapply_from
-from .dev import (build_string_prefix, exists, feature_pin, git, head_branch, listed, patch_blocks, rev, run,
-                  shipped_files, split_branch, status, tags_at, toplevel)
+from .dev import (build_string_prefix, exists, git, head_branch, listed, patch_blocks, rev, run, shipped_files,
+                  split_branch, status, tags_at, toplevel)
 from .errors import Refused
 from .new_tree import registrations
 
@@ -115,13 +115,13 @@ def committed_files(top: Path, commit: str, directory: Path) -> dict[str, str]:
     return out
 
 
-def feature_release(where: Path, feature: str, version: str, package: Path):
+def feature_release(where: Path, feature: str, m: str, package: Path):
     tree = toplevel(where)
     branch = resolve_branch(tree, feature)
     release, name = split_branch(branch)
-    if not re.fullmatch(r"[1-9][0-9]*", version):
-        raise Refused(f"the version is a positive integer, not {version!r}")
-    tag = f"{branch}/{version}"
+    if not re.fullmatch(r"[1-9][0-9]*", m):
+        raise Refused(f"the number at the end of the release tag is a positive integer (1, 2, 3, ...), not {m!r}")
+    tag = f"{branch}/{m}"
 
     # 7. the feature repository and the two trees
     top = toplevel(package)
@@ -143,7 +143,7 @@ def feature_release(where: Path, feature: str, version: str, package: Path):
     earlier = tags_at(tree, tip, f"{branch}/*")
     if earlier:
         raise Refused(f"{tip[:12]} already carries release tag {' '.join(earlier)}: commit first (an empty commit "
-                      "will do) to release this commit's content again under a new version")
+                      "will do) to release this commit's content again under a new number")
     H = git("rev-parse", "HEAD", cwd=top)
     shipped_rel = [os.path.relpath(p, top) for p in shipped]
 
@@ -181,18 +181,13 @@ def feature_release(where: Path, feature: str, version: str, package: Path):
     print(f"gate (d): signature sections: every entry of {base_tag} unchanged, {len(heads)} additions as listed")
 
     # provenance
-    build_prefix = build_string_prefix(release)
-    base_version = base_tag.rsplit("/", 1)[1]
-    base_is_pristine = split_branch(base)[1] == "pristine"
     provenance = [
         f"feature: {branch}",
         f"release_tag: {tag}",
         f"commit: {tip}",
         f"base_tag: {base_tag}",
         f"base_commit: {base_commit}",
-        f"base_package_version: {'none (the base is pristine)' if base_is_pristine else base_version}",
-        f"base_pin: {'none' if base_is_pristine else feature_pin(base_version, build_prefix)}",
-        f"build_string_prefix: {build_prefix}",
+        f"build_string_prefix: {build_string_prefix(release)}",
     ]
 
     with tempfile.TemporaryDirectory(prefix="make-patches-") as tmp:
@@ -244,7 +239,7 @@ def feature_release(where: Path, feature: str, version: str, package: Path):
             run(["git", "rm", "--cached", "-q", "--ignore-unmatch", "--", *removed], cwd=top)
         L = [*paths, *removed, ".gitmodules", *trees]
         if run(["git", "diff", "--cached", "--quiet", "--ignore-submodules=none", "--", *L], cwd=top, check=False).returncode:
-            run(["git", "commit", "-q", "-m", f"{name} release {version}: patches/{release}", "--", *L], cwd=top)
+            run(["git", "commit", "-q", "-m", f"{name} release {m}: patches/{release}", "--", *L], cwd=top)
             print(f"committed patches/{release} and the two trees' gitlinks in {top}")
         else:
             print(f"patches/{release} and the gitlinks already committed in {top}")
@@ -262,15 +257,15 @@ def feature_release(where: Path, feature: str, version: str, package: Path):
         if differing:
             where = f"release tag {tag} already exists at {commit[:12]} and" if tag_exists else f"commit {commit[:12]}"
             raise Refused(f"{where} does not hold the generated files: {' '.join(differing)}"
-                          + (f"\nthis version number is spent: release {int(version) + 1}" if tag_exists else ""))
+                          + (f"\nthis number is spent: release {int(m) + 1}" if tag_exists else ""))
 
         # write step (e): the feature repository's tag
         if not tag_exists:
-            git("tag", "-a", "-m", f"{branch} release {version}\n\n" + "\n".join(provenance), tag, commit, cwd=top)
+            git("tag", "-a", "-m", f"{branch} release {m}\n\n" + "\n".join(provenance), tag, commit, cwd=top)
             print(f"release tag {tag} created in {top} at {commit[:12]}")
         else:
             print(f"release tag {tag} already in {top} at {commit[:12]}")
 
     # write step (f): the private tree's tag, last: its existence marks the release as done
-    git("tag", "-a", "-m", f"{branch} release {version}\n\n" + "\n".join(provenance), tag, tip, cwd=tree)
+    git("tag", "-a", "-m", f"{branch} release {m}\n\n" + "\n".join(provenance), tag, tip, cwd=tree)
     print(f"release tag {tag} created in {tree} at {tip[:12]}")

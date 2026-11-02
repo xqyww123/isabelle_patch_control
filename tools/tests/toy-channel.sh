@@ -35,7 +35,7 @@ import os, subprocess, sys
 from pathlib import Path
 W, tools, R = Path(sys.argv[1]), sys.argv[2], sys.argv[3]
 sys.path.insert(0, tools); sys.path.insert(0, str(Path(tools).parent))
-from common import build_string_prefix, feature_pin, patch_blocks
+from common import build_string_prefix, patch_blocks
 
 PRISTINE, PREFIX = "89701cf1768e", build_string_prefix(R)
 TREE = {
@@ -82,14 +82,9 @@ for name, change in FEATURES:
                           capture_output=True).stdout
     for file, block in patch_blocks(diff).items():
         (d / file).write_bytes(block)
-    _, base_name, base_version = base.split("/")
-    pristine = base_name == "pristine"
     (d / "provenance.txt").write_text("\n".join([
         f"feature: {R}/{name}", f"release_tag: {tag}", f"commit: {git(src, 'rev-parse', tag)}", f"base_tag: {base}",
-        f"base_commit: {git(src, 'rev-parse', base)}",
-        f"base_package_version: {'none (the base is pristine)' if pristine else base_version}",
-        f"base_pin: {'none' if pristine else feature_pin(base_version, PREFIX)}",
-        f"build_string_prefix: {PREFIX}"]) + "\n")
+        f"base_commit: {git(src, 'rev-parse', base)}", f"build_string_prefix: {PREFIX}"]) + "\n")
     write(pkg, "README.md", f"# {name}\n\nA toy feature of the hook-layer tests.\n")
     if name == "t_two":
         write(pkg, "tools/component_files.txt", "ROOT\nT_Two.thy\n")
@@ -257,7 +252,7 @@ EOF
   python3 -I - "$NORE" <<'PY'                       # the indexing step must have seen the copied files
 import json, sys
 names = set(json.load(open(f"{sys.argv[1]}/noarch/repodata.json"))["packages.conda"])
-assert {"isabelle-2025.2-2.conda", "isabelle-t-three-1-Isabelle2025_2_0.conda"} <= names, sorted(names)
+assert {"isabelle-2025.2-2.conda", "isabelle-t-three-2025.2.1-Isabelle2025_2_0.conda"} <= names, sorted(names)
 assert not any(n.endswith("Isabelle2025_2_1.conda") for n in names), sorted(names)
 PY
 fi

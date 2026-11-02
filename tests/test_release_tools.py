@@ -96,17 +96,17 @@ def files_of(result):
 @pytest.mark.parametrize("transport", ["file", "http"])
 def test_plan_against_a_channel_with_a_served_file_not_yet_indexed(tmp_path, over_http, transport):
     url = channel(tmp_path,
-                  [record("isabelle-patch-control", "1.0.0", 0), record("isabelle-expose-foreign", "1", 0, "1"),
-                   record("isabelle-light-locale", "1", 0, "1")],
-                  served=[record("isabelle-light-locale", "1", 1, "2"),        # uploaded, not indexed, pins build 2
-                          record("isabelle-expose-foreign", "1", 1, "3")])     # pins another build: skipped
+                  [record("isabelle-patch-control", "1.0.0", 0), record("isabelle-expose-foreign", "2025.2.1", 0, "1"),
+                   record("isabelle-light-locale", "2025.2.1", 0, "1")],
+                  served=[record("isabelle-light-locale", "2025.2.1", 1, "2"),        # uploaded, not indexed, pins build 2
+                          record("isabelle-expose-foreign", "2025.2.1", 1, "3")])     # pins another build: skipped
     if transport == "http":                                                    # also the HTTP 404 of a file not served
         url = over_http(url)
     result = rp.plan(url, "2", "1.0.0", "pyh4616a5c", ["Isabelle2025-2/expose_foreign/1", "Isabelle2025-2/light_locale/1"])
     assert files_of(result) == {
         "isabelle-patch-control": ("reuse", "isabelle-patch-control-1.0.0-pyh4616a5c_0.conda"),
-        "isabelle-expose-foreign": ("build", "isabelle-expose-foreign-1-Isabelle2025_2_2.conda"),
-        "isabelle-light-locale": ("reuse", "isabelle-light-locale-1-Isabelle2025_2_1.conda")}
+        "isabelle-expose-foreign": ("build", "isabelle-expose-foreign-2025.2.1-Isabelle2025_2_2.conda"),
+        "isabelle-light-locale": ("reuse", "isabelle-light-locale-2025.2.1-Isabelle2025_2_1.conda")}
     assert [(p.get("tag"), p.get("feature"), p.get("build_number")) for p in result["packages"]] == [
         (None, None, None), ("Isabelle2025-2/expose_foreign/1", "expose_foreign", 2), ("Isabelle2025-2/light_locale/1", "light_locale", None)]
     assert result["isabelle_old_build"] == "1"             # the top's indexed records only; the served 2 is not counted
@@ -117,19 +117,19 @@ def test_an_empty_channel_and_no_other_build(tmp_path):
     (empty / "noarch").mkdir(parents=True)
     result = rp.plan(f"file://{empty}", "1", "1.0.0", "pyh4616a5c", ["Isabelle2025-2/expose_foreign/1"])
     assert files_of(result) == {"isabelle-patch-control": ("build", "isabelle-patch-control-1.0.0-pyh4616a5c_0.conda"),
-                                "isabelle-expose-foreign": ("build", "isabelle-expose-foreign-1-Isabelle2025_2_0.conda")}
+                                "isabelle-expose-foreign": ("build", "isabelle-expose-foreign-2025.2.1-Isabelle2025_2_0.conda")}
     assert result["isabelle_old_build"] == ""
 
 
 def test_the_old_build_is_the_highest_other_one_the_chain_top_pins(tmp_path):
     """§6 (h) installs the chain top at that build, so only the top's records count, of any version."""
-    other_line = ("isabelle-light-locale-1-Isabelle2026_1_0.conda",
-                  {"name": "isabelle-light-locale", "version": "1", "build": "Isabelle2026_1_0", "build_number": 0,
+    other_line = ("isabelle-light-locale-2026.1.1-Isabelle2026_1_0.conda",
+                  {"name": "isabelle-light-locale", "version": "2026.1.1", "build": "Isabelle2026_1_0", "build_number": 0,
                    "depends": ["isabelle ==2026.1 13"], "subdir": "noarch"})
-    url = channel(tmp_path, [record("isabelle-light-locale", "1", 0, "9"), record("isabelle-light-locale", "1", 1, "10"),
-                             record("isabelle-light-locale", "2", 2, "11"),      # another version of the top: counts
-                             record("isabelle-light-locale", "1", 3, "12"),      # this batch's own build: not an old one
-                             record("isabelle-expose-foreign", "1", 4, "14"),    # a lower feature: no state of (h)
+    url = channel(tmp_path, [record("isabelle-light-locale", "2025.2.1", 0, "9"), record("isabelle-light-locale", "2025.2.1", 1, "10"),
+                             record("isabelle-light-locale", "2025.2.2", 2, "11"),      # another version of the top: counts
+                             record("isabelle-light-locale", "2025.2.1", 3, "12"),      # this batch's own build: not an old one
+                             record("isabelle-expose-foreign", "2025.2.1", 4, "14"),    # a lower feature: no state of (h)
                              other_line])                                        # another release line's pin
     result = rp.plan(url, "12", "1.0.0", "p", ["Isabelle2025-2/expose_foreign/1", "Isabelle2025-2/light_locale/1"])
     assert result["isabelle_old_build"] == "11"
@@ -144,7 +144,7 @@ def test_the_isabelle_version_is_the_release_line_of_the_batch(tmp_path):
     assert (old["isabelle_version"], old["isabelle_non_pristine_build"]) == ("2025.2", "0")
     new = rp.plan(url, "0", "1.0.0", "p", ["Isabelle2026/expose_foreign/1", "Isabelle2026/light_locale/1"])
     assert (new["isabelle_version"], new["isabelle_non_pristine_build"]) == ("2026", "")
-    assert files_of(new)["isabelle-light-locale"] == ("build", "isabelle-light-locale-1-Isabelle2026_0.conda")
+    assert files_of(new)["isabelle-light-locale"] == ("build", "isabelle-light-locale-2026.0.1-Isabelle2026_0.conda")
 
 
 def isabelle(version, build, subdir):

@@ -63,7 +63,7 @@ all_applied() { states_rc 0 "$1" "applied t_one" "applied t_two" "applied t_thre
 bytes() {  # bytes <env> <isabelle build> <features of the chain, bottom first> -- <applied...>
   local e=$1 b=$2; shift 2
   local args=(--isabelle "$P/isabelle-2025.2-$b")
-  while [ "$1" != -- ]; do args+=(--feature "$P/isabelle-${1//_/-}-1-Isabelle2025_2_$((b - 1))"); shift; done; shift
+  while [ "$1" != -- ]; do args+=(--feature "$P/isabelle-${1//_/-}-2025.2.1-Isabelle2025_2_$((b - 1))"); shift; done; shift
   python3 "$tools/check-bytes" "$e/isa" "${args[@]}" --applied "$@" > "$W/out/bytes.txt" 2>&1 \
     || { sed 's/^/           /' "$W/out/bytes.txt"; return 1; }
 }
@@ -185,7 +185,7 @@ s_rebuild() {
   echo "--- a new isabelle build, with and without the matching re-release"
   fresh rebuild "isabelle=2025.2=1" isabelle-t-three || return 0
   c update -p "$E" "${CHANNELS[@]}" --all
-  check "update --all: isabelle build 2 and the re-released features" bash -c "compgen -G '$E/conda-meta/isabelle-2025.2-2.json' >/dev/null && compgen -G '$E/conda-meta/isabelle-t-three-1-Isabelle2025_2_1.json' >/dev/null"
+  check "update --all: isabelle build 2 and the re-released features" bash -c "compgen -G '$E/conda-meta/isabelle-2025.2-2.json' >/dev/null && compgen -G '$E/conda-meta/isabelle-t-three-2025.2.1-Isabelle2025_2_1.json' >/dev/null"
   check "the chain applied, bytes against build 2" chain_bytes "$E" 2 t_one t_two t_three
   check "status" all_applied "$E"
   check "one applied line" once "changed (applied: t_one, t_two, t_three)"
@@ -261,10 +261,10 @@ s_residue() {
   c remove -p "$E" "${CHANNELS[@]}" isabelle-t-three
   kill "$HOLDER" 2>/dev/null || true; wait "$HOLDER" 2>/dev/null || true
   check "lock busy while pruning: a residue block per feature, reason the lock" bash -c "[ \$(/usr/bin/grep -c 'reason: another isabelle-patch-control was running' '$OUT') = 3 ]"
-  check "every block names the same, highest package" bash -c "[ \$(/usr/bin/grep -cxF '  conda install -p $E -c https://conda.qiyuan.me -c conda-forge isabelle-t-three=1' '$OUT') = 3 ] && [ \$(/usr/bin/grep -cxF '  conda remove -p $E isabelle-t-three' '$OUT') = 3 ]"
+  check "every block names the same, highest package" bash -c "[ \$(/usr/bin/grep -cxF '  conda install -p $E -c https://conda.qiyuan.me -c conda-forge isabelle-t-three=2025.2.1' '$OUT') = 3 ] && [ \$(/usr/bin/grep -cxF '  conda remove -p $E isabelle-t-three' '$OUT') = 3 ]"
   check "a.ML (changed by t_one and t_two) is listed" /usr/bin/grep -qx '  src/Pure/a.ML' "$OUT"
   check "no Retry later" never "Retry later"
-  c install -p "$E" "${CHANNELS[@]}" "isabelle-t-three=1"
+  c install -p "$E" "${CHANNELS[@]}" "isabelle-t-three=2025.2.1"
   c remove -p "$E" "${CHANNELS[@]}" isabelle-t-three
   check "after the last block's steps the tree is the original" chain_bytes "$E" 1
   check "and features.d is empty" bash -c "[ -z \"\$(ls -A '$E/share/isabelle_patch_control/features.d' 2>/dev/null)\" ]"

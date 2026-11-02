@@ -185,10 +185,11 @@ Any new commit on the branch (a fix for a checklist point or for the build) star
 
    - Every patch file's path stays within 198 characters on Windows (`<package name>`: `isabelle-`
      plus `<F>` with `_` as `-`, but `qiyuan-dev-patches` for dev_patches; `<prefix>`: `<R>` with
-     `-` as `_`):
+     `-` as `_`; `<Y>.<k>`: the first two numbers of the package version, `2026.0` for Isabelle2026,
+     `2025.2` for Isabelle2025-2):
 
          git -C <private tree> diff-tree -r --no-renames --name-only <base tag> HEAD | sed 's,/,-,g' |
-           awk -v pre='<package name>-99-<prefix>_99/share/isabelle_patch_control/features.d/<F>/' 'length(pre $0 ".patch") > 198'
+           awk -v pre='<package name>-<Y>.<k>.99-<prefix>_99/share/isabelle_patch_control/features.d/<F>/' 'length(pre $0 ".patch") > 198'
 
 3. **The package directory.** A first release first adds the files of 3.6 step 4 that `<package dir>`
    lacks (new files: on order). Then bring the two lists up to date and commit them in the feature
@@ -220,10 +221,11 @@ Any new commit on the branch (a fix for a checklist point or for the build) star
    - macOS has Apple's bash 3.2 and BSD tools, Windows Git Bash (`$ISABELLE` is `isabelle.bat`), and
      the machines are slow (HOL takes about an hour on macOS): give session `timeout`s and ML
      `Timeout.apply` room, for example with `-o timeout_scale=<n>`.
-5. **Release:** `isabelle-patch-control make-patches -C <private tree> --package <package dir> <F> <v>`.
+5. **Release:** `isabelle-patch-control make-patches -C <private tree> --package <package dir> <F> <m>`
+   (`<m>` = 1 for the first release on the line, then 2, 3, …).
    Rerun it after a failure.
-6. **Push**, on order: `git -C <private tree> push origin <R>/<F> <R>/<F>/<v>` and
-   `git -C <feature repository> push origin main <R>/<F>/<v>`.
+6. **Push**, on order: `git -C <private tree> push origin <R>/<F> <R>/<F>/<m>` and
+   `git -C <feature repository> push origin main <R>/<F>/<m>`.
 7. **The features on this one:** `grep -l 'base = <R>/<F>$' contrib/*/.gitmodules`. Tell the owner;
    each of them merges this release (3.3) and is released in turn, in its own private tree.
 8. **Publishing to the conda channel**, on order. Pause the download counter while you release
@@ -282,7 +284,7 @@ then F's base changes from A to N.
    commit of N is a release of N.
 4. Rerun `<feature repository>/init.sh`: the stock tree moves to the new merge base.
 
-F's next release depends on N's package; `make-patches` derives this from the base tag.
+F's next release depends on N's package, through the base tag that `make-patches` records.
 
 ### 3.8 A new Isabelle release: the foundation (on the owner's order, once per release)
 

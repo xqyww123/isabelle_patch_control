@@ -14,7 +14,7 @@ from typing import Callable
 
 TOOLS_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(TOOLS_DIR.parent))            # the checkout's isabelle_patch_control, not an installed one
-from isabelle_patch_control.dev import (block_path, build_string_prefix, feature_pin, isabelle_version,  # noqa: E402,F401
+from isabelle_patch_control.dev import (block_path, build_string_prefix, isabelle_version, package_version,  # noqa: E402,F401
                                         patch_blocks, run, shipped_files)    # (re-exported for the scripts)
 from isabelle_patch_control.errors import Error as ToolError, Refused  # noqa: E402
 from isabelle_patch_control.names import package_name  # noqa: E402,F401  (re-exported for the scripts)

@@ -27,18 +27,18 @@ def git(cwd: Path, *args: str) -> str:
                           capture_output=True, text=True).stdout
 
 
-def provenance(feature: str, version: str, base_tag: str) -> str:
-    return (f"feature: {R}/{feature}\nrelease_tag: {R}/{feature}/{version}\ncommit: 0\nbase_tag: {base_tag}\n"
-            f"base_commit: 0\nbase_package_version: x\nbase_pin: x\nbuild_string_prefix: Isabelle2025_2\n")
+def provenance(feature: str, m: str, base_tag: str) -> str:
+    return (f"feature: {R}/{feature}\nrelease_tag: {R}/{feature}/{m}\ncommit: 0\nbase_tag: {base_tag}\n"
+            f"base_commit: 0\nbuild_string_prefix: Isabelle2025_2\n")
 
 
-def package(repo: Path, subdir: str = ".", feature: str = "light_locale", version: str = "2",
+def package(repo: Path, subdir: str = ".", feature: str = "light_locale", m: str = "2",
             base_tag: str = f"{R}/future_assign_interrupt/1", components: dict | None = None, tag: bool = True) -> Path:
     """A feature repository with one package directory, committed and tagged like make-patches leaves it."""
     pkg = repo / subdir
     (pkg / "patches" / R).mkdir(parents=True)
     (pkg / "README.md").write_text(f"# {feature}\n\nThe feature's own README.\n")
-    (pkg / "patches" / R / "provenance.txt").write_text(provenance(feature, version, base_tag))
+    (pkg / "patches" / R / "provenance.txt").write_text(provenance(feature, m, base_tag))
     (pkg / "patches" / R / "src-Pure-a.ML.patch").write_bytes(PATCH)
     if components is not None:
         (pkg / "tools").mkdir()
@@ -49,9 +49,9 @@ def package(repo: Path, subdir: str = ".", feature: str = "light_locale", versio
     if not (repo / ".git").exists():
         git(repo, "init", "-q", "-b", "main")
     git(repo, "add", "-A")
-    git(repo, "commit", "-q", "-m", f"{feature} release {version}")
+    git(repo, "commit", "-q", "-m", f"{feature} release {m}")
     if tag:
-        git(repo, "tag", "-a", "-m", "release", f"{R}/{feature}/{version}")
+        git(repo, "tag", "-a", "-m", "release", f"{R}/{feature}/{m}")
     return pkg
 
 
@@ -79,17 +79,17 @@ def test_recipe_pins_files_and_readme(tmp_path):
     out = tmp_path / "out"
     r = render(pkg, out)
     assert r.returncode == 0, r.stderr
-    assert "noarch/isabelle-light-locale-2-Isabelle2025_2_3.conda" in r.stdout
+    assert "noarch/isabelle-light-locale-2025.2.2-Isabelle2025_2_3.conda" in r.stdout
     recipe = (out / "recipe.yaml").read_text()
-    for line in ('name: "isabelle-light-locale"', 'version: "2"', "number: 3", 'string: "Isabelle2025_2_3"', "noarch: generic"):
+    for line in ('name: "isabelle-light-locale"', 'version: "2025.2.2"', "number: 3", 'string: "Isabelle2025_2_3"', "noarch: generic"):
         assert line in recipe
     deps = run_deps(recipe)
     assert deps == ["isabelle-patch-control >=1.0,<2", "isabelle ==2025.2 1",
-                    "isabelle-future-assign-interrupt ==1 Isabelle2025_2_*"]
+                    "isabelle-future-assign-interrupt ==2025.2.1"]
     # the recipe's pin is the one plan_builds looks for: a package built from it is what this batch wants
-    wanted = Wanted("isabelle-light-locale", "2", "Isabelle2025_2", isabelle_pin("Isabelle2025_2", "1"))
+    wanted = Wanted("isabelle-light-locale", "2025.2.2", "Isabelle2025_2", isabelle_pin("Isabelle2025_2", "1"))
     assert wanted.accepts({"depends": deps})
-    assert not Wanted("isabelle-light-locale", "2", "Isabelle2025_2", isabelle_pin("Isabelle2025_2", "2")).accepts({"depends": deps})
+    assert not Wanted("isabelle-light-locale", "2025.2.2", "Isabelle2025_2", isabelle_pin("Isabelle2025_2", "2")).accepts({"depends": deps})
 
     files = files_of(out)
     fd = "share/isabelle_patch_control/features.d/light_locale"
@@ -110,7 +110,7 @@ def test_hooks_are_the_fragments_verbatim(tmp_path):
     assert render(pkg, out).returncode == 0
     files = files_of(out)
     p = "isabelle-light-locale"
-    fill = lambda b: b.replace(b"<feature>", b"light_locale").replace(b"<package>", p.encode()).replace(b"<version>", b"2")
+    fill = lambda b: b.replace(b"<feature>", b"light_locale").replace(b"<package>", p.encode()).replace(b"<version>", b"2025.2.2")
     assert files[f"bin/.{p}-post-link.sh"][0] == b"#!/bin/bash\n" + (HOOKS / "post-link.sh").read_bytes() + b"exit 0\n"
     assert files[f"bin/.{p}-pre-unlink.sh"][0] == b"#!/bin/bash\n" + fill((HOOKS / "pre-unlink.sh").read_bytes()) + b"exit 0\n"
     assert files[f"Scripts/.{p}-post-link.bat"][0] == (HOOKS / "post-link.bat").read_bytes() + b"exit /b 0\r\n"
@@ -124,7 +124,7 @@ def test_hooks_are_the_fragments_verbatim(tmp_path):
 
 
 def test_pristine_base_has_no_base_dependency(tmp_path):
-    pkg = package(tmp_path / "repo", feature="expose_foreign", version="1", base_tag=f"{R}/pristine/89701cf1768e")
+    pkg = package(tmp_path / "repo", feature="expose_foreign", m="1", base_tag=f"{R}/pristine/89701cf1768e")
     out = tmp_path / "out"
     assert render(pkg, out, isabelle_build="h1a2b_4", n=0).returncode == 0
     assert run_deps((out / "recipe.yaml").read_text()) == ["isabelle-patch-control >=1.0,<2", "isabelle ==2025.2 h1a2b_4"]
@@ -156,8 +156,8 @@ def test_component_payload_and_registration(tmp_path):
 
 def test_a_repository_with_two_packages(tmp_path):
     repo = tmp_path / "repo"
-    ef = package(repo, "expose_foreign", feature="expose_foreign", version="1", base_tag=f"{R}/pristine/89701cf1768e")
-    fai = package(repo, "future_assign_interrupt", feature="future_assign_interrupt", version="1",
+    ef = package(repo, "expose_foreign", feature="expose_foreign", m="1", base_tag=f"{R}/pristine/89701cf1768e")
+    fai = package(repo, "future_assign_interrupt", feature="future_assign_interrupt", m="1",
                   base_tag=f"{R}/expose_foreign/1")
     assert render(fai, tmp_path / "fai").returncode == 0
     r = render(ef, tmp_path / "ef")                # HEAD carries only future_assign_interrupt/1

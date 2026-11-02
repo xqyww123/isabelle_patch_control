@@ -30,8 +30,8 @@ def test_hole_in_the_chain_is_refused(fresh):
     shutil.rmtree(toy.features_d / "f2")
     r = tool(t, toy.features_d, "status")
     assert r.code == 3
-    assert r.err.strip() == texts.PREFIX + texts.chain_broken("isabelle-f3", "1", "isabelle-f2", "1", None)
-    assert r.err == ("isabelle-patch-control: isabelle-f3 1 needs isabelle-f2 1, which is not installed. "
+    assert r.err.strip() == texts.PREFIX + texts.chain_broken("isabelle-f3", "2025.2.1", "isabelle-f2", "2025.2.1", None)
+    assert r.err == ("isabelle-patch-control: isabelle-f3 2025.2.1 needs isabelle-f2 2025.2.1, which is not installed. "
                      "Install matching versions of these packages.\n")
 
 
@@ -41,7 +41,7 @@ def test_wrong_version_installed_is_named(fresh):
     prov.write_text(prov.read_text().replace(f"release_tag: {RELEASE}/f2/1", f"release_tag: {RELEASE}/f2/2"))
     r = tool(t, toy.features_d, "status")
     assert r.code == 3
-    assert "isabelle-f3 1 needs isabelle-f2 1, but isabelle-f2 2 is installed. Install matching versions" in r.err
+    assert "isabelle-f3 2025.2.1 needs isabelle-f2 2025.2.1, but isabelle-f2 2025.2.2 is installed. Install matching versions" in r.err
 
 
 def test_fork_is_refused(fresh):
@@ -87,7 +87,7 @@ def test_refusals_do_not_depend_on_directory_order(chain3):
     shutil.rmtree(chain3.features_d / "f1")
     r = tool(chain3.tree(), chain3.features_d, "status")
     assert r.code == 3
-    assert "isabelle-f3 1 needs isabelle-f2 1, which is not installed." in r.err   # the name comes from release_tag
+    assert "isabelle-f3 2025.2.1 needs isabelle-f2 2025.2.1, which is not installed." in r.err   # the name comes from release_tag
 
 
 def test_no_feature_packages(toy, tmp_path):

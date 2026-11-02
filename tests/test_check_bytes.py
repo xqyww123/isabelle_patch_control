@@ -25,7 +25,7 @@ def unpacked(toy, root):
     (isabelle / "info" / "paths.json").write_text(json.dumps({"paths": paths, "paths_version": 1}))
     features = []
     for name in reversed(toy.names):                 # any order: the chain is read from provenance.txt
-        pkg = root / f"isabelle-{name}-1-Isabelle2025_2_0"
+        pkg = root / f"isabelle-{name}-2025.2.1-Isabelle2025_2_0"
         shutil.copytree(toy.features_d / name, pkg / cb.FEATURES_D / name)
         features.append(pkg)
     return isabelle, features

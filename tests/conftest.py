@@ -89,12 +89,12 @@ class Toy:
     def delete(self, rel: str):
         (self.repo / rel).unlink()
 
-    def feature(self, name: str, changes, version: str = "1") -> Path:
+    def feature(self, name: str, changes) -> Path:
         """Commit `changes()` as feature `name` on top of the chain and write its feature directory."""
         changes()
         self.git("add", "-A")
         self.git("commit", "-qm", name)
-        tag = f"{RELEASE}/{name}/{version}"
+        tag = f"{RELEASE}/{name}/1"
         self.git("tag", tag)
         base = self.tags[-1]
         d = self.features_d / name
@@ -105,7 +105,7 @@ class Toy:
         (d / "provenance.txt").write_text(
             f"feature: {RELEASE}/{name}\nrelease_tag: {tag}\ncommit: {self.git('rev-parse', tag).strip()}\n"
             f"base_tag: {base}\nbase_commit: {self.git('rev-parse', base).strip()}\n"
-            f"base_package_version: none\nbase_pin: none\nbuild_string_prefix: Isabelle2025_2\n")
+            f"build_string_prefix: Isabelle2025_2\n")
         self.tags.append(tag)
         self.names.append(name)
         return d

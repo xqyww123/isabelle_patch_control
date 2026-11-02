@@ -12,11 +12,11 @@ cd "$work"
 mp() { isabelle-patch-control make-patches "$@"; }
 new_tip() { git -C "$t" commit -q --allow-empty -m "$1"; }   # a new commit on the feature branch, same content
 tags() { git -C "$1" tag -l "R/feat/$2" | wc -l; }
-base_release() {  # base_release <version> <commands...>: a commit on R/base in the base's own clone, tagged, pushed
+base_release() {  # base_release <m> <commands...>: a commit on R/base in the base's own clone, tagged, pushed
   local v=$1; shift
   (cd "$seed" && git switch -q R/base && eval "$*" && git commit -q -am "base fix $v" && git tag -a -m "v$v" "R/base/$v" && git push -q origin R/base "R/base/$v")
 }
-write_order() {  # write_order <package> <first version>: a failure after each write step, then the rerun completes
+write_order() {  # write_order <package> <first m>: a failure after each write step, then the rerun completes
   local pkg=$1 v=$2 gd; gd=$(git -C "$t" rev-parse --absolute-git-dir)
   echo "--- the write order on $(basename "$pkg"): a failure after each write, then the rerun completes (decision 16 point 8)"
   new_tip "tip for $v"
@@ -113,7 +113,7 @@ expect ok      "release 1 of R/feat, the registration only staged" -- mp --packa
 cat "$work/out"
 check "six patch files, flat names" '[[ $(ls "$H"/patches/R/*.patch | wc -l) == 6 && -f $H/patches/R/src-Pure-new.ML.patch && -f $H/patches/R/bin-tool.patch ]]'
 check "the CRLF files' patch files keep their CRs" '[[ $(tr -cd "\r" < "$H/patches/R/etc-crlf.txt.patch" | wc -c) == 3 && $(tr -cd "\r" < "$H/patches/R/etc-new_crlf.txt.patch" | wc -c) == 1 ]]'
-check "provenance file" '/usr/bin/grep -q "^base_tag: R/base/1$" "$H/patches/R/provenance.txt" && /usr/bin/grep -q "^base_pin: ==1 R_\*$" "$H/patches/R/provenance.txt"'
+check "provenance file" '/usr/bin/grep -q "^base_tag: R/base/1$" "$H/patches/R/provenance.txt"'
 check "committed in the feature repository, clean" '[[ -z $(git -C "$H" status --porcelain) && $(git -C "$H" ls-tree -r --name-only HEAD -- patches/R | wc -l) == 7 ]]'
 check "the release commit records the gitlinks: the tip and the base tag's commit" '[[ $(git -C "$H" rev-parse R/feat/1^{commit}:worktrees/R-feat) == "$tip1" && $(git -C "$H" rev-parse R/feat/1^{commit}:worktrees/R-feat-stock) == "$base1" ]]'
 check "the release commit holds the staged registration" '[[ $(git -C "$H" show R/feat/1:.gitmodules | /usr/bin/grep -c "path = worktrees/R-feat") == 2 ]]'
@@ -150,7 +150,7 @@ saw "says to rerun init.sh" "rerun $H/init.sh"
 bash "$H/init.sh" >/dev/null
 echo unrelated > "$H/unrelated.txt"; git -C "$H" add unrelated.txt       # staged, not part of the release
 expect ok      "release 2 after the base released"               -- mp --package "$H" R/feat 2
-saw "pinned to base 2" "base_pin: ==2 R_\*"
+saw "built on base 2" "base_tag: R/base/2"
 check "the gitlinks: the tip and R/base/2's commit" '[[ $(git -C "$H" rev-parse R/feat/2^{commit}:worktrees/R-feat) == $(git rev-parse R/feat) && $(git -C "$H" rev-parse R/feat/2^{commit}:worktrees/R-feat-stock) == "$base2" ]]'
 check "an unrelated staged file stays out of the release commit" '! git -C "$H" ls-tree --name-only HEAD unrelated.txt | /usr/bin/grep -q . && git -C "$H" status --porcelain | /usr/bin/grep -q "^A  unrelated.txt$"'
 git -C "$H" rm -q --cached unrelated.txt; rm "$H/unrelated.txt"
@@ -211,7 +211,7 @@ expect refused "fail after (e) on the component package"         -- mp --package
 rm "$gd/refs/tags/R/feat/11.lock"
 echo 'session Light = HOL + theories Light Extra' > "$cpkg/ROOT"; git -C "$H" commit -q -am "ROOT changed between (e) and the rerun"
 expect refused "rerun: the tagged commit has other component files" -- mp --package "$cpkg" R/feat 11
-saw "says the version is spent" "this version number is spent: release 12"
+saw "says the number is spent" "this number is spent: release 12"
 check "no Isabelle tag 11" '[[ $(tags "$t" 11) == 0 ]]'
 new_tip "tip for 12"
 expect ok      "release 12 instead"                              -- mp --package "$cpkg" R/feat 12

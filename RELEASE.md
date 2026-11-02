@@ -21,11 +21,14 @@ package: same version, build number plus one, new pin.
 
 Words. This file uses the SKILL's words (feature, feature repository, base, base tag, release line,
 shared tree, private tree, stock tree; its section 1), and these. The *owner* is the person who owns
-isabelle-patched, the feature repositories and the channel. A *release tag*
-`<R>/<feature>/<version>` marks a released commit (versions are positive integers: 1, 2, 3, …). A
-release line `<R>` has a *build string prefix*, `<R>` with `-` turned into `_` (`Isabelle2025_2`),
-and an *`isabelle` version*, the prefix without `Isabelle` and with `_` turned into `.` (`2025.2`;
-`Isabelle2026` gives `2026`). The *package directory* (`make-patches --package <dir>`) holds the
+isabelle-patched, the feature repositories and the channel. A *release tag* `<R>/<feature>/<m>`
+(`m` = 1, 2, 3, …) marks a released commit. A release line `<R>` has a *build string prefix*, `<R>`
+with `-` turned into `_` (`Isabelle2025_2`), and an *`isabelle` version*, the prefix without
+`Isabelle` and with `_` turned into `.` (`2025.2`; `Isabelle2026` gives `2026`). The package built
+from `<R>/<feature>/<m>` has the version `<isabelle version>.<m>`, with `.0` inserted when the
+`isabelle` version has one number: `Isabelle2026/light_locale/1` gives `2026.0.1`,
+`Isabelle2025-2/light_locale/1` gives `2025.2.1` (`dev.package_version`); a newer line's versions
+are higher. The *package directory* (`make-patches --package <dir>`) holds the
 `tools/` lists and receives `patches/<R>/` (the patch files, one per changed path under a *flat
 name*: the path with `/` replaced by `-`, plus `.patch`; and `provenance.txt`). For light locale the
 package directory is the feature repository itself, `contrib/light_locale`;
@@ -60,20 +63,19 @@ Before a feature can be released, its package directory holds, committed:
   rewrites it on every release, one patch file per changed path.
 - `README.md`: the feature's own README; the package's `share/doc/<package>/README.md` is this
   repository's `common-readme.md` followed by it. It also carries the one line that tells others how
-  to get a release's sources: `git clone --recurse-submodules -b <R>/<feature>/<version> <url of the
-  feature repository>`, or in a clone `git checkout <R>/<feature>/<version>` followed by
-  `git submodule update --init` (a plain checkout leaves the two trees where they were).
+  to get a release's sources: `git clone --recurse-submodules -b <R>/<feature>/<m> <url of the
+  feature repository>`, or in a clone `git checkout <R>/<feature>/<m>` followed by
+  `git submodule update --init` (a plain checkout leaves the two trees where they were); `<m>` is the
+  last number of the package's version.
 
 A feature's base is recorded as `base =` in the feature repository's `.gitmodules` (SKILL, section
-1); its package depends on the base's package at the exact version of the base tag
-(`==<version> <build string prefix>_*`, for example `==1 Isabelle2025_2_*`), which `make-patches`
-writes into `provenance.txt` as `base_pin` and the recipe renderer computes from `base_tag` the same
-way.
+1); its package depends on the base's package at exactly that package's version (`==<version>`,
+for example `==2026.0.1`), which the recipe renderer computes from `base_tag`.
 
 ## Why the release steps are in this order
 
 The checklist comes before the build and before `make-patches`: a failed point means a new commit,
-and `make-patches` tags the release, so a failed point after it would cost the version number.
+and `make-patches` tags the release, so a failed point after it would use up the number `<m>`.
 `make-patches` checks the repository-side gates (base tag, changed files, signatures, round trip
 through the tool) before it writes anything; then each of its write steps can be rerun after a
 failure, and the tag in the private tree comes last: it marks the release as done. The features
@@ -104,12 +106,12 @@ for files that features below yours change.
    the build.
 4. **`etc/ISABELLE_ID` is not changed.** The tool locks on it.
 5. **The longest new patch file's path in the package cache stays within 198 characters** on
-   Windows: `<package>-99-<build string prefix>_99/share/isabelle_patch_control/features.d/<feature>/<flat name>.patch`
-   (version 99 and build 99 for the estimate).
+   Windows: `<package>-<Y>.<k>.99-<build string prefix>_99/share/isabelle_patch_control/features.d/<feature>/<flat name>.patch`
+   (`<Y>.<k>` the first two numbers of the package's version, `m` 99 and build 99 for the estimate).
 
 The workflow's `roundtrip` and `accept` jobs run `status` with the whole batch installed before
 anything is published, so a file that fits two levels with every feature installed shows up there
-as `CONFLICT` and stops the batch (the version number is then spent: release v+1); `smoke` repeats
+as `CONFLICT` and stops the batch (the number `<m>` is then spent: release m+1); `smoke` repeats
 the check after publishing, on what the README's command installs, and can only report. The states
 *between* two releases (a user who has only the lower packages installed) are protected by this list
 alone.
@@ -123,7 +125,7 @@ Inputs:
 | `isabelle_build` | the build string of the pristine `isabelle` build to pin (required) |
 | `isabelle_from` | `channel` (the build is on conda.qiyuan.me) or `run:<isabelle-packaging-ci run id>` (rehearsal against that run's `conda-packages` artifact, which must carry `isabelle_build` of the batch's `isabelle` version (`local-channel` refuses otherwise), a build the channel does not serve yet (`release-plan --rehearsal` refuses otherwise)) |
 | `tool_ref` | the tag of this repository to build the tool from (default: the triggering ref) |
-| `features` | the explicit list of feature release tags to publish, bottom first: the first one built on pristine, each next one built on the one before (`check-packages` refuses any other list); no default. Two features built on the same base go into separate batches, each from the bottom up to its own feature; the later batch reuses the lower packages the earlier one published. The tags are all of one release line `<R>` (`release-plan` refuses a batch that spans two). When every feature package is republished for a new `isabelle` build of `<R>`, take, for each feature package with builds of `<R>` on the channel (build string `<build string prefix>_<n>`, for example `Isabelle2025_2_3`), the release tag `<R>/<feature>/<version>` of its highest version among those builds (`git tag --list` would also bring in tags not yet published), and split these tags into batches as above: one batch for each of them that no other is built on, listing it and the features below it, bottom first |
+| `features` | the explicit list of feature release tags to publish, bottom first: the first one built on pristine, each next one built on the one before (`check-packages` refuses any other list); no default. Two features built on the same base go into separate batches, each from the bottom up to its own feature; the later batch reuses the lower packages the earlier one published. The tags are all of one release line `<R>` (`release-plan` refuses a batch that spans two). When every feature package is republished for a new `isabelle` build of `<R>`, take, for each feature package with builds of `<R>` on the channel (build string `<build string prefix>_<n>`, for example `Isabelle2025_2_3`), the release tag `<R>/<feature>/<m>` of its highest version among those builds (`<m>` is that version's last number; `git tag --list` would also bring in tags not yet published), and split these tags into batches as above: one batch for each of them that no other is built on, listing it and the features below it, bottom first |
 | `other_component` | an Isabelle_RPC-style component package on the channel that installs on this `isabelle` version, for the `accept` scenarios that install a second component (plan §6 (c), (e)); default `isabelle-performant-ml`; on an `isabelle` version that no record of it installs on (a new release line before the component is ported), (c) fails at creating its environment: name another component, or give it empty to skip (c) and (e) |
 | `publish` | default `false`; `publish=true` together with `isabelle_from=run:…` fails at once |
 
@@ -149,14 +151,14 @@ is applied, that removing a package reverses it, and that `--force-reinstall isa
 it (plan §6). **sessions** (the same five legs) installs the batch into a fresh environment, builds
 HOL, and runs each feature's `tools/release_build.sh` in its package directory, in the order of the
 batch (a feature without one gets only HOL). `roundtrip`, `accept` and `sessions` stop the batch; a
-failure whose fix changes a feature's tagged files costs that feature's version number. **publish**
+failure whose fix changes a feature's tagged files costs that feature's number `<m>`. **publish**
 (only `publish=true`) calls
 `xqyww123/isabelle-packaging-ci/.github/workflows/publish-conda.yml@main` once with the artifact and
 the two R2 secrets. **smoke** (linux-64, win-64) runs the install command read from the copied
 common README text and installs `qiyuan-dev-patches` on top, then `status`; it runs after
 publishing and only reports.
 
-Versions and build numbers: a feature package's version is the version in its release tag; its
+Versions and build numbers: a feature package's version is computed from its release tag (Words); its
 build string is `<build string prefix>_<n>`; `n` is never typed by hand. Nothing is published if the same
 (feature, version, `isabelle` build) is already on the channel: to change a README or template,
 release a new version.

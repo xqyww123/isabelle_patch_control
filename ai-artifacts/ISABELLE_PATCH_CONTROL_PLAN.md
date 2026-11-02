@@ -52,7 +52,7 @@
    第 22 条修订（迁移方案第 31 条）。
 4. 新建文件的 patch 头部用 git 原生的 `--- /dev/null`（迁移方案第 13 条）；包精确钉死所对的基包版本（第 14 条）；feature 包的 build string 是
    **`<发行版名把 - 换成 _>_<build 号>`**，即 `Isabelle2025_2_<build 号>`（第 27 条原文；rev 3 曾擅改，第 30 条撤回）；包的版本号是发布 tag
-   里的版本号（迁移方案决定 3）。
+   里的版本号（迁移方案决定 3；已被第 44 条修订：包版本 `<Y>.<k>.<m>`，基包钉死 `==<基包的版本>`）。
 5. 共用脚本放工具仓库顶层 `tools/`（迁移方案第 20 条、决定 6）——已写好、**尚未提交**（`?? tools/`，§5 第 0 步）。
 6. 不发空的 0 版包；`qiyuan_dev_patches` 等三个 feature 发布后再发（迁移方案第 25 条）。
 7. **feature 补丁由 conda 包的 post-link 打、pre-unlink 反打，heap 全部失效按需重建，用户接受**（用户 2026-09-14 与 2026-10-11；
@@ -87,7 +87,7 @@
     做成同一个包 `isabelle-light-locale`**，不拆 session 包（"这两部分本就是同一个项目内的啊，本来版本就是耦合的啊"）。据此：
     feature 包模板加一个可选的组件载荷（`share/<包名>/` 下的 ROOT 与 theory，按渠道 `RELEASE_CHECKLIST.md` §4 的组件包规范用
     `isabelle components -u/-x` 登记）；钩子 = 钩子片段 + 组件包规范的登记行，只有带组件的包才有后者；版本仍是补丁发布
-    tag 的版本号，HOL 侧单独改动也走一次新的 light 发布并连带重发其上的 feature 包，这是用户接受的既有耦合。
+    tag 的版本号（已被第 44 条修订：由 tag 算出的 `<Y>.<k>.<m>`），HOL 侧单独改动也走一次新的 light 发布并连带重发其上的 feature 包，这是用户接受的既有耦合。
     作者 2026-10-24 对用户说"HOL 侧改了就重跑 `make-patches` 得到新 tag、补丁内容可以不变"，不完整：`make-patches` 拒绝在同一个 commit 上打
     第二个发布 tag（决定 16），所以 HOL 侧单独改动的发布流程是：在 `<R>/light_locale` 分支上一个 commit（空 commit 即可）、一次 tested 构建、
     `make-patches light_locale <v+1>`，然后对其上每一层依次 merge、tested 构建、`make-patches`（决定 11 的例子）。
@@ -437,6 +437,19 @@
       `batch.txt` 记顺序与包目录）；仓库表加第三列 contrib 名、补齐五行。
     - 编什么、`-d` 给哪些、要不要 AFP，全由脚本定；脚本（不是工作流）读 `required_sessions.txt`。指导原则只写在 SKILL 3.4 第 4 步。
     - 验收里只认 light_locale 的组件小 session 与输入 `session_build_legs` 删去（第 35 条那一项由此取代）。
+44. **feature 包的版本号是 `<Y>.<k>.<m>`**（2026-11-02，设计与两轮评审记录在 `ai-artifacts/FEATURE_VERSION_DESIGN.md`）。用户（经会话 mlml-71
+    转来）："我对这个版本设计不满意。我建议 2026.1 这样的版本号，大版本号与 isabelle 的 major version 统一"；又："我建议进一步改进为 Isabelle2026
+    这条线为 2026.0.1, 2026.0.2... 这样未来出现 2026-2 的时候就可以说 2026.2.1 ... 采纳这个建议，tag 可以不变。Isabelle2025-2 线写成 2025.2.1"；
+    评审之后："1. 按你建议来"（基包钉死去掉 `<prefix>_*`）、"2. 按你建议来"（make-patches 不再写来历字段 `base_package_version`、`base_pin`）、
+    "3. 这么小的事情需要制造新术语吗？"（不造词）。于是：
+    - 发布 tag 仍是 `<R>/<feature>/<m>`（m = 1, 2, 3, …，make-patches 的参数照旧）；由它做出的包的版本 = 发行线的 `isabelle` 版本，只有一个数时
+      补 `.0`，再接 `.<m>`：`Isabelle2026/light_locale/1` → `2026.0.1`，`Isabelle2025-2/light_locale/1` → `2025.2.1`。唯一的函数是
+      `dev.package_version`；渲染器（版本、钩子文字里的 `<package>=<version>`、基包钉死）、release-plan、工具运行时的 `FeatureDir.version` 与
+      `link_chain` 所缺 base 的版本都调它。build string `<prefix>_<n>` 不变。
+    - 基包钉死写成 `==<基包的版本>`（如 `==2026.0.1`），由渲染器从 `base_tag` 算；`dev.feature_pin` 删去。make-patches 不再写
+      `base_package_version` 与 `base_pin`；Isabelle2025-2 已发布的三个 tag 的来历文件留着旧值，没有读者。
+    - 用词：单说"版本"指包的版本；tag 末尾的数写 `<m>`、注明 1、2、3……；`<n>` 仍是 build 号。
+    - Windows 路径估算的版本取 `<Y>.<k>.99`（比原来长 7 个字符；今天实际最长 158，按版本 `<Y>.<k>.99`、build 号 99 估算为 160，预算 198）。
 
 作者 2026-10-24 对用户的更正（第二轮评审 C16、C22 与第三轮 C4 查出）：
 - 作者 2026-10-23 04:46 对用户说"问题 10 后半（内置 feature 出新版）消失了"是错的；该问题以问题 3 重新提出，由第 22 条解决。
@@ -665,9 +678,10 @@ README 已有 "Working in the Isabelle source repository" 一节。都未提交�
 ### 决定 3：来历文件与按精确 tag 的链
 
 - 来历文件 `provenance.txt` 的字段就是 `make-patches` 今天写的：`feature`（`<R>/<feature>`）、`release_tag`、`commit`、`base_tag`、
-  `base_commit`、`base_package_version`、`base_pin`、`build_string_prefix`（`tree_hash`、`tree_hash_excludes` 写到 2026-11-01 为止：没有读者——为之设计的
-  CI 构建断言从未建成；用户"provenance 里那两个没人读的字段可以删除"；已发布的来历文件里仍有这两行，照常可读）。工具读 `release_tag`、
-  `base_tag`（feature 名取 `release_tag` 的第二段，版本取第三段），其余给渲染器与人看。（rev 6 还读 `feature` 字段并核它的 `<R>` 等于树的发行版名；
+  `base_commit`、`build_string_prefix`（`tree_hash`、`tree_hash_excludes` 写到 2026-11-01 为止：没有读者——为之设计的 CI 构建断言从未建成；用户
+  "provenance 里那两个没人读的字段可以删除"；`base_package_version`、`base_pin` 写到 2026-11-02 为止，被第 44 条删去：没有读者，渲染器从
+  `base_tag` 算钉死；已发布的来历文件里仍有这几行，照常可读）。工具读 `release_tag`、
+  `base_tag`（feature 名取 `release_tag` 的第二段，版本取第三段——已被第 44 条修订：版本由 `dev.package_version` 从 tag 算出），其余给渲染器与人看。（rev 6 还读 `feature` 字段并核它的 `<R>` 等于树的发行版名；
   代码评审一轮 C35 后不读：名字和发行版都已在 `release_tag` 里，发行版不配由下一点的"树不是原版构建"判据统一覆盖。`make-patches` 照旧写
   `feature` 字段，输出格式不变。）
 - **链按精确 tag 链接**，不按名字：
@@ -974,7 +988,8 @@ README 已有 "Working in the Isabelle source repository" 一节。都未提交�
   `isabelle-<feature 名把 _ 换成 ->`（`isabelle-expose-foreign`、`isabelle-future-assign-interrupt`、`isabelle-light-locale`、
   `isabelle-local-type-abbrev`、`isabelle-localized-record`、`isabelle-local-datatype`），唯一的例外条目 `dev_patches → qiyuan-dev-patches`
   （light 计划 D1）。
-- 版本 = 发布 tag 里的版本号。build string **`Isabelle2025_2_<该 feature 包的 build 号>`**（第 30 条）。noarch generic。
+- 版本 = 发布 tag 里的版本号（已被 §0 第 44 条修订：`dev.package_version` 从 tag 算出 `<Y>.<k>.<m>`）。build string
+  **`Isabelle2025_2_<该 feature 包的 build 号>`**（第 30 条）。noarch generic。
 - **复用与 build 号由一个函数、一条规则决定**（`tools/common.py` 的 `plan_builds(repodata, wanted, fetch)`，pytest 覆盖；评审四 C2、
   评审五 C2；代码评审一轮 C8：rev 6 写的是四参数 `plan_builds(repodata, isabelle_build, wanted, fetch)`，实现是三参数——`isabelle` 的钉死不是整批
   一个参数，而是每个 `Wanted(name, version, build_prefix, pin)` 自带的 `pin`，由同一文件的 `isabelle_pin(build_string_prefix, isabelle_build)`
@@ -993,7 +1008,8 @@ README 已有 "Working in the Isabelle source repository" 一节。都未提交�
   `MatchSpec` 实测把新旧两种写法解析成同一个约束（版本恰为该值、build 恰为/匹配该串），rattler-build 把依赖原样写进 `info/index.json`。
   两个写法由 `tools/common.py` 的 `isabelle_pin` 与新 `feature_pin` 唯一给出：`make-patches` 写来历文件的 `base_pin` 用 `feature_pin`，渲染器
   从 `base_tag` 用同一个函数算基包钉死、不读 `base_pin`——`future_assign_interrupt/1` 已发布的来历文件里仍是旧写法（conda 读法相同）。
-  `plan_builds` 的复用键随 `isabelle_pin` 一起变，二者仍不可能走散。
+  `plan_builds` 的复用键随 `isabelle_pin` 一起变，二者仍不可能走散。（已被 §0 第 44 条修订：基包钉死写成 `isabelle-<基> ==<基包的版本>`，
+  不带 `Isabelle2025_2_*`；`feature_pin` 删去，渲染器从 `base_tag` 直接算；`make-patches` 不再写 `base_pin`。）
 - 文件：feature 目录（patch 文件与来历文件原样）、`share/doc/<包名>/README.md`、两个钩子（`bin/.<包名>-post-link.sh`、`.pre-unlink.sh`、
   `Scripts/.<包名>-post-link.bat`、`.pre-unlink.bat`，无条件都写）；带组件载荷的包另有 `share/<包名>/`，内容由该仓库的 `tools/component_files.txt`
   列出（light：`ROOT`、`Light_Locale.thy`、`README.md`、`LICENSE`，不含 `patches/`、`tests/`、`tools/`、`private_build_logs/`）。
@@ -1008,7 +1024,8 @@ README 已有 "Working in the Isabelle source repository" 一节。都未提交�
   `<包名>-<版本>-Isabelle2025_2_<n>/share/isabelle_patch_control/features.d/<feature>/<扁平名>.patch`，今天最长 151 字符
   （`isabelle-future-assign-interrupt-1-Isabelle2025_2_0/…/src-Pure-Concurrent-future.ML.patch`），`isabelle` 包自己的预算是 198
   （`pack.sh:335-339,357`），可行。feature 发布的 checklist（决定 16 第 10 点）让发布者按这个公式、取版本 99 与 build 号 99 核一下新文件的路径长度，
-  不写代码（第 37 条）。
+  不写代码（第 37 条）。（已被 §0 第 44 条修订：版本取 `<Y>.<k>.99`，例如 `isabelle-future-assign-interrupt-2025.2.1-Isabelle2025_2_0/…`，今天最长
+  158 字符。）
 
 ### 决定 11：批量发布 workflow 与发布程序（第 25、27 条）
 
@@ -1332,7 +1349,7 @@ Performant_Isabelle_ML `release-conda.yml:423-425,527-529` 与 auto_sledgehammer
      "could not write …"），只改权限位的文件字节不变、同时处于两个层级读成 CONFLICT
      （代码评审一轮 C31）。
    - 不改 `etc/ISABELLE_ID`（决定 5 用它当锁文件）。
-   - 新 patch 文件在 pkgs 缓存里的完整路径（决定 10 的公式，取版本 99、build 号 99）不超过 198 字符（Windows，`pack.sh:335-339,357`）。
+   - 新 patch 文件在 pkgs 缓存里的完整路径（决定 10 的公式，取版本 99、build 号 99；已被 §0 第 44 条修订为版本 `<Y>.<k>.99`）不超过 198 字符（Windows，`pack.sh:335-339,357`）。
    - patch 文件不经 CRLF 转换（feature 仓库的 `.gitattributes` 有 `*.patch -text`）；每个被改路径恰一个 patch 文件（`make-patches` 按文件切块，
      手改过 `patches/` 之后重新核一遍）。
    **`make-patches` 之前**过一遍这张单子（第 38 条；rev 6 写"之后、dispatch 之前"——`make-patches` 一跑就打 tag，之后发现问题就烧掉一个版本号），
@@ -1405,8 +1422,8 @@ If you are removing light_locale: you may delete heaps/ in this environment's Is
 树没回到链底时第一行是 "light_locale was undone in the Isabelle sources under $PREFIX/isa, and with it local_type_abbrev."（上面没有一起反打的
 feature 时没有 "and with it" 那半句；原来是 "…was undone; … changed (reversed: …)"，一行说两遍），加第二行。
 
-链接不上：`isabelle-light-locale 1 needs isabelle-future-assign-interrupt 1, which is not installed. Install matching versions of these
-packages.`（装着别的版本时 "…, but isabelle-future-assign-interrupt 2 is installed. …"；第 41 条校读后去掉了 features.d 目录与 release tag
+链接不上：`isabelle-light-locale 2025.2.1 needs isabelle-future-assign-interrupt 2025.2.1, which is not installed. Install matching versions
+of these packages.`（装着别的版本时 "…, but isabelle-future-assign-interrupt 2025.2.2 is installed. …"；第 41 条校读后去掉了 features.d 目录与 release tag
 这些内部细节，原来以小写的 "install matching versions…: …" 开头、套进钩子框里读成 "were not applied: install …"；包名经 `names.package_name`。）
 树不是原版构建（有 feature 目录时）：`$PREFIX/isa is not the Isabelle build the feature packages were made for: they need the unmodified
 Isabelle2025-2 build of the isabelle package (this tree has etc/ISABELLE_ID 5533cd83156e; features.d/expose_foreign was made for Isabelle2025-2
@@ -1629,7 +1646,7 @@ situation" 的第一条（第 41 条"赞同 1"）——源码归 conda 管、不
 - conda 25.11.1 的钩子、回滚、顺序、剪枝、入口点、PATH、`.messages.txt`、`.c~`：§2.3 引用的源码行，评审三轮的 defender 在玩具渠道上实测。
 - conda-forge `git` 各平台体积、win-64 的 PortableGit 来源与 `autocrlf`：§2.3。
 - `check-signatures`：`pristine → expose_foreign`、`expose_foreign → future_assign_interrupt` 各 0 additions；`future_assign_interrupt → ab6006e` 三条。
-- 路径长度：决定 10 的公式，最长 151、预算 198。
+- 路径长度：决定 10 的公式，最长 158（§0 第 44 条之后；原 151）、预算 198。
 - `pack.sh` 的改动、缓存里的权限位分布、Performant_Isabelle_ML 的 `rescue_foreign.ML`、`RELEASE_CHECKLIST.md` 与 `build.yml` 的引用行：作者核对文件。
 - 官方 tarball `~/isa_release_proto/Isabelle2025-2_linux.tar.gz` sha256 `a20a507bc7c1270d8be96a9f3fbec06345387789d2dc2c4d3df6260d47bfb33c`。
 - 第五轮（`…REVIEW5.md`，scratchpad `review-ipc5/`）：pre-unlink 的环境变量只有 `ROOT_PREFIX`、`PREFIX`、`PKG_NAME`、`PKG_VERSION`、`PKG_BUILDNUM`，

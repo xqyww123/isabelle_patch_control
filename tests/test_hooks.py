@@ -294,8 +294,8 @@ def test_pre_unlink_residue_after_a_lock_timeout(prefix, monkeypatch):
         finally:
             fcntl.flock(f, fcntl.LOCK_UN)
     assert text == said(texts.residue("f2", texts.REASON_LOCK, [("README", False), ("bin/new2", True), ("src/Pure/b.ML", False)],
-                                      prefix.tree, lock_package=("isabelle-f3", "1")))
-    assert (f"run:\n  conda install -p {prefix.path} {texts.CHANNELS} isabelle-f3=1\n  conda remove -p {prefix.path} isabelle-f3\n") in text
+                                      prefix.tree, lock_package=("isabelle-f3", "2025.2.1")))
+    assert (f"run:\n  conda install -p {prefix.path} {texts.CHANNELS} isabelle-f3=2025.2.1\n  conda remove -p {prefix.path} isabelle-f3\n") in text
     assert texts.UPDATE_LINE in text and "reinstall the isabelle package" not in text and "delete every file" not in text
 
 
@@ -400,7 +400,7 @@ def test_pre_unlink_that_cannot_tell_the_residue_exits_non_zero_and_writes_nothi
 def test_pre_unlink_when_the_chain_does_not_link(prefix):
     prefix.hook("post-link")
     shutil.rmtree(prefix.features_d / "f2")
-    error = texts.chain_broken("isabelle-f3", "1", "isabelle-f2", "1", None)
+    error = texts.chain_broken("isabelle-f3", "2025.2.1", "isabelle-f2", "2025.2.1", None)
     text = prefix.hook("pre-unlink", "f3")
     assert text == said(texts.chain_broken_removal("f3", "isabelle-f3", error, prefix.tree)) and texts.UPDATE_LINE in text
     assert prefix.hook("pre-unlink", "f2") == said(texts.chain_broken_removal("f2", "isabelle-f2", error, prefix.tree))

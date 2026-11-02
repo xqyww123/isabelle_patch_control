@@ -30,7 +30,7 @@ import urllib.error
 import urllib.request
 
 from common import (Refused, Wanted, build_string_prefix, conda_archive, indexed, isabelle_pin, isabelle_version, main,
-                    package_name, pinned_build, plan_builds)
+                    package_name, package_version, pinned_build, plan_builds)
 
 TOOL = "isabelle-patch-control"
 # The channel's Cloudflare front refuses urllib's default User-Agent (error 1010, HTTP 403).
@@ -70,14 +70,14 @@ def plan(channel: str, isabelle_build: str, tool_version: str, tool_prefix: str,
     for tag in tags:
         m = TAG.match(tag)
         if not m:
-            raise Refused(f"{tag!r} is not a release tag <R>/<feature>/<version>")
-        features.append((tag, m[2], m[3], build_string_prefix(m[1])))
+            raise Refused(f"{tag!r} is not a release tag <R>/<feature>/<m>")
+        features.append((tag, m[2], build_string_prefix(m[1])))
     if len({f[1] for f in features}) != len(features):
         raise Refused("the batch names a feature twice")
     lines = sorted({tag.split("/")[0] for tag, *_ in features})
     if len(lines) > 1:
         raise Refused(f"the batch's release tags span the release lines {' and '.join(lines)}: one batch is one isabelle version")
-    version = isabelle_version(features[0][3])
+    version = isabelle_version(features[0][2])
     if rehearsal:
         for subdir in PLATFORMS:
             if any(rec.get("name") == "isabelle" and rec.get("version") == version and rec.get("build") == isabelle_build
@@ -87,7 +87,8 @@ def plan(channel: str, isabelle_build: str, tool_version: str, tool_prefix: str,
                               "two apart")
     noarch = repodata(channel, "noarch")
     wanted = [Wanted(TOOL, tool_version, tool_prefix, None)]
-    wanted += [Wanted(package_name(f), v, prefix, isabelle_pin(prefix, isabelle_build)) for _, f, v, prefix in features]
+    wanted += [Wanted(package_name(f), package_version(tag), prefix, isabelle_pin(prefix, isabelle_build))
+               for tag, f, prefix in features]
 
     def fetch(filename: str) -> dict | None:
         data = get(f"{channel}/noarch/{filename}")

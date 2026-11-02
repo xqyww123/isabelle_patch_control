@@ -3,9 +3,9 @@
 
 The one recipe of every feature package (patch tool plan decision 10).  <package dir> is a
 feature's package directory in its feature repository, checked out at a release tag; the tag
-picks its patches/<R>/provenance.txt, which gives everything the recipe needs: version, base
-package and pin, build string prefix.  Writes <dir>/recipe.yaml and <dir>/files/, the package's
-files laid out as under the environment's prefix:
+picks its patches/<R>/provenance.txt, whose release and base tags give everything the recipe needs:
+the version (dev.package_version), the base package and its pin, the build string prefix.  Writes
+<dir>/recipe.yaml and <dir>/files/, the package's files laid out as under the environment's prefix:
 
   share/isabelle_patch_control/features.d/<feature>/   the patch files and provenance.txt, as committed
   share/doc/<package>/README.md                         this repository's common-readme.md, then the feature's README.md
@@ -25,8 +25,8 @@ import shutil
 import sys
 from pathlib import Path
 
-from common import (TOOLS_DIR, Refused, build_string_prefix, components_bat, components_sh, feature_pin, isabelle_pin,
-                    main, package_name, run, shipped_files)
+from common import (TOOLS_DIR, Refused, build_string_prefix, components_bat, components_sh, isabelle_pin, main,
+                    package_name, package_version, run, shipped_files)
 from isabelle_patch_control.features import provenance_fields
 
 HOOKS = TOOLS_DIR.parent / "isabelle_patch_control" / "hooks"
@@ -141,7 +141,8 @@ def render(package: Path, isabelle_build: str, n: int, out: Path) -> str:
         raise Refused(f"{out} is not empty")
     r, fields = release_of(package)
     release_tag = fields["release_tag"]
-    _, feature, version = release_tag.split("/")
+    feature = release_tag.split("/")[1]
+    version = package_version(release_tag)
     name = package_name(feature)
     prefix = build_string_prefix(r)
     for v in (feature, version, prefix):
@@ -156,9 +157,9 @@ def render(package: Path, isabelle_build: str, n: int, out: Path) -> str:
         raise Refused(f"{package} differs from the checked-out release tag {release_tag}:\n{dirty.rstrip()}")
 
     depends = [TOOL_PIN, isabelle_pin(prefix, isabelle_build)]
-    _, base_feature, base_version = fields["base_tag"].split("/")
+    base_feature = fields["base_tag"].split("/")[1]
     if base_feature != "pristine":
-        depends.append(f"{package_name(base_feature)} {feature_pin(base_version, prefix)}")
+        depends.append(f"{package_name(base_feature)} =={package_version(fields['base_tag'])}")
 
     files = out / "files"
     fd = files / "share" / "isabelle_patch_control" / "features.d" / feature
