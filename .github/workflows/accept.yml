@@ -38,7 +38,7 @@ on:
         default: ""
         type: string
       other_component:
-        description: "An Isabelle_RPC-style component package for (c) and (e)"
+        description: "An Isabelle_RPC-style component package for (c) and (e); empty skips (e) and (c)'s check of a second component"
         default: ""
         type: string
       online_channel:

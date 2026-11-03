@@ -431,7 +431,7 @@
     代价答复："全都接受"，"A 发布时间不需要考虑"（派发两次照旧），"B 你在 SKILL 里写清就够了。但要允许别人有特殊情况，就是不写构建脚本。你要灵活啊，
     别死脑筋只想着攻防！…在我们场景里所有一切都是可信任的！"，"C 无所谓"（下载计数器暂停更久），"D 可接受"（每个 feature 一个脚本），"E 可接受"
     （开新 feature 要在 release-features.yml 的表里加一行）。于是：
-    - `release-features.yml` 新任务 `sessions`（五平台、360 分钟）：在装好整批的新环境里 `isabelle build -b HOL`，再按这一批的顺序在每个 feature
+    - `release-features.yml` 新任务 `sessions`（五平台、360 分钟；【2026-11-02 第 45 条：不在 osx-arm64 上跑】）：在装好整批的新环境里 `isabelle build -b HOL`，再按这一批的顺序在每个 feature
       的包目录里跑 `tools/release_build.sh`（`ISABELLE` 指环境的 Isabelle）；没有脚本的 feature 只编 HOL、打印一行；`publish` 等它。
     - build 任务检出这一批每个 feature，每个仓库按这一批里它最高那个 feature 的 tag 打成 tar（`feature-sources`，按 MLML `contrib/` 名并排放，
       `batch.txt` 记顺序与包目录）；仓库表加第三列 contrib 名、补齐五行。
@@ -450,6 +450,24 @@
       `base_package_version` 与 `base_pin`；Isabelle2025-2 已发布的三个 tag 的来历文件留着旧值，没有读者。
     - 用词：单说"版本"指包的版本；tag 末尾的数写 `<m>`、注明 1、2、3……；`<n>` 仍是 build 号。
     - Windows 路径估算的版本取 `<Y>.<k>.99`（比原来长 7 个字符；今天实际最长 158，按版本 `<Y>.<k>.99`、build 号 99 估算为 160，预算 198）。
+45. **批量发布 workflow 第一次真跑暴露的三个缺陷与用户的裁定**（2026-11-02）。运行 41424597268（main dc891fa，`publish=false`，
+    `Isabelle2026/bicompose_rename_fix/1`）：build、roundtrip 与五条腿的 `sessions` 都绿（osx-arm64 那条是重跑那次）；五条 `accept` 腿全红：(c) 的第二个组件
+    `isabelle-performant-ml` 当时只有 2025.2 的版本（`other_component` 传空也没用：GitHub 把传空的输入换成默认值）；(g) 在 win-64 上
+    "只剩 `contrib/cygwin/`"的期望错了（§2.3 的更正）；`sessions` 在 osx-arm64（macos-15，3 核 7 GB）上太慢：重跑那次（job 125252125670）
+    成功，但 HOL 2:53:43 elapsed、factor 0.53；第一次 72 分钟以上未完、被取消。用户："我们不能接受在产品 conda 上测试，而现在我们没有别的测试渠道。所以你的评审必须足够强"；问
+    "为啥要有默认项""这个选项是用来控制什么的""我觉得这个检查有点幼稚"之后（作者先附和了要删，没查第 26 条的来由，被用户指出），定："我建议你还是
+    别删了，恢复默认值 isabelle-performant-ml"、"isabelle-performant-ml 能过的"（0.2.1 当天发布，装在 2026 上）、"赞同去掉 osx-arm64 上编 HOL
+    那一步"。于是：
+    - `other_component` 默认仍是 `isabelle-performant-ml`，说明不再许诺"传空就跳过"；传空只在 `accept.yml` 与 `tools/accept`（玩具渠道、手工运行）
+      里表示跳过 (e) 与 (c) 对第二个组件的检查。
+    - (c) 不再整个依赖 `--other-component`：链在重装 `isabelle` 后仍全部打着、恰一次重打记录、`--component` 仍登记，每次都查；第二个组件给了才查。
+    - (g) 在 win-64 上：`isa/` 下只许剩 Cygwin 第一次运行写的东西——`contrib/cygwin/` 与 `contrib/cygwin/isabelle/symlinks` 列出的链接（`conda remove`
+      前读这份清单）；失败时列出其余文件。玩具 `isabelle` 在 Windows 上第一次被调用时照 `cygwin_init` 写清单里的链接（玩具包带一条
+      `contrib/cygwin/` 之外的），并像 postinstall 那样写 `contrib/cygwin/etc/passwd`，规则的两半在玩具 CI 上都能失败。`Leg.check` 的失败细节超过 30 行时注明省略了几行、全文另写一个文件。
+    - `sessions` 不在 osx-arm64 上跑（修订第 43 条的"五平台"）：arm64 上的 Poly/ML 由 linux-aarch64 覆盖，macOS 由 osx-64 覆盖；osx-arm64 的 `accept`
+      照旧。
+    - 两轮辩论评审（第一轮 wf_cfb6604b-029，离线：从 isabelle-packaging-ci 发布运行 41282713954 的产物按字节区间只取 win-64 isabelle 包、sha256 与
+      渠道一致，模拟安装→首次运行→卸载）判 (g) 的新规则离线确立正确；改后另做一轮离线复审，通过前不派发。
 
 作者 2026-10-24 对用户的更正（第二轮评审 C16、C22 与第三轮 C4 查出）：
 - 作者 2026-10-23 04:46 对用户说"问题 10 后半（内置 feature 出新版）消失了"是错的；该问题以问题 3 重新提出，由第 22 条解决。
@@ -522,7 +540,11 @@
   `isabelle.bat version`），用户目录里有 `etc/components`——所有组件登记随之消失。重链接 `isabelle`（`--force-reinstall`、升构建）时只有
   `isabelle` 自己的钩子跑，组件包的 post-link 不跑（下一点），登记不会回来。第 26 条由新构建的 post-link 重跑它们修复。Windows 上
   `isabelle.bat` 的 cygwin 初始化会往 `isa/` 写未跟踪文件，conda 只删跟踪的路径，所以 `conda remove isabelle` 后 `isa/contrib/cygwin/` 下有残留
-  （评审 C21 实测；`recipe.yaml:106` 的"no untracked files"不对）。
+  （评审 C21 实测；`recipe.yaml:106` 的"no untracked files"不对）。【2026-11-02 更正（第 45 条，运行 41424597268）：残留不只在 `contrib/cygwin/`
+  下。`cygwin_init`（`Environment.java:303-325`）建出包里 `contrib/cygwin/isabelle/symlinks` 列出的每一条链接（两行一组：`./<链接>`、内容），
+  Isabelle2026 有 848 条，其中 245 条在 `contrib/cygwin/` 之外（243 条在 `contrib/e-3.2/src/{lib,include}`，2 条在 `contrib/rsync-3.2.7-2/src`），
+  包里都不带；rebaseall 与 postinstall 再在 `contrib/cygwin/` 下写文件。C21 实测的只是 conda 那一半（只删跟踪路径），用的玩具清单只有
+  `contrib/cygwin/` 的路径，看不到这些。`recipe.yaml:113-117` 的注释同样写窄了，由 isabelle-packaging-ci 按它自己的流程改。】
 - **钩子的执行与失败语义（conda 25.11.1，评审实测）**：conda 先链接事务里的全部包，再依次跑 post-link（`core/link.py:938-967`）；一个
   post-link 失败后其余的照跑，最后回滚（`:1006-1007,1038-1045`）；**回滚只撤文件链接、不跑任何脚本**（`:1129-1160`，入口 `:1042`），所以前面的
   post-link 已经写进 `isa/` 的改动留在树里、而包没了；回滚还删 `conda-meta/history`（`core/path_actions.py:1075-1080`），之后 conda 不再认
@@ -1036,7 +1058,9 @@ README 已有 "Working in the Isabelle source repository" 一节。都未提交�
   原版 build 就是 0。改为：`release-plan --rehearsal` 只在线上渠道已有同版本同 build 的 `isabelle` 时拒绝（同名同版本同 build 的两个包 conda 分不清，
   这才是原规矩的理由）；版本从批次的 release tag 来，验收的 `isabelle=2025.2=…` 全改成该版本；(e)(i) 用的"非原版 build"（2025.2 是 0）只记在
   `release-plan` 的一张表里，别的版本为空、(e)(i) 跳过。设计与经过见 Git 迁移方案 §12 执行状态"另记"里 conda 会话那一条。落地（c8b17aa，两轮评审）
-  后本决定其余各处照此读：输入多一个 `other_component`（默认 `isabelle-performant-ml`，它只装在 2025.2 上）；build 任务多输出 `isabelle_version` 与
+  后本决定其余各处照此读：输入多一个 `other_component`（默认 `isabelle-performant-ml`，它只装在 2025.2 上；【2026-11-02 更正（§0 第 45 条）：
+  0.2.1 起它也装在 2026 上；GitHub 把传空的输入换成默认值，所以这个输入不能"传空跳过"，说明不再这样许诺；传空只在 `accept.yml` 与
+  `tools/accept` 里表示跳过 (e) 与 (c) 对第二个组件的检查】）；build 任务多输出 `isabelle_version` 与
   `isabelle_non_pristine_build`；roundtrip 装 `isabelle <isabelle_version> <b>`；§6 的 (a)(h) 等装 `isabelle=<isabelle_version>=…`，(e)(i) 从
   `isabelle_non_pristine_build` 起、为空就跳过；(h) 的更新留在本线（`conda install --update-all "isabelle==<V>"`，用户 2026-10-31 "赞同 judge"），工具的
   exit 3 建议同改；`--strict` 只放过选项真为空要求的跳过；CI 的玩具渠道同时有 Isabelle2025-2 与 Isabelle2026 两条线】；需要一个对 `isabelle-packaging-ci` 有 `actions:read` 的 token，run token 的权限不能放宽，
@@ -1076,7 +1100,7 @@ README 已有 "Working in the Isabelle source repository" 一节。都未提交�
      **显式设为 flexible**（setup-miniconda 的 `channel-priority: flexible`，不依赖 Miniforge 的默认）：rehearsal 里本地渠道有 `isabelle` 包，
      (e)、(i) 的 `isabelle=2025.2=0` 要越过它拿到线上的 build 0，strict 下是 LibMambaUnsatisfiableError（代码评审三轮实测；第 39 条）。（原先批次里有
      带组件载荷的 feature 时 linux-64 还跑 §6 (a) 的 session 构建、`session_build_legs` 加别的腿；§0 第 43 条删去，由下一项取代。）
-  3b. **`sessions`**（§0 第 43 条；`needs: build`，与 `accept` 同五条腿，360 分钟）：建一个装好整批的新环境（本地渠道同 `roundtrip`，Windows 上路径用
+  3b. **`sessions`**（§0 第 43 条；`needs: build`，与 `accept` 同五条腿【2026-11-02 第 45 条：不在 osx-arm64 上跑】，360 分钟）：建一个装好整批的新环境（本地渠道同 `roundtrip`，Windows 上路径用
      `cygpath -m` 形式），解开 `feature-sources`，`isabelle build -b HOL`，再按 `batch.txt` 的顺序在每个包目录里跑 `tools/release_build.sh`（`ISABELLE`
      指环境的 Isabelle）；没有脚本的只编 HOL、打印一行；失败时上传源码目录（golden 的 `.actual` 在里面）。编什么由脚本定，指导原则在 SKILL 3.4 第 4 步。
   4. **`publish`**（`needs: [build, roundtrip, accept, sessions]`，仅 `publish=true`）：对 `feature-packages` **调一次**
@@ -1122,7 +1146,8 @@ README 已有 "Working in the Isabelle source repository" 一节。都未提交�
    `ci.yml` 的非发布 dispatch 接受 `build_number`（今天 `:19-23` 不传），`release.yml` 之后用同一个号发布：批量发布 workflow 要先对那次运行的
    artifact 排练（决定 11 的 `isabelle_from=run:<id>`）。artifact 只保留 7 天，过期重跑。
 4. `PACKAGING_DESIGN.md` 加附录 A 的一节，并改写与之矛盾的段落：`PACKAGING_DESIGN.md:20-30`、`:737`、§7.9（`:876-`）、§7.11（`:940-`）、`:1027`；
-   `recipe.yaml:3,6-9,20,182-184,235-237,253-264`；`recipe.yaml:106` 的 "no untracked files"（Windows 上 cygwin 初始化会写）；`pack.sh` 里把
+   `recipe.yaml:3,6-9,20,182-184,235-237,253-264`；`recipe.yaml:106` 的 "no untracked files"（Windows 上 cygwin 初始化会写）；`recipe.yaml:113-117`
+   说残留只在 `isa\contrib\cygwin\` 下，写窄了（§2.3 的 2026-11-02 更正；isabelle-packaging-ci 按它自己的流程改，本计划不动那个仓库）；`pack.sh` 里把
    Pure 称作 "patched" 的注释；`publish-conda.yml:55` 过时的 `package_name` 说明。
 5. **先修 `publish-conda.yml` 的 banner 步骤**（`:223-227`；§2.3），修法要对同仓库调用（`uses: ./…`）和跨仓库调用（`…@main`，批量发布 workflow
    就是）都成立：用 `actions/checkout` 检出 `repository: ${{ job.workflow_repository }}`、`ref: ${{ job.workflow_sha }}`（GitHub 文档记载的两个
@@ -1300,7 +1325,8 @@ Performant_Isabelle_ML `release-conda.yml:423-425,527-529` 与 auto_sledgehammer
     只有本地渠道加 conda-forge），带 `--strict`：任何"跳过"都算 WRONG。`toy-channel` 与 `hooks` 用发布 `build` job 的同一个 rattler-build 安装
     action。
   玩具渠道上跑不到、只在 §5 第 7 步排练与第 8 步发布里跑的：要真 `isabelle` 包或线上渠道的部分——`sessions` 任务（§0 第 43 条）、(l) 作数的数字、
-  经 Cygwin 的 `isabelle.bat version -i`、(g) 的 `contrib/cygwin` 残留、(e)/(i) 对线上 build 0、真组件、真重跑 post-link、`build`/`roundtrip`/
+  经 Cygwin 的 `isabelle.bat version -i`、(g) 的 Cygwin 残留（玩具 `isabelle` 自 2026-11-02 起在 Windows 上模仿 `cygwin_init`，第 45 条）、(e)/(i)
+  对线上 build 0、真组件、真重跑 post-link、`build`/`roundtrip`/
   `publish`/`smoke` 本身（玩具渠道不得与线上渠道混用：它的 `isabelle-2025.2-0` 与线上的同名）。留在本地、一次性、不提交的：新 pytest 测试的
   变异检查；钩子层分段规则在归档输出与一个改坏的输出上的验证；`accept` 的两个反对照（"坏工具"渠道下 (a) 必须报 WRONG；去掉 `||` 那句的钩子
   片段重渲染后 (m) 必须报 WRONG；本地 2026-10-29 已做，都报了）。macOS 两条腿的 runner 与可复用 workflow 用户 2026-10-29 已定（第 39 条）。
@@ -1550,18 +1576,20 @@ situation" 的第一条（第 41 条"赞同 1"）——源码归 conda 管、不
   (b) `conda remove isabelle-light-locale` → light 反打干净、新建文件消失、下层 feature 不动、`etc/components` 不再列它；剪枝三例（决定 15）；
   每例之后跑 (k)；
   (c) `conda install --force-reinstall isabelle` → 重跑直接依赖者的 post-link：`status` 不变，`etc/components` 仍列出 light 与一个
-  Isabelle_RPC 式的组件，conda 输出一次重打记录；
+  Isabelle_RPC 式的组件，conda 输出一次重打记录；【2026-11-02 第 45 条：(c) 每次都跑；第二个组件（`other_component`）给了才装、才查它的登记】
   (d) `conda create --clone` → 新环境 `status` 与原环境相同；
   【2026-10-31：(e) 与 (i) 用的是该版本在线上的"非原版 build"（2025.2 是 0），别的版本没有就跳过，见决定 11 的更正。】
   (e) 在装着 `isabelle-2025.2-0`（线上）加一个组件包的环境里 `conda install isabelle-light-locale` → solver 把 `isabelle` 升到原版构建、链打好、
-  组件登记由新 post-link 重建（第 22、26 条）；
+  组件登记由新 post-link 重建（第 22、26 条）；【2026-11-02 第 45 条：没有 `other_component` 时 (e) 跳过（只在 `accept.yml` 与 `tools/accept`
+  里可能；发布时它总有值）】
   (f1) 把一个 light 要改的跟踪文件**换成一个新文件**（`sed -i`，或写临时文件再 `mv`；**永不**用 `>`/`>>` 或就地写入的编辑器——那会穿过硬链接写进
   这条腿的包缓存，评审五 C9 实测）后装 light → 安装成功、诊断按决定 15 的不变式恰一段、`status` 显示 CONFLICT 与其下 applied、环境仍可用；再
   `--force-reinstall isabelle` → 全部 applied、没有诊断；
   (f2) 在 light 新建的路径（如 `isa/src/Pure/exported_premises.ML`）上先放别的内容再装 light → CONFLICT；再 `--force-reinstall isabelle` 而
   CONFLICT 仍在（conda 不跟踪这个路径）→ 仍恰一段完整诊断。（经硬链接原地改写的诊断随第 41 条删掉的检测作废，`s_hardlink` 已删。）
   (g) 全部 pre-unlink 成功的前提下 `conda remove isabelle` → 四条 POSIX 腿 `test ! -e "$PREFIX/isa"`；win-64 上断言没有任何 feature 补丁的目标
-  路径存在、没有 `isa.staging`、`isa/` 下剩下的都在 `contrib/cygwin/` 之下（这是 `isabelle` 包自己的残留，§2.3）；装与不装 feature 包各一次；
+  路径存在、没有 `isa.staging`、`isa/` 下剩下的只有 Cygwin 第一次运行写的东西：`contrib/cygwin/` 与 `contrib/cygwin/isabelle/symlinks` 列出的
+  链接（这是 `isabelle` 包自己的残留，§2.3 与它 2026-11-02 的更正；第 45 条）；装与不装 feature 包各一次；
   用户目录不存在；
   (h) 只在 `build` job 的 `isabelle_old_build` 非空时执行（线上有钉着别的 `isabelle` 构建的链顶包；评审五 C9，第 39 条）。起始状态：从**线上渠道加
   conda-forge**（这是决定 11 渠道规则的唯一例外，因为旧构建只在线上）建环境，装 `isabelle=2025.2=<isabelle_old_build>`、本批的链顶 feature 包、
@@ -1684,6 +1712,17 @@ situation" 的第一条（第 41 条"赞同 1"）——源码归 conda 管、不
 - `isabelle-ai` 元包要不要依赖 `isabelle-future-assign-interrupt`（它是每个人都该有的修复，原版构建不带它）。
 
 ## 10. 对照表（**与裁决不同之处明说**）
+
+### 10.0b 第一次真跑之后的修复评审（2026-11-02；§0 第 45 条；离线，不碰线上渠道；judge 裁定 6 条，交用户 1 条）
+
+| judge 裁定 | 本版 |
+|---|---|
+| E1 传空跳过永远做不到；默认组件 0.2.1 已装在 2026 上（用户定） | 用户："恢复默认值 isabelle-performant-ml"；说明不再许诺传空跳过；已做于决定 11 的更正与第 45 条 |
+| E2 (c) 整个依赖 `--other-component`，连 `--component` 的登记检查也一起丢 | 代码已改：(c) 每次都跑，第二个组件给了才查；已做于 §6 (c) |
+| E3 win-64 的 (g) 在玩具 CI 上不可能失败；`./` 前缀的处理没交代 | 代码已改：玩具 `isabelle` 在 Windows 上模仿 `cygwin_init`；`removeprefix("./")` |
+| E4 失败细节只印最后 30 行、不说省略 | 代码已改：`Leg.check` 注明省略的行数、全文写进工作目录的文件；(g) 的细节是排好序的路径 |
+| E5 方案仍写"残留只在 `contrib/cygwin/`"（错误期望的来源） | 已做于 §2.3 的更正、§6 (g)、决定 15"玩具渠道上跑不到"那一行与决定 12 第 4 点；**偏离第三轮 C21 的裁定措辞**：C21 实测的只是 conda 那一半，清单里 `contrib/cygwin/` 之外的链接它看不到 |
+| E6 决定 11 的记录过时 | 已做于决定 11 的 2026-11-02 更正与 §6 (e) |
 
 ### 10.0a 代码评审三轮（2026-10-28；§5 第 5 步的实现：渲染器、批量发布 workflow、byte check、钩子层测试；24 条裁定，judge 判 not-accepted；用户裁决见 §0 第 39 条）
 

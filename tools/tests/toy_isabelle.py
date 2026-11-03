@@ -6,6 +6,10 @@ isa/bin/isabelle.bat.  It answers what the hooks and tools/accept ask:
   version [-i]                                 the identifier, or etc/ISABELLE_ID
   components -u|-x <dir>                       <dir> added to or removed from the user's etc/components
 
+On Windows its first call does what Isabelle's cygwin_init does there: it writes the links that
+contrib/cygwin/isabelle/symlinks names (one of them outside contrib/cygwin/) and, as its postinstall does,
+contrib/cygwin/etc/passwd; conda tracks none of them.
+
 As the isabelle package's post-link, `--rerun-post-links` re-runs the post-link of every installed
 package that depends on isabelle directly, dependencies first (plan §0 items 26, 33, 34; the CI plan
 implements the real one).  One self-contained file: python writes no __pycache__ for a script.
@@ -70,7 +74,23 @@ def rerun_post_links():
                                          "PKG_VERSION": d["version"], "PKG_BUILDNUM": str(d["build_number"])})
 
 
+def cygwin_init():
+    """Environment.cygwin_init: while the marker is there, delete it, write each listed link and, as its
+    postinstall does, contrib/cygwin/etc/passwd."""
+    cygwin = HOME / "contrib" / "cygwin"
+    marker = cygwin / "isabelle" / "uninitialized"
+    if WINDOWS and marker.is_file():
+        marker.unlink()
+        lines = (marker.parent / "symlinks").read_text().splitlines()
+        for link, content in zip(lines[0::2], lines[1::2]):
+            (HOME / link).write_text(f"!<symlink>{content}\0")
+        (cygwin / "etc").mkdir(exist_ok=True)
+        (cygwin / "etc" / "passwd").write_text("")      # postinstall's mkpasswd >/etc/passwd
+
+
 def main(args: list[str]) -> int:
+    if args != ["--rerun-post-links"]:      # isabelle.bat's calls; the post-link runs this script directly
+        cygwin_init()
     match args:
         case ["getenv", "-b", "ISABELLE_HOME_USER"]:
             print(cygwin(user_dir()))

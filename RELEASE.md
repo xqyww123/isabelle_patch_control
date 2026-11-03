@@ -127,7 +127,7 @@ Inputs:
 | `isabelle_from` | `channel` (the build is on conda.qiyuan.me) or `run:<isabelle-packaging-ci run id>` (rehearsal against that run's `conda-packages` artifact, which must carry `isabelle_build` of the batch's `isabelle` version (`local-channel` refuses otherwise), a build the channel does not serve yet (`release-plan --rehearsal` refuses otherwise)) |
 | `tool_ref` | the tag of this repository to build the tool from (default: the triggering ref) |
 | `features` | the explicit list of feature release tags to publish, bottom first: the first one built on pristine, each next one built on the one before (`check-packages` refuses any other list); no default. Two features built on the same base go into separate batches, each from the bottom up to its own feature; the later batch reuses the lower packages the earlier one published. The tags are all of one release line `<R>` (`release-plan` refuses a batch that spans two). When every feature package is republished for a new `isabelle` build of `<R>`, take, for each feature package with builds of `<R>` on the channel (build string `<build string prefix>_<n>`, for example `Isabelle2025_2_3`), the release tag `<R>/<feature>/<m>` of its highest version among those builds (`<m>` is that version's last number; `git tag --list` would also bring in tags not yet published), and split these tags into batches as above: one batch for each of them that no other is built on, listing it and the features below it, bottom first |
-| `other_component` | an Isabelle_RPC-style component package on the channel that installs on this `isabelle` version, for the `accept` scenarios that install a second component (plan §6 (c), (e)); default `isabelle-performant-ml`; on an `isabelle` version that no record of it installs on (a new release line before the component is ported), (c) fails at creating its environment: name another component, or give it empty to skip (c) and (e) |
+| `other_component` | an Isabelle_RPC-style component package on the channel that installs on this `isabelle` version, for the `accept` scenarios that install a second component (plan §6 (c), (e)); default `isabelle-performant-ml`, which has releases for Isabelle2025-2 (0.2.0) and Isabelle2026 (0.2.1). GitHub gives an input dispatched empty its default. On a release line the component has no release for yet, (c) fails at creating its environment: release the component for that line first, or name another component that installs |
 | `publish` | default `false`; `publish=true` together with `isabelle_from=run:…` fails at once |
 
 Jobs, in order: **build** (one `ubuntu-latest` job, `rattler-build` 0.69.1) reads the channel's
@@ -149,7 +149,8 @@ feature, and runs `tools/check-roundtrip` against the installed tool and `featur
 `.github/workflows/accept.yml`, which `tests.yml` also runs on the toy channel) installs the batch
 into a fresh environment and checks, through `status` and the bytes of every touched file, that the batch
 is applied, that removing a package reverses it, and that `--force-reinstall isabelle` re-applies
-it (plan §6). **sessions** (the same five legs) installs the batch into a fresh environment, builds
+it (plan §6). **sessions** (the same legs but osx-arm64, whose runner took about three hours for HOL; Poly/ML on
+arm64 is linux-aarch64's, macOS osx-64's) installs the batch into a fresh environment, builds
 HOL, and runs each feature's `tools/release_build.sh` in its package directory, in the order of the
 batch (a feature without one gets only HOL). `roundtrip`, `accept` and `sessions` stop the batch; a
 failure whose fix changes a feature's tagged files costs that feature's number `<m>`. **publish**

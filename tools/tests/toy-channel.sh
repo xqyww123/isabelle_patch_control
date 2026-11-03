@@ -106,6 +106,10 @@ isabelle_recipe() {  # <build number> <ISABELLE_ID> <output channel>
   cp -a "$W/isa-src/." "$d/files/isa/"
   printf '%s\n' "$id" > "$d/files/isa/etc/ISABELLE_ID"
   cp "$here/toy_isabelle.py" "$d/files/isa/bin/isabelle.py"
+  # Cygwin's first-run files as Isabelle ships them: the list of links (./<link>, content), one outside contrib/cygwin/, and the marker
+  mkdir -p "$d/files/isa/contrib/cygwin/isabelle"
+  printf '%s\n' ./etc/toy-link ISABELLE_ID > "$d/files/isa/contrib/cygwin/isabelle/symlinks"
+  : > "$d/files/isa/contrib/cygwin/isabelle/uninitialized"
   printf '#!/bin/bash\nexec "$(dirname "$0")/../../bin/python" -I "$(dirname "$0")/isabelle.py" "$@"\n' > "$d/files/isa/bin/isabelle"
   crlf '@echo off' '"%~dp0..\..\python.exe" -I "%~dp0isabelle.py" %*' 'exit /b %errorlevel%' > "$d/files/isa/bin/isabelle.bat"
   printf '#!/bin/bash\n"$PREFIX/bin/python" -I "$PREFIX/isa/bin/isabelle.py" --rerun-post-links || true\nexit 0\n' \

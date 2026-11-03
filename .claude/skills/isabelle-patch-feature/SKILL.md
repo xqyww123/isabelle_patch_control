@@ -231,7 +231,7 @@ Any new commit on the branch (a fix for a checklist point or for the build) star
 8. **Publishing to the conda channel**, on order. Pause the download counter while you release
    (the SKILL conda-release, "4. Before: pause the download counter"). Dispatch the patch tool's
    `release-features.yml` with `publish=false`; when its `roundtrip` job, its five `accept` legs and
-   its five `sessions` legs are green, dispatch it again with `publish=true`. Its `features` input
+   its `sessions` legs are green, dispatch it again with `publish=true`. Its `features` input
    lists release tags, each feature after the one it is built on. When the `isabelle` conda package
    gets a new build, every feature package is re-released the same way, with the same versions. The
    inputs, jobs and recovery: RELEASE.md, "The batch release workflow".

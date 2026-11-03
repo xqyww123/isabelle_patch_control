@@ -8,7 +8,7 @@
 # clones every feature of the batch and uploads its repositories as feature-sources.  `roundtrip` runs
 # tools/check-roundtrip against the installed packages and tool; `accept` runs tools/accept (§6) on
 # five legs through accept.yml, the reusable workflow tests.yml also runs on the toy channel;
-# `sessions` installs the batch on the same five legs, builds HOL and runs each feature's
+# `sessions` installs the batch on the same legs but osx-arm64, builds HOL and runs each feature's
 # tools/release_build.sh (SKILL isabelle-patch-feature, 3.4 step 4); `publish` calls
 # publish-conda.yml once for the whole batch; `smoke` installs from the channel what the README tells
 # users to install.
@@ -40,7 +40,7 @@ on:
         required: true
         type: string
       other_component:
-        description: "An Isabelle_RPC-style component package on the channel that installs on this isabelle version; empty skips the scenarios that use it"
+        description: "An Isabelle_RPC-style component package on the channel that installs on this isabelle version, for the accept scenarios (c) and (e)"
         default: isabelle-performant-ml
         type: string
       publish:
@@ -314,7 +314,7 @@ jobs:
         include:
           - {leg: linux-64, os: ubuntu-latest}
           - {leg: linux-aarch64, os: ubuntu-24.04-arm}
-          - {leg: osx-arm64, os: macos-15}
+          # no osx-arm64: macos-15's 3 cores and 7 GB took 2 h 54 min for HOL (run 41424597268); arm64 is linux-aarch64's, macOS osx-64's
           - {leg: osx-64, os: macos-15-intel}       # native Intel: under Rosetta Isabelle picks its arm64 programs
           - {leg: win-64, os: windows-latest}
     defaults:

@@ -20,13 +20,15 @@ scenario can run.
       is of --subdir, (k) bytes.
   (b) removing the component package (the user directory stays: isabelle was asked for), then the
       three pruning shapes; (k) after each.
-  (c) --force-reinstall isabelle with --other-component installed: still all applied, both registered.
+  (c) --force-reinstall isabelle: still all applied, one re-apply record, the component still registered,
+      and --other-component, installed too when given, still registered.
   (d) --clone gives the same state.
   (e) from isabelle at --non-pristine-build with --other-component: installing the component moves
       isabelle to <b>, the chain is applied, the registration is rebuilt.
   (f1), (f2) CONFLICT: one complete diagnostic, the features below applied; --force-reinstall isabelle.
-  (g) conda remove isabelle leaves no isa/ (win-64: no target of a patch, no isa.staging, only
-      contrib/cygwin/ remains) and no user directory (one with heaps/ in it before); with and
+  (g) conda remove isabelle leaves no isa/ (win-64: no target of a patch, no isa.staging, only what
+      Cygwin's first run wrote remains: contrib/cygwin/ and the links that contrib/cygwin/isabelle/symlinks
+      names) and no user directory (one with heaps/ in it before); with and
       without feature packages.
   (h) with --old-build: from --start-channel (the online channel: decision 11's one exception) at that
       isabelle build, the update that keeps the release line (`conda install --update-all
@@ -173,7 +175,12 @@ class Leg:
             self.passed += 1
         else:
             print(f"WRONG    {what}")
-            for line in (detail or self.out).splitlines()[-30:]:
+            lines = (detail or self.out).splitlines()
+            if len(lines) > 30:
+                whole = self.work / f"wrong-{time.monotonic_ns()}.txt"
+                whole.write_text("\n".join(lines) + "\n")
+                print(f"           ({len(lines) - 30} lines before these not shown; all in {whole.name})")
+            for line in lines[-30:]:
                 print(f"           {line}")
             self.failed.append(what)
         return ok
@@ -318,17 +325,17 @@ def scenario_b(leg: Leg, a, chain):
 
 
 def scenario_c(leg: Leg, a):
-    if leg.lacks("(c)", "--other-component"):
-        return
-    e = leg.env("c", isabelle_at(a, a.isabelle_build), a.top, a.other_component)
+    e = leg.env("c", isabelle_at(a, a.isabelle_build), a.top, *filter(None, [a.other_component]))
     if not e:
         return
     leg.check("(c) before: all applied", leg.all_applied(e))
     leg.conda("install", e, "--force-reinstall", "isabelle")
     leg.check("(c) --force-reinstall isabelle: still all applied", leg.all_applied(e))
     leg.check("(c) one re-apply record", leg.times("changed (applied:") == 1)
-    for p in filter(None, [a.component, a.other_component]):
-        leg.check(f"(c) {p} still registered", leg.registered(e, p))
+    if a.component:
+        leg.check(f"(c) {a.component} still registered", leg.registered(e, a.component))
+    if not leg.lacks("(c) a second component", "--other-component"):
+        leg.check(f"(c) {a.other_component} still registered", leg.registered(e, a.other_component))
 
 
 def scenario_d(leg: Leg, a, e_a: Path | None):
@@ -395,13 +402,18 @@ def scenario_g(leg: Leg, a):
         if not leg.check(f"({case}) isabelle names its user directory", user is not None):
             continue
         (user / "heaps" / "HOL").mkdir(parents=True, exist_ok=True)          # a user's heaps, so "gone" means deleted
-        leg.conda("remove", e, "isabelle")
         isa = e / "isa"
+        # Cygwin's first run (Isabelle's cygwin_init) writes contrib/cygwin/ and the links this list names, in
+        # pairs of lines (./<link>, content); conda tracks none of them. The list itself goes with the package.
+        listed = isa / "contrib" / "cygwin" / "isabelle" / "symlinks"
+        links = {x.removeprefix("./") for x in listed.read_text().splitlines()[0::2] if x} if listed.is_file() else set()
+        leg.conda("remove", e, "isabelle")
         if WINDOWS:
-            left = [p.relative_to(isa).as_posix() for p in isa.rglob("*") if p.is_file()] if isa.exists() else []
+            left = sorted(p.relative_to(isa).as_posix() for p in isa.rglob("*") if p.is_file()) if isa.exists() else []
             leg.check(f"({case}) no patch target left", not any((isa / t).exists() for t in targets))
             leg.check(f"({case}) no isa.staging", not list(e.glob("isa.staging*")))
-            leg.check(f"({case}) only contrib/cygwin/ left under isa/", all(x.startswith("contrib/cygwin/") for x in left))
+            other = [x for x in left if not x.startswith("contrib/cygwin/") and x not in links]
+            leg.check(f"({case}) only what Cygwin's first run wrote is left under isa/", not other, "\n".join(other))
         else:
             leg.check(f"({case}) no isa/ left", not isa.exists())
         leg.check(f"({case}) no user directory left", not user.exists())

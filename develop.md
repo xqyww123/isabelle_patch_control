@@ -125,8 +125,10 @@ controls (plan decision 15).
 the tool from `conda/recipe.yaml` (with its recipe's tests); a toy `isabelle` package in three
 builds (0 with the old `ISABELLE_ID`, 1 and 2 pristine) whose `isa/bin/isabelle` and
 `isa/bin/isabelle.bat` run one Python stub (`tools/tests/toy_isabelle.py`: `getenv`, `version`,
-`components`), whose two pre-unlinks are the real ones and whose post-link only re-runs the direct
-dependents' post-links (plan §0 items 26, 33, 34); three toy features cut from a toy source
+`components`; on Windows its first call writes the links its Cygwin list names, as Isabelle's
+`cygwin_init` does, one of them outside `contrib/cygwin/`, and `contrib/cygwin/etc/passwd`, as its
+postinstall does), whose two pre-unlinks are the real ones and
+whose post-link only re-runs the direct dependents' post-links (plan §0 items 26, 33, 34); three toy features cut from a toy source
 repository and rendered by the real renderer (each creates a file, the middle one ships a
 component); a component package of the Isabelle_RPC kind; a package that depends on `isabelle`
 only indirectly; a broken tool in a channel of its own; and a channel without the re-release for
