@@ -42,7 +42,7 @@ on:
         default: ""
         type: string
       online_channel:
-        description: "https://conda.qiyuan.me for a batch; empty for the toy channel, which must never meet the online one"
+        description: "https://conda-ci.qiyuan.me for a batch; empty for the toy channel, which must never meet the online one"
         default: ""
         type: string
       strict:

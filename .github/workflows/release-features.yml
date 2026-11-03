@@ -53,8 +53,10 @@ concurrency:
   group: release-features
   cancel-in-progress: false
 
+# Everything the batch downloads from the channel comes from https://conda-ci.qiyuan.me, the same bucket at an
+# address the download counter does not count.
 env:
-  CHANNEL: https://conda.qiyuan.me
+  CHANNEL: https://conda-ci.qiyuan.me
 
 jobs:
   build:
@@ -299,7 +301,7 @@ jobs:
       top: ${{ needs.build.outputs.top }}
       component: ${{ needs.build.outputs.component }}
       other_component: ${{ inputs.other_component }}
-      online_channel: https://conda.qiyuan.me
+      online_channel: https://conda-ci.qiyuan.me
     secrets:
       PACKAGING_CI_ACTIONS_READ_TOKEN: ${{ secrets.PACKAGING_CI_ACTIONS_READ_TOKEN }}
 
@@ -404,8 +406,10 @@ jobs:
   # After publishing, it can only report.  The first command is the README's install line, read
   # from the common text the renderer copies into every feature package (the key: the line that
   # starts with `conda create -n `; tests/test_docs.py uses the same key), so the documented
-  # command and the tested one cannot drift apart.  With a newer isabelle line on the channel it
-  # installs that line, as users get it; the batch's own line is checked by roundtrip and accept.
+  # command and the tested one cannot drift apart.  It runs with CHANNEL in place of the users'
+  # address, so that the download counter does not count it.  With a newer isabelle line on the
+  # channel it installs that line, as users get it; the batch's own line is checked by roundtrip
+  # and accept.
   smoke:
     name: "Smoke on ${{ matrix.os }}: the README's install command"
     needs: [build, publish]
@@ -420,6 +424,7 @@ jobs:
         shell: bash -l {0}
     env:
       CONDA_ALWAYS_YES: "true"
+      PUBLIC: https://conda.qiyuan.me  # the users' address, not a download
     steps:
       - uses: actions/checkout@v4
         with:
@@ -430,12 +435,14 @@ jobs:
           miniforge-version: latest      # conda-forge only: no defaults channel, no Terms of Service prompt
           auto-activate-base: true
           activate-environment: ""
-      - name: "The README's install command, as written"
+      - name: "The README's install command, from https://conda-ci.qiyuan.me"
         run: |
           set -euo pipefail
           cmd=$(grep -m1 '^conda create -n ' tool/common-readme.md)
-          echo "$cmd"
-          eval "$cmd" 2>&1 | tr -d '\r' | tee "$RUNNER_TEMP/create.txt"
+          run_cmd=${cmd//"$PUBLIC"/"$CHANNEL"}
+          [ "$run_cmd" != "$cmd" ] || { echo "::error::the README's command does not name $PUBLIC"; exit 1; }
+          echo "$run_cmd"
+          eval "$run_cmd" 2>&1 | tr -d '\r' | tee "$RUNNER_TEMP/create.txt"
           [ "$(grep -o -F 'The heaps shipped with the isabelle package' "$RUNNER_TEMP/create.txt" | wc -l)" = 1 ] \
             || { echo "::error::not exactly one heap paragraph"; exit 1; }
       - name: "Not the README's command: qiyuan-dev-patches, to cover the whole chain"
