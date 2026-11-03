@@ -228,13 +228,15 @@ Any new commit on the branch (a fix for a checklist point or for the build) star
    `git -C <feature repository> push origin main <R>/<F>/<m>`.
 7. **The features on this one:** `grep -l 'base = <R>/<F>$' contrib/*/.gitmodules`. Tell the owner;
    each of them merges this release (3.3) and is released in turn, in its own private tree.
-8. **Publishing to the conda channel**, on order. Pause the download counter while you release
-   (the SKILL conda-release, "4. Before: pause the download counter"). Dispatch the patch tool's
-   `release-features.yml` with `publish=false`; when its `roundtrip` job, its five `accept` legs and
-   its `sessions` legs are green, dispatch it again with `publish=true`. Its `features` input
-   lists release tags, each feature after the one it is built on. When the `isabelle` conda package
-   gets a new build, every feature package is re-released the same way, with the same versions. The
-   inputs, jobs and recovery: RELEASE.md, "The batch release workflow".
+8. **Publishing to the conda channel**, on order. Before the first dispatch, run the check of the
+   SKILL conda-release, "4. Before: check where the workflows download from", on the patch tool's
+   checkout, `contrib/my_better_isabelle_prover` (it holds `release-features.yml`; a feature
+   repository has no workflows). Dispatch the patch tool's `release-features.yml` with
+   `publish=false`; when its `roundtrip` job, its five `accept` legs and its `sessions` legs are
+   green, dispatch it again with `publish=true`. Its `features` input lists release tags, each
+   feature after the one it is built on. When the `isabelle` conda package gets a new build, every
+   feature package is re-released the same way, with the same versions. The inputs, jobs and
+   recovery: RELEASE.md, "The batch release workflow".
 
 ### 3.5 Moving `daily` (on the owner's order)
 
