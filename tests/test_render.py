@@ -33,15 +33,20 @@ def provenance(feature: str, m: str, base_tag: str) -> str:
 
 
 def package(repo: Path, subdir: str = ".", feature: str = "light_locale", m: str = "2",
-            base_tag: str = f"{R}/future_assign_interrupt/1", components: dict | None = None, tag: bool = True) -> Path:
-    """A feature repository with one package directory, committed and tagged like make-patches leaves it."""
+            base_tag: str = f"{R}/future_assign_interrupt/1", components: dict | None = None, tag: bool = True,
+            files: dict | None = None) -> Path:
+    """A feature repository with one package directory, committed and tagged like make-patches leaves it;
+    `files` are more files, relative to the repository."""
     pkg = repo / subdir
     (pkg / "patches" / R).mkdir(parents=True)
     (pkg / "README.md").write_text(f"# {feature}\n\nThe feature's own README.\n")
     (pkg / "patches" / R / "provenance.txt").write_text(provenance(feature, m, base_tag))
     (pkg / "patches" / R / "src-Pure-a.ML.patch").write_bytes(PATCH)
+    for rel, data in (files or {}).items():
+        (repo / rel).parent.mkdir(parents=True, exist_ok=True)
+        (repo / rel).write_text(data)
     if components is not None:
-        (pkg / "tools").mkdir()
+        (pkg / "tools").mkdir(exist_ok=True)
         (pkg / "tools" / "component_files.txt").write_text("# shipped under share/<package>/\n" + "".join(f"{c}\n" for c in components))
         for rel, data in components.items():
             (pkg / rel).parent.mkdir(parents=True, exist_ok=True)
@@ -84,7 +89,7 @@ def test_recipe_pins_files_and_readme(tmp_path):
     for line in ('name: "isabelle-light-locale"', 'version: "2025.2.2"', "number: 3", 'string: "Isabelle2025_2_3"', "noarch: generic"):
         assert line in recipe
     deps = run_deps(recipe)
-    assert deps == ["isabelle-patch-control >=1.0,<2", "isabelle ==2025.2 1",
+    assert deps == ["isabelle-patch-control >=1.0,<2", "isabelle ==2025.2 1",            # one pin per direct dependency
                     "isabelle-future-assign-interrupt ==2025.2.1"]
     # the recipe's pin is the one plan_builds looks for: a package built from it is what this batch wants
     wanted = Wanted("isabelle-light-locale", "2025.2.2", "Isabelle2025_2", isabelle_pin("Isabelle2025_2", "1"))
@@ -99,9 +104,46 @@ def test_recipe_pins_files_and_readme(tmp_path):
                           f"Scripts/.{p}-post-link.bat", f"Scripts/.{p}-pre-unlink.bat"}
     assert files[f"{fd}/src-Pure-a.ML.patch"][0] == PATCH
     assert files[f"{fd}/provenance.txt"][0] == (pkg / "patches" / R / "provenance.txt").read_bytes()
-    assert files[f"share/doc/{p}/README.md"][0] == COMMON + b"\n" + (pkg / "README.md").read_bytes()
     assert {rel: mode for rel, (_, mode) in files.items()} == {
         rel: 0o755 if rel.endswith(".sh") else 0o644 for rel in files}
+    assert "license" not in recipe and "homepage" not in recipe and not (out / "LICENSE").exists()
+
+
+def test_readme_names_the_package_and_keeps_version_for_the_user(tmp_path):
+    """<package> and <feature> are filled in the whole README, the feature's own part included;
+    <version> stays for the user."""
+    own = "# x\n\nMade from `<Isabelle release>/<feature>/<m>`; `<package>` needs `isabelle==<version>`.\n"
+    pkg = package(tmp_path / "repo", files={"README.md": own})
+    out = tmp_path / "out"
+    assert render(pkg, out).returncode == 0
+    readme = (out / "files" / "share" / "doc" / "isabelle-light-locale" / "README.md").read_bytes()
+    whole = COMMON + b"\n" + own.encode()
+    assert readme == whole.replace(b"<package>", b"isabelle-light-locale").replace(b"<feature>", b"light_locale")
+    assert b"<package>" in COMMON and b"<feature>" in COMMON and b"<version>" in readme
+    assert b"`<Isabelle release>/light_locale/<m>`; `isabelle-light-locale` needs" in readme
+
+
+def test_license_homepage_and_the_nearest_license_file(tmp_path):
+    """tools/license.txt's entry, the LICENSE of the package directory before the repository's, and the
+    homepage for both links; none of it among the package's files."""
+    repo = tmp_path / "repo"
+    pkg = package(repo, "light_locale", files={"light_locale/tools/license.txt": "# SPDX\nBSD-3-Clause\n",
+                                               "light_locale/LICENSE": "the package's\n", "LICENSE": "the repository's\n"})
+    out = tmp_path / "out"
+    r = subprocess.run([sys.executable, RENDER, pkg, "--isabelle-build", "1", "--build-number", "0", "--homepage",
+                        "https://github.com/x/y", "-o", out], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    recipe = (out / "recipe.yaml").read_text()
+    about = recipe.split("about:\n", 1)[1]
+    assert about.splitlines()[1:] == ['  license: "BSD-3-Clause"', '  license_file: "LICENSE"',
+                                      '  homepage: "https://github.com/x/y"', '  repository: "https://github.com/x/y"']
+    assert (out / "LICENSE").read_text() == "the package's\n"
+    assert not any("LICENSE" in rel or "license" in rel for rel in files_of(out))
+    git(repo, "rm", "-q", "light_locale/LICENSE")
+    git(repo, "commit", "-q", "-m", "only the repository's")
+    git(repo, "tag", "-f", "-a", "-m", "release", f"{R}/light_locale/2")
+    assert render(pkg, tmp_path / "out2").returncode == 0
+    assert (tmp_path / "out2" / "LICENSE").read_text() == "the repository's\n"
 
 
 def test_hooks_are_the_fragments_verbatim(tmp_path):
@@ -168,29 +210,14 @@ def test_a_repository_with_two_packages(tmp_path):
 
 @pytest.mark.parametrize("case, says", [
     ("untagged", "check out the release tag"),
-    ("untracked_patch", "differs from the checked-out release tag"),
-    ("edited_readme", "differs from the checked-out release tag"),
-    ("missing_component", "is not a committed file"),
-    ("no_readme", "README.md is missing"),
     ("output_not_empty", "is not empty"),
     ("bad_build_string", "is not a build string"),
 ])
 def test_refusals(tmp_path, case, says):
     out = tmp_path / "out"
-    pkg = package(tmp_path / "repo", tag=case != "untagged",
-                  components={"ROOT": "x\n"} if case == "missing_component" else None)
+    pkg = package(tmp_path / "repo", tag=case != "untagged")
     build = "1"
-    if case == "untracked_patch":
-        (pkg / "patches" / R / "src-Pure-b.ML.patch").write_bytes(PATCH)
-    elif case == "edited_readme":
-        (pkg / "README.md").write_text("changed\n")
-    elif case == "missing_component":
-        (pkg / "tools" / "component_files.txt").write_text("ROOT\nLICENSE\n")
-        git(tmp_path / "repo", "commit", "-q", "-am", "list LICENSE")
-        git(tmp_path / "repo", "tag", "-f", "-a", "-m", "release", f"{R}/light_locale/2")
-    elif case == "no_readme":
-        (pkg / "README.md").unlink()
-    elif case == "output_not_empty":
+    if case == "output_not_empty":
         out.mkdir()
         (out / "x").write_text("x")
     elif case == "bad_build_string":

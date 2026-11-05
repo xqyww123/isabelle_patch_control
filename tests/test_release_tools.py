@@ -1,7 +1,9 @@
 """tools/release-plan and tools/check-packages (plan decision 11): the build job's plan against a
-file:// channel, and its look inside the packages; the archives are made here."""
+file:// channel, its look inside the packages, and the environments of a batch; the archives are made
+here."""
 import functools
 import http.server
+import itertools
 import importlib.machinery
 import importlib.util
 import io
@@ -24,6 +26,7 @@ def load(name: str):
 
 
 rp, cp = load("release-plan"), load("check-packages")
+from common import entries  # noqa: E402  (tools/ is on sys.path once a tool is loaded)
 
 
 def tar_zst(files: dict[str, tuple[bytes, int]]) -> bytes:
@@ -109,7 +112,8 @@ def test_plan_against_a_channel_with_a_served_file_not_yet_indexed(tmp_path, ove
         "isabelle-light-locale": ("reuse", "isabelle-light-locale-2025.2.1-Isabelle2025_2_1.conda")}
     assert [(p.get("tag"), p.get("feature"), p.get("build_number")) for p in result["packages"]] == [
         (None, None, None), ("Isabelle2025-2/expose_foreign/1", "expose_foreign", 2), ("Isabelle2025-2/light_locale/1", "light_locale", None)]
-    assert result["isabelle_old_build"] == "1"             # the top's indexed records only; the served 2 is not counted
+    # each package's indexed records only: the served 2 and 3 are not counted
+    assert [p.get("isabelle_old_build") for p in result["packages"]] == [None, "1", "1"]
 
 
 def test_an_empty_channel_and_no_other_build(tmp_path):
@@ -118,11 +122,16 @@ def test_an_empty_channel_and_no_other_build(tmp_path):
     result = rp.plan(f"file://{empty}", "1", "1.0.0", "pyh4616a5c", ["Isabelle2025-2/expose_foreign/1"])
     assert files_of(result) == {"isabelle-patch-control": ("build", "isabelle-patch-control-1.0.0-pyh4616a5c_0.conda"),
                                 "isabelle-expose-foreign": ("build", "isabelle-expose-foreign-2025.2.1-Isabelle2025_2_0.conda")}
-    assert result["isabelle_old_build"] == ""
+    assert result["packages"][1]["isabelle_old_build"] == ""
 
 
-def test_the_old_build_is_the_highest_other_one_the_chain_top_pins(tmp_path):
-    """§6 (h) installs the chain top at that build, so only the top's records count, of any version."""
+def old_builds(result):
+    return {p["name"]: p["isabelle_old_build"] for p in result["packages"] if "tag" in p}
+
+
+def test_each_package_has_its_own_old_build(tmp_path):
+    """tools/accept's scenario (h) installs one package of the batch at that build, so that package's
+    own records count, of any version; not the others' or this batch's build."""
     other_line = ("isabelle-light-locale-2026.1.1-Isabelle2026_1_0.conda",
                   {"name": "isabelle-light-locale", "version": "2026.1.1", "build": "Isabelle2026_1_0", "build_number": 0,
                    "depends": ["isabelle ==2026.1 13"], "subdir": "noarch"})
@@ -132,9 +141,8 @@ def test_the_old_build_is_the_highest_other_one_the_chain_top_pins(tmp_path):
                              record("isabelle-expose-foreign", "2025.2.1", 4, "14"),    # a lower feature: no state of (h)
                              other_line])                                        # another release line's pin
     result = rp.plan(url, "12", "1.0.0", "p", ["Isabelle2025-2/expose_foreign/1", "Isabelle2025-2/light_locale/1"])
-    assert result["isabelle_old_build"] == "11"
-    lower_only = rp.plan(url, "14", "1.0.0", "p", ["Isabelle2025-2/expose_foreign/1"])
-    assert lower_only["isabelle_old_build"] == ""
+    assert old_builds(result) == {"isabelle-expose-foreign": "14", "isabelle-light-locale": "11"}
+    assert old_builds(rp.plan(url, "14", "1.0.0", "p", ["Isabelle2025-2/expose_foreign/1"])) == {"isabelle-expose-foreign": ""}
 
 
 def test_the_isabelle_version_is_the_release_line_of_the_batch(tmp_path):
@@ -237,32 +245,56 @@ def test_noarch_only_and_the_tool(tmp_path):
     assert problems_in(package(tmp_path, {}, name="isabelle")) == ["isabelle is neither the tool nor a feature package"]
 
 
-def chained(tmp_path, *links):
-    """{path: archive} of feature packages whose provenance links (release tag, base tag)."""
-    out = {}
-    for tag, base in links:
-        feature = tag.split("/")[1]
-        name = f"isabelle-{feature.replace('_', '-')}"
-        p = tmp_path / "noarch" / f"{name}-1-Isabelle2025_2_0.conda"
-        conda(p, {"name": name, "version": "1", "subdir": "noarch"},
-              {f"share/isabelle_patch_control/features.d/{feature}/provenance.txt": (f"release_tag: {tag}\nbase_tag: {base}\n".encode(), 0o644)})
-        out[p] = cp.conda_archive(p.read_bytes())
-    return out
-
-
 R = "Isabelle2025-2"
-CHAIN = [(f"{R}/a/1", f"{R}/pristine/89701cf1768e"), (f"{R}/b/2", f"{R}/a/1"), (f"{R}/c/1", f"{R}/b/2")]
+PRISTINE = f"{R}/pristine/89701cf1768e"
+PUBLIC = "conda create -n isabelle -c https://conda.qiyuan.me -c conda-forge isabelle"
 
 
-def test_the_batch_is_the_whole_chain_bottom_first(tmp_path):
-    archives = chained(tmp_path, *CHAIN)
-    assert cp.chain_problems(archives, [t for t, _ in CHAIN]) == []
-    assert cp.chain_problems(archives, [f"{R}/b/2", f"{R}/a/1", f"{R}/c/1"]) == [
-        f"{R}/b/2 is the bottom of the batch but stands on {R}/a/1: the batch must be the whole chain",
-        f"{R}/a/1 stands on {R}/pristine/89701cf1768e, not on {R}/b/2: list the whole chain, bottom first",
-        f"{R}/c/1 stands on {R}/b/2, not on {R}/a/1: list the whole chain, bottom first"]
-    top_only = chained(tmp_path / "top", CHAIN[2])
-    assert cp.chain_problems(top_only, [f"{R}/c/1"]) == [
-        f"{R}/c/1 is the bottom of the batch but stands on {R}/b/2: the batch must be the whole chain"]
-    assert cp.chain_problems(archives, [f"{R}/a/1", f"{R}/b/2"]) == [
-        f"the feature packages are {R}/a/1 {R}/b/2 {R}/c/1, the batch names {R}/a/1 {R}/b/2"]
+def feature_package(d, tag, base):
+    """A feature package of `tag` built on `base`, as check-packages reads it."""
+    feature = tag.split("/")[1]
+    name, version = rp.package_name(feature), rp.package_version(tag)
+    fd = f"share/isabelle_patch_control/features.d/{feature}"
+    files = {f"bin/.{name}-post-link.sh": (LF, 0o755), f"bin/.{name}-pre-unlink.sh": (LF, 0o755),
+             f"Scripts/.{name}-post-link.bat": (CRLF, 0o644), f"Scripts/.{name}-pre-unlink.bat": (CRLF, 0o644),
+             f"{fd}/provenance.txt": (f"release_tag: {tag}\nbase_tag: {base}\n".encode(), 0o644),
+             f"{fd}/src-Pure-a.ML.patch": (b"diff\n", 0o644),
+             f"share/doc/{name}/README.md": (f"# {feature}\n\n{PUBLIC} {name}\n".encode(), 0o644)}
+    p = d / "noarch" / f"{name}-{version}-Isabelle2025_2_0.conda"
+    conda(p, {"name": name, "version": version, "subdir": "noarch"}, files)
+    return p
+
+
+def tool_package(d):
+    return package(d, {f: (b"x", 0o644) for f in cp.FRAGMENTS}, name="isabelle-patch-control")
+
+
+def environments(tmp_path, links):
+    """{entry: (its batch_release_tags, its isabelle_old_build)} of a batch: the tool and a feature package
+    for each (release tag, base tag), each with its own old build in the plan."""
+    paths = [tool_package(tmp_path)] + [feature_package(tmp_path, tag, base) for tag, base in links]
+    plan = {"packages": [{"file": paths[0].name}] + [{"file": p.name, "tag": tag, "isabelle_old_build": str(i)}
+                                                      for i, (p, (tag, _)) in enumerate(zip(paths[1:], links), 1)]}
+    envs = cp.environments({p: cp.conda_archive(p.read_bytes()) for p in paths}, plan)
+    assert all(e["install"] == f"{PUBLIC} {e['package']}" for e in envs)
+    return {e["release_tag"]: (e["batch_release_tags"], e["isabelle_old_build"]) for e in envs}
+
+
+def test_the_environments_of_a_chain_and_of_a_tree(tmp_path):
+    """Each entry carries the release tags of its environment and its own package's old build."""
+    a, b, c, d = (f"{R}/{f}/1" for f in "abcd")
+    assert environments(tmp_path / "chain", [(a, PRISTINE), (b, a), (c, b)]) == {c: ([a, b, c], "3")}
+    assert environments(tmp_path / "tree", [(a, PRISTINE), (b, a), (c, b), (d, a)]) == {c: ([a, b, c], "3"), d: ([a, d], "4")}
+
+
+def test_the_environments_do_not_depend_on_the_order():
+    """common.entries on a chain, a tree, a forest, one feature and a deeper tree, under every order."""
+    shapes = [{"a": [], "b": ["a"], "c": ["b"]}, {"a": [], "b": ["a"], "c": ["a"]}, {"a": [], "b": [], "c": ["b"]},
+              {"a": []}, {"a": [], "b": ["a"], "c": ["b"], "d": ["b"], "e": ["a"]},
+              {"b": ["x"]}]                                                       # x: from a channel
+    expected = [{"c": ["a", "b", "c"]}, {"b": ["a", "b"], "c": ["a", "c"]}, {"a": ["a"], "c": ["b", "c"]},
+                {"a": ["a"]}, {"c": ["a", "b", "c"], "d": ["a", "b", "d"], "e": ["a", "e"]}, {"b": ["b"]}]
+    for shape, want in zip(shapes, expected):
+        for order in itertools.permutations(shape):
+            got = entries({tag: shape[tag] for tag in order})
+            assert json.dumps(got) == json.dumps(want), (order, got)

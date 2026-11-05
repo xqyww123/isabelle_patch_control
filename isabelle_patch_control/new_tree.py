@@ -20,8 +20,7 @@ the private tree `branch` and `base`.
 
 Every step already done is skipped; a tree in another shape is refused, not repaired.
 """
-# This docstring is what `new-tree --help` prints; the design is MLML's
-# ai-artifacts/ISABELLE_GIT_MIGRATION_PLAN.md §12, fourth draft, item 6.
+# This docstring is what `new-tree --help` prints.
 from __future__ import annotations
 
 import os

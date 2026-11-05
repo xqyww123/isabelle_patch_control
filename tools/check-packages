@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""check-packages [--chain <release tag>... --summary <file>] <file.conda>...
+"""check-packages --plan <plan.json> [--summary <file>] <file.conda>...
 
 The build job's look inside every package of a batch before anything is installed (patch tool plan
 decision 11): every file is noarch; a feature package
@@ -7,18 +7,19 @@ has both hook sets, its .sh hooks are LF, its .bat hooks are CRLF throughout, it
 holds provenance.txt and patch files, its README is there, and when it ships a component the
 post-link names that component's directory literally; the tool package ships its hook fragments.
 
---chain: the feature packages are exactly these release tags, bottom first, each one's base_tag
-the tag before it and the first one's a pristine tag.  --summary writes {"chain": [packages,
-bottom first], "top": <package>, "top_feature": <feature>, "components": [packages that ship a
-component]} for the jobs after the build.
+The packages are exactly the files of release-plan's plan.json.  --summary writes
+{"environments": [...]}, one for each feature package that no other package of the batch is built on,
+sorted by release tag: its release_tag, package, version, feature, batch_release_tags (the release
+tags of the batch in its environment, sorted), isabelle_old_build (the plan's) and install (its
+README's first `conda create -n ` line, the common text's), for the jobs after the build.
 """
 import argparse
 import json
 from pathlib import Path
 
-from common import Refused, conda_archive, main
+from common import Refused, conda_archive, direct_dependencies, entries, main, ships_component
 from isabelle_patch_control.features import provenance_fields
-from isabelle_patch_control.names import feature_name, package_name
+from isabelle_patch_control.names import feature_name
 
 TOOL = "isabelle-patch-control"
 FRAGMENTS = [f"site-packages/isabelle_patch_control/hooks/{h}" for h in ("post-link.sh", "post-link.bat", "pre-unlink.sh", "pre-unlink.bat")]
@@ -52,55 +53,50 @@ def problems_of(path: Path, index: dict, files: dict) -> list[str]:
         out.append(f"{fd} lacks provenance.txt or a patch file")
     if f"share/doc/{name}/README.md" not in files:
         out.append(f"missing share/doc/{name}/README.md")
-    if any(f.startswith(f"share/{name}/") for f in files):
+    if ships_component(index, files):
         post = files.get(f"bin/.{name}-post-link.sh", (b"", 0))[0]
         if f'"$PREFIX/share/{name}"'.encode() not in post:
             out.append(f"the post-link does not register share/{name}, where the component is installed")
     return out
 
 
-def chain_problems(archives: dict[Path, tuple[dict, dict]], tags: list[str]) -> list[str]:
-    """The feature packages against the batch's release tags, bottom first."""
-    provenance = {}
-    for index, files in archives.values():
-        feature = feature_name(index["name"])
-        prov = files.get(f"share/isabelle_patch_control/features.d/{feature}/provenance.txt")
-        if prov:
-            fields = provenance_fields(prov[0].decode())
-            provenance[fields["release_tag"]] = fields["base_tag"]
-    out = []
-    if sorted(provenance) != sorted(tags):
-        out.append(f"the feature packages are {' '.join(sorted(provenance))}, the batch names {' '.join(sorted(tags))}")
-    for i, tag in enumerate(tags):
-        base = provenance.get(tag)
-        if base is None:
-            continue
-        if i == 0 and base.split("/")[1] != "pristine":
-            out.append(f"{tag} is the bottom of the batch but stands on {base}: the batch must be the whole chain")
-        elif i > 0 and base != tags[i - 1]:
-            out.append(f"{tag} stands on {base}, not on {tags[i - 1]}: list the whole chain, bottom first")
-    return out
+def provenance_of(index: dict, files: dict) -> dict[str, str]:
+    feature = feature_name(index["name"])
+    return provenance_fields(files[f"share/isabelle_patch_control/features.d/{feature}/provenance.txt"][0].decode())
+
+
+def install_line(index: dict, files: dict) -> str:
+    readme = files[f"share/doc/{index['name']}/README.md"][0].decode()
+    return next(line for line in readme.splitlines() if line.startswith("conda create -n "))
+
+
+def environments(archives: dict[Path, tuple[dict, dict]], plan: dict) -> list[dict]:
+    """The environments of the summary."""
+    planned = {p["tag"]: p for p in plan["packages"] if "tag" in p}
+    features = {provenance_of(index, f)["release_tag"]: (index, f) for index, f in archives.values() if index["name"] != TOOL}
+    bases = {tag: direct_dependencies(provenance_of(index, f)) for tag, (index, f) in features.items()}
+    return [{"release_tag": tag, "package": features[tag][0]["name"], "version": features[tag][0]["version"],
+             "feature": tag.split("/")[1], "batch_release_tags": tags,
+             "isabelle_old_build": planned[tag]["isabelle_old_build"], "install": install_line(*features[tag])}
+            for tag, tags in entries(bases).items()]
 
 
 def cli():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--chain", nargs="+", metavar="release tag")
+    p.add_argument("--plan", type=Path, required=True, help="release-plan's output")
     p.add_argument("--summary", type=Path)
     p.add_argument("packages", nargs="+", type=Path)
     a = p.parse_args()
     archives = {pkg: conda_archive(pkg.read_bytes()) for pkg in a.packages}
     report = [f"{pkg}: {problem}" for pkg, (index, files) in archives.items() for problem in problems_of(pkg, index, files)]
-    if a.chain:
-        report += chain_problems(archives, a.chain)
+    plan = json.loads(a.plan.read_text())
+    files = sorted(p["file"] for p in plan["packages"])
+    if sorted(pkg.name for pkg in archives) != files:
+        report.append(f"the packages are {' '.join(sorted(pkg.name for pkg in archives))}, the plan's files {' '.join(files)}")
     if report:
         raise Refused("\n  ".join(["the packages are not as the batch needs them:", *report]))
     if a.summary:
-        features = [t.split("/")[1] for t in a.chain or []]
-        chain = [package_name(f) for f in features]
-        components = sorted(index["name"] for index, files in archives.values()
-                            if any(f.startswith(f"share/{index['name']}/") for f in files))
-        a.summary.write_text(json.dumps({"chain": chain, "top": chain[-1] if chain else None,
-                                         "top_feature": features[-1] if features else None, "components": components}))
+        a.summary.write_text(json.dumps({"environments": environments(archives, plan)}, indent=1) + "\n")
     print(f"check-packages: {len(a.packages)} packages as expected")
 
 

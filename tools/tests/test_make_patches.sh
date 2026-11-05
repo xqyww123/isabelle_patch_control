@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Toy run of `isabelle-patch-control make-patches`: a bare repository plays GitHub's isabelle-patched
 # (url.<dir>.insteadOf) with R/pristine -> R/base -> R/feat and release tags; the feature repository
-# H (a package directory in light locale's layout at its root, one with component files in comp/)
-# registers R/feat's two trees (new-tree --home); every gate from both sides; the release commit by
+# H (a package directory at its root, with README.md from the start and no optional input; one in
+# comp/ with every optional input: component files, a license, a build script, and a LICENSE at H's
+# top only) registers R/feat's two trees (new-tree --home); every gate from both sides; the release commit by
 # path with .gitmodules and the gitlinks, and what an outsider gets from the tag; the write order
 # with a failure after each write (a held git lock file makes the next write fail; files ref
 # backend) and the rerun completing (decision 16 point 8).  Usage: test_make_patches.sh [<scratch dir>]
@@ -77,13 +78,14 @@ mkdir -p "$work/contrib/R/contrib" "$work/contrib/R/lib/classes" "$work/contrib/
 
 # the feature repository H: the package directory is its root
 H=$work/contrib/H; git init -q -b main "$H"; mkdir -p "$H/tools"; cd "$H"
-printf '#!/usr/bin/env bash\nisabelle-patch-control new-tree "$(dirname "$0")"\n' > init.sh; git add init.sh; git commit -q -m init
+printf '#!/usr/bin/env bash\nisabelle-patch-control new-tree "$(dirname "$0")"\n' > init.sh; echo '# feat' > README.md
+git add init.sh README.md; git commit -q -m init
 printf 'src/Pure/a.ML\nsrc/Pure/new.ML\nbin/tool\netc/x\netc/crlf.txt\netc/new_crlf.txt\n' > tools/patched_files.txt
 printf 'src/Pure/a.ML A val a2\nsrc/Pure/new.ML NEW val n\n' > tools/signature_additions.txt
 printf 'Pure\nHOL\n' > tools/required_sessions.txt
 t=$H/worktrees/R-feat; s=$H/worktrees/R-feat-stock
 
-echo "--- gate 7: the feature repository and the two trees"
+echo "--- gate 1: the committed files of the feature repository, and the two trees"
 expect refused "a feature repository that registers no trees"   -- mp -C "$seed" --package "$H" R/feat 1
 saw "says so" "registers no trees"
 isabelle-patch-control new-tree --home "$H" --base R/base R/feat >/dev/null
@@ -135,12 +137,12 @@ saw "names bin/tool" "changed but not listed: bin/tool"
 echo bin/tool >> "$H/tools/patched_files.txt"; git -C "$H" commit -q -am "tool back"
 sed -i '/new.ML/d' "$H/tools/signature_additions.txt"; git -C "$H" commit -q -am "drop sig"
 expect refused "signature addition not listed"                   -- mp --package "$H" R/feat 2
-saw "gate (d) names it" "not listed: src/Pure/new.ML NEW val n"
+saw "gate 4 names it" "not listed: src/Pure/new.ML NEW val n"
 printf 'src/Pure/a.ML A val a2\nsrc/Pure/new.ML NEW val n\n' > "$H/tools/signature_additions.txt"; git -C "$H" commit -q -am "sig back"
 (cd "$seed" && echo "(* base fix 2 *)" >> src/Pure/b.ML && git commit -q -am "base fix 2" && git push -q origin R/base)
 git fetch -q; git merge -q --no-edit origin/R/base
 expect refused "merged an unreleased base commit"                -- mp --package "$H" R/feat 2
-saw "gate 0 asks for a release of the base" "merge a release of R/base"
+saw "gate 2 asks for a release of the base" "merge a release of R/base"
 (cd "$seed" && git tag -a -m v2 R/base/2 && git push -q origin R/base/2); base2=$(git -C "$seed" rev-parse R/base)
 expect refused "the base released elsewhere, not fetched"        -- mp --package "$H" R/feat 2
 saw "says to fetch first" "fetch first"
@@ -166,11 +168,11 @@ check "nothing written to the package by a refused run" '[[ -z $(git -C "$H" sta
 git reset -q --hard R/feat/2   # toy repository only
 sed -i '/src\/Pure\/b.ML/d' "$H/tools/patched_files.txt"; git -C "$H" commit -q -am "unlist b"
 
-echo "--- gate (c): the round trip through the tool's directory interface refuses what the tool cannot reproduce"
+echo "--- gate 5: the round trip through the tool's directory interface refuses what the tool cannot reproduce"
 ln -s /dev/null lib/link; git add lib/link; git commit -q -m "a symbolic link"     # a target the replay copy can read: the tool installs a regular file
 echo lib/link >> "$H/tools/patched_files.txt"; git -C "$H" commit -q -am "list the link"
 expect refused "a symbolic link in the feature"                  -- mp --package "$H" R/feat 3
-saw "gate (c) names the forward comparison" "gate (c): forward application gives tree"
+saw "gate 5 names the forward comparison" "gate 5 (round trip): forward application gives tree"
 check "nothing written, no tag" '[[ -z $(git -C "$H" status --porcelain) && $(tags "$H" 3) == 0 && $(tags "$t" 3) == 0 ]]'
 git reset -q --hard R/feat/2   # toy repository only
 sed -i '/lib\/link/d' "$H/tools/patched_files.txt"; git -C "$H" commit -q -am "unlist the link"
@@ -179,19 +181,41 @@ git fetch -q; git merge -q --no-edit origin/R/base; bash "$H/init.sh" >/dev/null
 sed -i '5s/A/C/' etc/r.txt; git commit -q -am "the first occurrence changed: the hunk's context occurs twice"
 echo etc/r.txt >> "$H/tools/patched_files.txt"; git -C "$H" commit -q -am "list r"
 expect refused "the checklist's repeated-context case"           -- mp --package "$H" R/feat 3
-saw "gate (c): the forward patch applies at the other place too, so the file fits two levels" "gate (c): the patches do not reverse cleanly"
+saw "gate 5: the forward patch applies at the other place too, so the file fits two levels" "gate 5 (round trip): the patches do not reverse cleanly"
 check "nothing written, no tag" '[[ -z $(git -C "$H" status --porcelain) && $(tags "$H" 3) == 0 && $(tags "$t" 3) == 0 ]]'
 git reset -q --hard R/feat/2; bash "$H/init.sh" >/dev/null   # toy repository only; the stock tree back at R/base/2
 sed -i '/etc\/r.txt/d' "$H/tools/patched_files.txt"; git -C "$H" commit -q -am "unlist r"
 
 write_order "$H" 3
 
-echo "--- a package with component files (migration plan §0 item 32, plan §0 item 35)"
+echo "--- a package with component files (a package that ships an Isabelle component, plan §0 item 35)"
 cpkg=$H/comp; mkdir -p "$cpkg/tools" "$cpkg/patches/R"
 cp "$H"/tools/patched_files.txt "$H"/tools/signature_additions.txt "$H"/tools/required_sessions.txt "$cpkg/tools/"
 printf 'ROOT\nLight.thy\n' > "$cpkg/tools/component_files.txt"; echo 'session Light = HOL + theories Light' > "$cpkg/ROOT"; echo 'theory Light imports Main begin end' > "$cpkg/Light.thy"
 echo stale > "$cpkg/patches/R/src-Pure-a.ML.patch"; echo stale > "$cpkg/patches/R/stale.patch"     # light's first-release shape: old files, no provenance
-git -C "$H" add comp; git -C "$H" commit -q -m "component package"
+echo '# comp' > "$cpkg/README.md"; printf '# the SPDX license expression\nBSD-3-Clause\n' > "$cpkg/tools/license.txt"
+printf '#!/usr/bin/env bash\n"$ISABELLE" build -d . Light\n' > "$cpkg/tools/release_build.sh"; echo 'the license' > "$H/LICENSE"
+git -C "$H" add comp LICENSE; git -C "$H" commit -q -m "component package"
+
+echo "--- gate 1 on the component package: every file the release reads, committed as it is"
+cpkg_refused() {  # cpkg_refused <description> <text the refusal names>
+  expect refused "$1" -- mp --package "$cpkg" R/feat 6
+  saw "names $2" "$2"
+}
+git -C "$H" rm -q comp/README.md; git -C "$H" commit -q -m "no README"
+cpkg_refused "a README.md removed by a commit" "comp/README.md is missing"
+echo '# comp' > "$cpkg/README.md"; git -C "$H" add comp/README.md; git -C "$H" commit -q -m "README back"
+echo '# edited' >> "$cpkg/tools/license.txt"
+cpkg_refused "an uncommitted edit of tools/license.txt" " M comp/tools/license.txt"
+git -C "$H" restore comp/tools/license.txt
+echo 'a nearer license' > "$cpkg/LICENSE"
+cpkg_refused "an untracked LICENSE nearer than the top one" "comp/LICENSE is not committed"
+rm "$cpkg/LICENSE"
+printf 'BSD-3-Clause\nMIT\n' > "$cpkg/tools/license.txt"; git -C "$H" commit -q -am "two licenses"
+cpkg_refused "two entries in tools/license.txt" "holds more than one entry: give one SPDX license expression, or none"
+printf '# the SPDX license expression\nBSD-3-Clause\n' > "$cpkg/tools/license.txt"; git -C "$H" commit -q -am "one license"
+check "the refusals created no tag" '[[ $(tags "$H" 6) == 0 && $(tags "$t" 6) == 0 ]]'
+
 write_order "$cpkg" 6     # release 6 is light's first-release shape: the tracked stale.patch goes
 check "the tagged commit holds exactly the generated files" '[[ $(git -C "$H" ls-tree -r --name-only R/feat/6^{commit} -- comp/patches/R | sort | tr "\n" " ") == "comp/patches/R/bin-tool.patch comp/patches/R/etc-crlf.txt.patch comp/patches/R/etc-new_crlf.txt.patch comp/patches/R/etc-x.patch comp/patches/R/provenance.txt comp/patches/R/src-Pure-a.ML.patch comp/patches/R/src-Pure-new.ML.patch " && ! -e $cpkg/patches/R/stale.patch ]]'
 new_tip "tip for 9"
@@ -201,7 +225,7 @@ new_tip "tip for 10"
 printf '#!/bin/sh\nflag=%s/commit-root-once\nif [ -f "$flag" ]; then rm "$flag"; echo "(* by the hook *)" >> comp/ROOT; git commit -q -am "ROOT changed between the gates and the commit"; fi\n' "$work" > "$H/.git/hooks/post-commit"
 chmod +x "$H/.git/hooks/post-commit"; touch "$work/commit-root-once"
 expect refused "a component file committed between the gates and write step (c)" -- mp --package "$cpkg" R/feat 10
-saw "names the component files" "(component files)"
+saw "names gate 1's files" "(gate 1's files) comp/ROOT"
 check "no tag anywhere" '[[ $(tags "$H" 10) == 0 && $(tags "$t" 10) == 0 && ! -e $work/commit-root-once ]]'
 rm "$H/.git/hooks/post-commit"
 expect ok      "release 10 of what was committed"                -- mp --package "$cpkg" R/feat 10

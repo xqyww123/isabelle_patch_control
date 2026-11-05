@@ -18,11 +18,11 @@ isabelle-patched:
   is the release's `etc/ISABELLE_ID`.
 - `<R>/<F>`: one branch per feature `<F>`; its releases are tagged `<R>/<F>/1`, `<R>/<F>/2`, ...,
   only by `make-patches`.
-- `<R>/dev_patches`: the top feature; `<R>/daily` follows it.
+- `<R>/daily`: the branch the shared tree follows; it follows `<R>/dev_patches` (3.5).
 
 **Base.** Every feature has exactly one *base* on each line: `pristine` or another feature. It is
 recorded as `base =` in the feature repository's `.gitmodules`. The owner decides which features a
-line carries and their bases (Isabelle2026 has no expose_foreign and no future_assign_interrupt).
+line carries and their bases.
 
 **Feature repository.** Each feature has a git repository under MLML's `contrib/` (for example
 `contrib/light_locale`; `contrib/isabelle-base-features` holds several features). It holds the
@@ -37,7 +37,7 @@ submodules:
 
 A tree's `contrib` is a link to the shared tree's `contrib`: never write through it. `lib/classes` and
 `src/Tools/Demo/lib` are copies. A module jar that a release adds is compiled by Isabelle on the tree's
-first Scala tool run (Isabelle2026: `scalajs_demo.jar`, about 6 s); nothing fails. Each tree's user
+first Scala tool run (for example `scalajs_demo.jar`, new in Isabelle2026); nothing fails. Each tree's user
 directory is `~/.isabelle/<directory name>`; heaps live there.
 
 **Base tag.** The base's release tag on the merge base of your branch and the base, that is, on the
@@ -152,6 +152,10 @@ base tag (section 1).
 ### 3.4 Releasing a feature (on the owner's order)
 
 Any new commit on the branch (a fix for a checklist point or for the build) starts again at step 2.
+A release of the same sources under a new number (only the feature repository changed) starts with an
+empty commit in the private tree, on order:
+
+    git -C <private tree> commit --allow-empty -m "<R>/<F>: release <m>"
 
 1. **The base tag** (section 1) must be exactly one tag; it is `<base tag>` in the commands below. If
    there is none, the last base commit you merged is not a release of the base: tell the owner.
@@ -191,7 +195,7 @@ Any new commit on the branch (a fix for a checklist point or for the build) star
          git -C <private tree> diff-tree -r --no-renames --name-only <base tag> HEAD | sed 's,/,-,g' |
            awk -v pre='<package name>-<Y>.<k>.99-<prefix>_99/share/isabelle_patch_control/features.d/<F>/' 'length(pre $0 ".patch") > 198'
 
-3. **The package directory.** A first release first adds the files of 3.6 step 4 that `<package dir>`
+3. **The package directory.** A release first adds the files of 3.6 step 4 that `<package dir>`
    lacks (new files: on order). Then bring the two lists up to date and commit them in the feature
    repository on order:
 
@@ -209,18 +213,17 @@ Any new commit on the branch (a fix for a checklist point or for the build) star
    `"$ISABELLE" build -b ...` on what must build before the release, at least the sessions of
    `tools/required_sessions.txt` (read the list, skipping its `#` comment lines, rather than repeat
    it); anything else it needs (the AFP, options) it brings itself. The release workflow (step 8) runs
-   it too, also when a feature built on this one is released, and a failure there stops that release:
+   it too, in every environment of a batch that holds this feature, and a failure there stops that
+   release:
    - Commit the script and every file it reads, on order, before step 5: the workflow takes the
      feature repository at its release tag, without `.git`, so the script cannot call git.
-   - There the feature repositories sit side by side under their `contrib/` names, as in MLML: reach
-     another one, and give every `-d`, by a relative path such as `../light_locale/tests` (Isabelle
-     refuses Windows paths).
-   - The packages released with it are installed there, so Isabelle already knows every session they
-     ship as an Isabelle component; give a `-d` for such a session only when Isabelle does not know
-     it yet: `dirs=; "$ISABELLE" sessions Light_Locale >/dev/null 2>&1 || dirs="-d ."`.
+   - Give every `-d` by a relative path inside the feature repository (Isabelle refuses Windows paths).
+   - The feature packages of that environment are installed there, so Isabelle already knows every
+     session they ship as an Isabelle component; give a `-d` for such a session only when Isabelle does
+     not know it yet: `dirs=; "$ISABELLE" sessions <session> >/dev/null 2>&1 || dirs="-d ."`.
    - macOS has Apple's bash 3.2 and BSD tools, Windows Git Bash (`$ISABELLE` is `isabelle.bat`), and
-     the machines are slow (HOL takes about an hour on macOS): give session `timeout`s and ML
-     `Timeout.apply` room, for example with `-o timeout_scale=<n>`.
+     the machines are slow (HOL takes about an hour on GitHub's macOS runners): give session `timeout`s
+     and ML `Timeout.apply` room, for example with `-o timeout_scale=<n>`.
 5. **Release:** `isabelle-patch-control make-patches -C <private tree> --package <package dir> <F> <m>`
    (`<m>` = 1 for the first release on the line, then 2, 3, …).
    Rerun it after a failure.
@@ -232,15 +235,15 @@ Any new commit on the branch (a fix for a checklist point or for the build) star
    SKILL conda-release, "4. Before: check where the workflows download from", on the patch tool's
    checkout, `contrib/my_better_isabelle_prover` (it holds `release-features.yml`; a feature
    repository has no workflows). Dispatch the patch tool's `release-features.yml` with
-   `publish=false`; when its `roundtrip` job, its five `accept` legs and its `sessions` legs are
-   green, dispatch it again with `publish=true`. Its `features` input lists release tags, each
-   feature after the one it is built on. When the `isabelle` conda package gets a new build, every
-   feature package is re-released the same way, with the same versions. The inputs, jobs and
-   recovery: RELEASE.md, "The batch release workflow".
+   `publish=false`; when its roundtrip, accept and sessions jobs are green, dispatch it again with
+   `publish=true`. Its `features` input lists the release tags to publish, in any order, with those
+   they are built on that are not yet published for this `isabelle` build. When the `isabelle` conda
+   package gets a new build, every feature package is re-released the same way, with the same
+   versions. The inputs, jobs and recovery: RELEASE.md, "The batch release workflow".
 
 ### 3.5 Moving `daily` (on the owner's order)
 
-1. Build dev_patches as in 3.4 step 4 (until it has a `tools/required_sessions.txt`, the sessions the
+1. Build dev_patches as in 3.4 step 4 (when it has no `tools/required_sessions.txt`, the sessions the
    owner names) in its private tree, on order, with its HEAD equal to `origin/<R>/dev_patches` and an
    empty `git status`.
 2. Notify every session.
@@ -260,7 +263,8 @@ Any new commit on the branch (a fix for a checklist point or for the build) star
    `isabelle-patch-control new-tree "$(dirname "$0")"`), `tools/patched_files.txt` and
    `tools/signature_additions.txt` (made as in 3.4 step 3), `tools/required_sessions.txt`,
    `tools/release_build.sh` (3.4 step 4), `tools/component_files.txt` if the package also ships an
-   Isabelle component (light_locale does), `.gitattributes` (`*.patch -text`), a README. Formats:
+   Isabelle component, `tools/license.txt` and a `LICENSE` when the package has a license,
+   `.gitattributes` (`*.patch -text`), a README. Formats:
    RELEASE.md, "First-time setup of a feature repository". Add the feature's row to the table in the
    patch tool's `.github/workflows/release-features.yml`, on order.
 5. The registration commit, on order:
@@ -303,7 +307,8 @@ release `https://isabelle.in.tum.de/website-<R2>/dist/<R2>_linux.tar.gz` into `c
 Write `.gitignore`: the old line's, with its launcher line `/<R>` renamed to `/<R2>`, plus every build
 product the release adds. Before committing, look at the binaries `git add -A` would take
 (`git add -A -n | grep -E '\.(jar|so|dll|dylib|exe)'`) and at every `module =` line of an
-`etc/build.props`; ignore those directories (Isabelle2026 added `/src/Tools/Scalajs_Demo/lib`). Then:
+`etc/build.props`; ignore those directories (for example `/src/Tools/Scalajs_Demo/lib`, new in
+Isabelle2026). Then:
 
     git add -A
     git commit -m "<R2> pristine: the official release"
@@ -331,12 +336,12 @@ the foundation (3.8) exists, and your base on the new line has its `<R2>` branch
      origin/<R>/<base> origin/<R2>/<base>` exits 0 (your base's `<R2>` branch has merged its old
      line's branch and been pushed; true at once for `pristine`), or `git tag --list '<R2>/<base>/*'`
      prints a tag (your base was implemented afresh and has released on the new line). Then, in your
-     private tree on the new line: merge `origin/<R2>/<base>` as in 3.3 (for Isabelle2026 a
-     fast-forward, no commit; run `bash <feature repository>/init.sh` right after it); then
+     private tree on the new line: merge `origin/<R2>/<base>` as in 3.3 (a fast-forward, with nothing
+     to commit, while `<R2>/<F>` has no commit of its own; run `bash <feature repository>/init.sh`
+     right after it); then
      `git merge --no-commit origin/<R>/<F>`. In the other order there are two merge bases, and new-tree
      and make-patches refuse. The merge brings your old-line work, plus any old-line work below it that
-     your base's `<R2>` branch does not contain (on Isabelle2026, for fast_abbrev_printing:
-     expose_foreign and future_assign_interrupt). Remove by editing what the new line does not carry;
+     your base's `<R2>` branch does not contain. Remove by editing what the new line does not carry;
      `make-patches` does not notice what is left. `git diff --cached --stat` shows what came in.
    - **Or implement the feature afresh** on the new line.
 5. Build and test on order; commit on order; push on order.
@@ -344,12 +349,10 @@ the foundation (3.8) exists, and your base on the new line has its `<R2>` branch
 
 Later fixes of the old line come over by the same merge.
 
-**Isabelle2026 (2026-10-31):** steps 1 and 2 are done for every feature; start at step 3. The
-features with no work on Isabelle2025-2 are implemented afresh (the owner's plan).
-
 ## 4. Where the details are
 
 - The patch tool's `RELEASE.md`: the reason and corner cases of each checklist point; the formats of
   the package directory's files; the batch release workflow's inputs, jobs and recovery.
 - `isabelle-patch-control <subcommand> --help`.
-- Each feature repository's design document.
+- Each feature repository's own documents: its README, and its `details.md` or the plans in its
+  `ai-artifacts/` where it has them.

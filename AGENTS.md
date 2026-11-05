@@ -3,10 +3,9 @@
 For users and AI agents that meet `isabelle-patch-control` in a conda environment;
 `isabelle-patch-control help` prints this file. More in the tool's repository
 <https://github.com/xqyww123/isabelle_patch_control>: reference.md (every command and exit code,
-and the main messages) and, for the developers of feature packages (developing a feature,
-releasing it, upgrading it to a new Isabelle release), the SKILL
-`.claude/skills/isabelle-patch-feature/SKILL.md`. Working on the tool itself? Read develop.md there
-first.
+and the main messages) and, for developing, releasing and upgrading the features in MLML
+(<https://github.com/xqyww123/MLML>), the SKILL `.claude/skills/isabelle-patch-feature/SKILL.md`.
+Working on the tool itself? Read develop.md there first.
 
 ## What this is
 
@@ -14,8 +13,8 @@ first.
 to that environment's Isabelle, the directory `<prefix>/isa`, reverses them when they are removed,
 and reports the state of every feature. `<prefix>` is the environment's directory
 (`$CONDA_PREFIX` once the environment is activated; `conda env list` shows it). The tool carries no
-patches itself: each feature package (for example `isabelle-light-locale`) ships its own, and
-conda runs the tool from the package's install and removal hooks. So in normal use nobody runs
+patches itself: each feature package (below, `<package>` stands for the name of one) ships its own,
+and conda runs the tool from the package's install and removal hooks. So in normal use nobody runs
 `apply` or `unapply` by hand: installing, updating or removing packages does it.
 
 Each feature is built on one *base*: Isabelle itself or one other feature. conda installs a feature
@@ -74,7 +73,7 @@ check the files, so it cannot report changes that a removal left behind; see the
   `conda install --update-all` command it gives.
 - **Updating the environment.** Run `conda install -p <prefix> --update-all "isabelle==<version>"
   -c https://conda.qiyuan.me -c conda-forge`, where `<version>` is the version that
-  `conda list -p <prefix> --full-name isabelle` shows, such as `2025.2`; then run
+  `conda list -p <prefix> --full-name isabelle` shows, such as `2026`; then run
   `isabelle-patch-control status`. Do not use `conda update --all`: once the channel has a newer
   Isabelle release, it moves the environment to it. When the update brings a new `isabelle` build,
   it deletes this environment's Isabelle user directory, as every reinstall of `isabelle` does: an
@@ -92,7 +91,7 @@ check the files, so it cannot report changes that a removal left behind; see the
 - The tool's messages are the paragraphs of conda's output that start with `isabelle-patch-control`.
   After installing, updating or removing packages, run `apply` only when one of them asks you to,
   or when `status` says so.
-- `conda remove isabelle-light-locale` reverses the feature's changes and deletes the files it
+- `conda remove <package>` reverses the feature's changes and deletes the files it
   created. conda also removes the feature packages above it (they depend on it), and
   the tool reverses those too; and it removes every package that was installed only as a
   dependency and that nothing you asked for still needs: the feature packages below it,
@@ -157,28 +156,3 @@ be moved, or the lock is busy; `2` no Isabelle tree where expected, `git` missin
 tree is not the build the packages were made for, the tree has a `.git`, a patch target is a
 symbolic link, a patch file cannot be read, a name is unknown, the prefix is not a conda
 environment and no `--features-dir` is given, or `--features-dir` is not a directory.
-
-## Coming from my-better-isabelle 0.x
-
-`my-better-isabelle` (PyPI `my-better-isabelle-prover`, 0.x) carried its patches itself and applied
-them with GNU `patch`. It stays at 0.3.0 on PyPI for Isabelle2024 and for Isabelle installations
-outside conda; it is not updated. The new tool exists only as the conda package
-`isabelle-patch-control`, and it does **not** see patches that 0.x applied: a 0.x patch left in
-`<prefix>/isa` makes a feature read `cannot be applied` (or `is applied`, when a feature package
-carries the same change).
-
-Before installing any feature package into an environment where 0.x was used:
-
-1. If you ran `my-better-isabelle patch --category all`, reverse the dev patches first:
-   `my-better-isabelle unpatch --category dev`. Never run a bare `my-better-isabelle unpatch` on
-   conda's `isabelle`: the `2025.2-0` build ships with `expose_foreign` built in, and reversing it
-   leaves a tree that is neither the package's nor any feature's.
-2. `pip uninstall my-better-isabelle-prover`. This touches only 0.x; the new tool has a different
-   distribution name.
-3. Install the feature packages. The dev patches of 0.x (`register_thy`, `show_types_nv`,
-   `expose_map_syn`) are now part of the feature package `qiyuan-dev-patches`, which also carries
-   `skip_nitpick_examples`; `expose_foreign` is now `isabelle-expose-foreign`.
-
-If `status` then says a feature `cannot be applied`, a 0.x patch is still in the tree: save
-anything of your own under `<prefix>/isa`, then do what the last lines of `status` say (they give
-the reinstall command for this environment and what the reinstall deletes).

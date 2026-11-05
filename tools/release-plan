@@ -2,26 +2,27 @@
 """release-plan --isabelle-build <b> --tool-version <v> --tool-prefix <p> [--channel <url>] [--rehearsal] <release tag>...
 
 The build job's plan (patch tool plan decisions 10 and 11): for the tool package and for every
-feature release tag of the batch, whether the channel already serves exactly what the batch wants
-(reuse that file) or a new build is needed and with which build number -- tools/common.py's
-plan_builds, the one rule for every package.  The channel's noarch/repodata.json is read; a file
-the channel serves but has not indexed yet is probed by downloading it and reading its
-info/index.json.  The release tags are of one release line: one batch is one isabelle version.
---rehearsal (the batch's isabelle comes from a CI run): refused when the channel's repodata.json of
-one of the five platforms already indexes isabelle <version> <b>, since the CI run's package would
-be a second package with that name, version and build, which conda cannot tell apart from it.
-Prints one JSON object:
+feature release tag of the batch, in any order, whether the channel already serves exactly what the
+batch wants (reuse that file) or a new build is needed and with which build number --
+tools/common.py's plan_builds, the one rule for every package.  The channel's noarch/repodata.json
+is read; a file the channel serves but has not indexed yet is probed by downloading it and reading
+its info/index.json.  The release tags are of one release line: one batch is one isabelle version,
+with one release tag per feature.  --rehearsal (the batch's isabelle comes from a CI
+run): refused when the channel's repodata.json of one of the five platforms already indexes
+isabelle <version> <b>, since the CI run's package would be a second package with that name,
+version and build, which conda cannot tell apart from it.  Prints one JSON object:
 
-  {"packages": [{"name", "version", "tag" and "feature" (features only), "action": "reuse" | "build",
-                 "file": <the .conda file name either way>, "build_number" (to build only)}],
+  {"packages": [{"name", "version", "tag", "feature" and "isabelle_old_build" (features only),
+                 "action": "reuse" | "build", "file": <the .conda file name either way>,
+                 "build_number" (to build only)}],
    "isabelle_version": <the release line's isabelle version: Isabelle2025-2 -> 2025.2>,
-   "isabelle_non_pristine_build": <NON_PRISTINE_BUILDS of that version, or "">,
-   "isabelle_old_build": <the highest isabelle build other than <b> that an indexed record of the
-                          chain top's package (any version) pins, or "">}
+   "isabelle_non_pristine_build": <NON_PRISTINE_BUILDS of that version, or "">}
 
-isabelle_old_build is where §6 (h) starts from (empty: (h) is skipped): an environment with
-isabelle at that build and the chain top, which only the top's own records can make solvable.
-isabelle_non_pristine_build is where §6 (e) and (i) start from (empty: they are skipped).
+A feature package's isabelle_old_build is the highest isabelle build other than <b> that an indexed
+record of that package (any version) pins, or "": where tools/accept's scenario (h) starts from in
+the environment of that package (empty: (h) is skipped), which only its own records can make
+solvable.  isabelle_non_pristine_build is where scenarios (e) and (i) start from (empty: they are
+skipped).
 """
 import argparse
 import json
@@ -64,6 +65,14 @@ def repodata(channel: str, subdir: str) -> dict:
     return json.loads(raw) if raw else {}
 
 
+def old_build(noarch: dict, w: Wanted, isabelle_build: str) -> str:
+    """The highest isabelle build other than isabelle_build that an indexed record of w's package
+    (any version) pins, or ""."""
+    others = {b for rec in indexed(noarch).values() if rec.get("name") == w.name
+              if (b := pinned_build(rec, w.build_string_prefix)) is not None and b != isabelle_build}
+    return max(others, key=lambda b: (int(b) if b.isdigit() else -1, b), default="")
+
+
 def plan(channel: str, isabelle_build: str, tool_version: str, tool_prefix: str, tags: list[str],
          rehearsal: bool = False) -> dict:
     features = []
@@ -104,14 +113,10 @@ def plan(channel: str, isabelle_build: str, tool_version: str, tool_prefix: str,
             entry["build_number"] = what
         if feature:
             entry["tag"], entry["feature"] = feature[0], feature[1]
+            entry["isabelle_old_build"] = old_build(noarch, w, isabelle_build)
         packages.append(entry)
-
-    top = wanted[-1] if features else None
-    others = {b for rec in indexed(noarch).values() if top and rec.get("name") == top.name
-              if (b := pinned_build(rec, top.build_string_prefix)) is not None and b != isabelle_build}
-    old = max(others, key=lambda b: (int(b) if b.isdigit() else -1, b), default="")
     return {"packages": packages, "isabelle_version": version,
-            "isabelle_non_pristine_build": NON_PRISTINE_BUILDS.get(version, ""), "isabelle_old_build": old}
+            "isabelle_non_pristine_build": NON_PRISTINE_BUILDS.get(version, "")}
 
 
 def cli():

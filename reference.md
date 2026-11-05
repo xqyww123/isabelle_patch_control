@@ -64,8 +64,8 @@ level lower when absent.
 
 A feature's state follows from its files: `applied` when all are at or above its number,
 `not-applied` when all are below, `half-applied` otherwise, `CONFLICT` when any of its files is.
-`--feature F` names a feature by its feature name (`light_locale`) or by its package name
-(`isabelle-light-locale`).
+`--feature F` names a feature by its feature name (`<feature>`) or by its package name
+(`<package>`).
 
 ## Commands
 
@@ -200,10 +200,10 @@ or new, and the next `apply` or `unapply` finishes the job.
 
 ## Messages
 
-`isabelle_patch_control/texts.py` holds the texts of the design plan
-(`ai-artifacts/ISABELLE_PATCH_CONTROL_PLAN.md` §4, decision 9) and every frame `conda-hook` writes
-(the hook scripts' own fallback lines are in `isabelle_patch_control/hooks/`); develop.md says how
-they are written. The refusals (an unknown name, a patch file git cannot read, a tree with a `.git`,
+`isabelle_patch_control/texts.py` holds the messages that `status`, `apply`, `unapply` and the hooks
+print, other than refusals and the lines `-v` and `--dry-run` print about each package, file and level
+(cli.py composes those), and every frame `conda-hook` writes (the hook scripts' own fallback lines are
+in `isabelle_patch_control/hooks/`); develop.md says how they are written. The refusals (an unknown name, a patch file git cannot read, a tree with a `.git`,
 ...) are written next to their checks, and a hook frame quotes them. The ones met most often:
 
 - the heap hint after `src/` changed: `Isabelle sources under <tree> changed (applied: …).` followed

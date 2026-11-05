@@ -1,6 +1,7 @@
 """Shared code of the release scripts in tools/ (the workflows run them): patch file headers, the
-hooks' component lines, conda archives, and which packages a release builds.  The helpers that
-make-patches shares with them live in isabelle_patch_control.dev and are re-exported here.
+hooks' component lines, conda archives, which packages a release builds, and the environments it
+checks.  The helpers that make-patches shares with them live in isabelle_patch_control.dev and are
+re-exported here.
 """
 from __future__ import annotations
 
@@ -59,6 +60,40 @@ def block_header(block: bytes) -> tuple[str, str, str]:
     return path, index[1].decode(), index[2].decode()
 
 
+def changes_src(patches: list[Path]) -> bool:
+    """Whether some patch file's target lies under src/: then installing it makes the tool print its
+    heap paragraph (api.ApplyResult.src_changed, stated here on the test side)."""
+    return any(block_path(p.read_bytes()).startswith("src/") for p in patches)
+
+
+def ships_component(index: dict, files) -> bool:
+    """Whether a package (its info/index.json, the paths of its payload) ships an Isabelle component:
+    files under share/<name>/."""
+    return any(f.startswith(f"share/{index['name']}/") for f in files)
+
+
+def direct_dependencies(provenance: dict[str, str]) -> list[str]:
+    """The release tags a release tag is directly built on, from its provenance fields: its base_tag,
+    unless that is a pristine tag."""
+    return [] if provenance["base_tag"].split("/")[1] == "pristine" else [provenance["base_tag"]]
+
+
+def entries(bases: dict[str, list[str]]) -> dict[str, list[str]]:
+    """The environments a batch is checked in.  `bases` maps each release tag of the batch to the
+    release tags it is directly built on; the result maps each tag that no other tag of the batch is
+    built on to the tags of the batch its environment holds (itself included, reachable through
+    `bases`), sorted."""
+    def reach(tag: str, seen: set[str]) -> set[str]:
+        if tag in bases and tag not in seen:
+            seen.add(tag)
+            for base in bases[tag]:
+                reach(base, seen)
+        return seen
+
+    below = {base for tags in bases.values() for base in tags}
+    return {tag: sorted(reach(tag, set())) for tag in sorted(bases) if tag not in below}
+
+
 # --- which packages the release workflow builds and which it reuses (patch tool plan decision 10)
 
 @dataclass(frozen=True)
@@ -81,7 +116,7 @@ class Wanted:
 
 
 def isabelle_pin(build_string_prefix: str, isabelle_build: str) -> str:
-    """The `isabelle` dependency of a feature package, e.g. `isabelle ==2025.2 1`.  The renderer of the
+    """The `isabelle` dependency of a feature package, e.g. `isabelle ==2026 0`.  The renderer of the
     feature recipes imports this: the pin a recipe writes and the pin plan_builds looks for are then
     one and the same (rattler-build records it in `depends` as written).  `==`, not a bare version:
     rattler-build refuses `isabelle 2025.2 1` in a recipe; conda reads both the same."""

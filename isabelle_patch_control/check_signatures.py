@@ -1,6 +1,6 @@
 """check-signatures [-C <dir>] <base rev> <rev> <additions file>
 
-Release gate (d) of make-patches: for every .ML file that differs between <base rev> and <rev>,
+The signature gate of make-patches: for every .ML file that differs between <base rev> and <rev>,
 every entry of the signature sections of the base version is still present unchanged in <rev>,
 and the entries added have exactly the heads listed in <additions file>.  Both revisions are
 resolved, and the files read, in the repository of <dir> (default: the current directory).
@@ -12,8 +12,7 @@ its continuation lines are joined, comments dropped, white space squeezed.  A he
 `datatype 'a state = ...` has the head `... datatype state`).  The additions file lists one
 head per line; `#` lines and blank lines are ignored.
 """
-# This docstring is what `check-signatures --help` prints; gate (d) is MLML's
-# ai-artifacts/ISABELLE_GIT_MIGRATION_PLAN.md §5.1, light locale's make_patches.sh check generalised.
+# This docstring is what `check-signatures --help` prints; make-patches runs the same check as its gate 4.
 from __future__ import annotations
 
 import re

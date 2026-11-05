@@ -11,8 +11,8 @@ contrib/cygwin/isabelle/symlinks names (one of them outside contrib/cygwin/) and
 contrib/cygwin/etc/passwd; conda tracks none of them.
 
 As the isabelle package's post-link, `--rerun-post-links` re-runs the post-link of every installed
-package that depends on isabelle directly, dependencies first (plan §0 items 26, 33, 34; the CI plan
-implements the real one).  One self-contained file: python writes no __pycache__ for a script.
+package that depends on isabelle directly, dependencies first (plan §0 items 26, 33, 34;
+isabelle-packaging-ci's isabelle package implements the real one).  One self-contained file: python writes no __pycache__ for a script.
 """
 import json
 import os

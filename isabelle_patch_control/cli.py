@@ -17,7 +17,7 @@ For the developers of feature packages (`<command> --help` says more):
   new-tree      <feature repo>         put the trees that the feature repository registers in place
   new-tree      --home <feature repo> --base <R>/<base> <R>/<feature>     register a feature's two trees
   make-patches  --package <dir> [<R>/]<feature> <m>                       release a feature, in its private tree
-  check-signatures  <base rev> <rev> <additions file>                     release gate (d) on its own
+  check-signatures  <base rev> <rev> <additions file>                     the signature gate of make-patches, on its own
 
 Exit codes: 0 `status` found everything asked for applied, or `apply`/`unapply` found nothing in its
 way (also: no feature packages installed); 1 something is not applied, a file could not be moved,

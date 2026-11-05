@@ -1,17 +1,16 @@
 ## Isabelle and its feature packages
 
-Isabelle is the conda package `isabelle`, the official release unchanged. A *feature package*,
-such as `isabelle-light-locale`, changes Isabelle's sources inside your environment when it is
-installed and puts them back when it is removed. The tool that does this, `isabelle-patch-control`,
-comes in with the feature packages as their dependency. A feature package is built on Isabelle itself
-or on one other feature package, which conda installs with it, so `status` may list more features than
-you named. Two feature packages built on the same feature package, or both directly on Isabelle, do
-not work together.
+Isabelle is the conda package `isabelle`, the official release unchanged. A *feature package*
+changes Isabelle's sources inside your environment when it is installed and puts them back when it
+is removed. The tool that does this, `isabelle-patch-control`, comes in with the feature packages as
+their dependency. A feature package is built on Isabelle itself or on one other feature package,
+which conda installs with it, so `status` may list more features than you named. Two feature
+packages built on the same feature package, or both directly on Isabelle, do not work together.
 
-Install Isabelle with a feature package:
+Install Isabelle with the feature package `<package>`:
 
 ```
-conda create -n isabelle -c https://conda.qiyuan.me -c conda-forge isabelle isabelle-light-locale
+conda create -n isabelle -c https://conda.qiyuan.me -c conda-forge isabelle <package>
 ```
 
 Name `isabelle` itself, as above: otherwise conda installs it only as a dependency, and removing
@@ -28,15 +27,11 @@ isabelle-patch-control status
 ```
 
 (`command not found` means that the environment is not activated, or that it has no feature
-package.) A healthy environment looks like this:
+package.) It names every feature in the environment, first the ones `<package>` is built on, then
+`<feature>`. A healthy environment ends like this:
 
 ```
-Checked the Isabelle sources in /home/you/miniconda3/envs/isabelle/isa against 4 feature packages.
-
-Feature `expose_foreign` is applied.
-Feature `future_assign_interrupt` is applied.
-Feature `fast_abbrev_printing` is applied.
-Feature `light_locale` is applied.
+Feature `<feature>` is applied.
 
 Everything is in order.
 ```
@@ -45,7 +40,7 @@ If it ends with `Everything is in order.`, you are done; otherwise its last line
 
 With the environment activated, update everything in it later with this, then run
 `isabelle-patch-control status` again. `<version>` is the version of `isabelle` that
-`conda list --full-name isabelle` shows, such as `2025.2`; `conda update --all` would instead move the
+`conda list --full-name isabelle` shows, such as `2026`; `conda update --all` would instead move the
 environment to a newer Isabelle release once the channel has one. When the update brings a new build
 of `isabelle`, it deletes this environment's Isabelle user directory (its heaps, `etc/settings`,
 components registered by hand), as removing Isabelle does.

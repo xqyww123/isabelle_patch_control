@@ -88,8 +88,7 @@ def test_post_link_conflict_full_diagnostic_only_from_the_chain_top(prefix):
         "and components you registered by hand); copy out anything you want to keep first "
         "(isabelle getenv -b ISABELLE_HOME_USER shows where it is).\n"
         f"Then run:\n  conda install -p {prefix.path} -c https://conda.qiyuan.me -c conda-forge --force-reinstall isabelle\n"
-        "The installed feature packages are applied again, and Isabelle rebuilds the heaps on first use.\n"
-        "Upgrading from my-better-isabelle 0.x? See: isabelle-patch-control help\n")
+        "The installed feature packages are applied again, and Isabelle rebuilds the heaps on first use.\n")
     # a lower package's hook (or the one being installed below the top): one line
     line = ("isabelle-patch-control: Feature `f2` cannot be applied: src/Pure/b.ML was changed by something other than the "
             "installed feature packages. Run isabelle-patch-control status for what to do.\n")

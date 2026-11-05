@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """check-roundtrip <pristine tree> <top feature> --features-dir FD [-C <Isabelle repository>] [--fetch <remote>] [--tool <command>] [--keep]
 
-Check (b2) of the migration plan (patch tool plan decision 17): the chain of feature directories in
+The round-trip check (patch tool plan decision 17): the chain of feature directories in
 FD, applied by the patch tool, gives the same tree as GNU patch applying the Isabelle repository's
 diff from the pristine tag to the top feature's release tag; and the tool takes it back.
 

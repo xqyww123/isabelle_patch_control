@@ -1,40 +1,39 @@
 """make-patches [-C <tree>] --package <dir> [<R>/]<feature> <m>
 
-Release <m> (1, 2, 3, ...) of a feature, run on the owner's order in the feature's private tree
-<tree> (default: the current directory).  No network, nothing pushed.
-<R> defaults to the release line of the branch checked out there.  The package directory <dir>
-lies in the feature repository H that registers the tree (new-tree --home) and holds
-tools/patched_files.txt, tools/signature_additions.txt and tools/required_sessions.txt (see
-RELEASE.md, "First-time setup of a feature repository"); it receives patches/<R>/*.patch and
-patches/<R>/provenance.txt.  The base is the one H's .gitmodules records; branches and tags are
-the private tree's own (fetch first when the base was released elsewhere).
+Release <m> (1, 2, 3, ...) of a feature, run in the feature's private tree <tree> (default: the current
+directory).  No network, nothing pushed.  <R> defaults to the release line of the branch checked out
+there.  The package directory <dir> lies in the feature repository H that registers the tree (new-tree
+--home); it receives patches/<R>/*.patch and patches/<R>/provenance.txt.  The base is the one H's
+.gitmodules records; branches and tags are the private tree's own (fetch first when the base was
+released elsewhere).
 
 Gates, in order, all before anything is written or tagged:
-  7. tools/patched_files.txt, signature_additions.txt, required_sessions.txt and, if present,
-     tools/component_files.txt with the files it lists are committed and unchanged in H; H's
-     .gitmodules registers the feature's two trees and <tree> is the private one, clean and on
-     <R>/<feature>, whose tip carries no release tag of this feature yet (commit first).
-  0. base tag: `git merge-base --all origin/<base> <tip>` is one commit, exactly one release tag
-     <base>/* points at it, and the stock tree stands there (else rerun <H>/init.sh).  Every gate
-     below is relative to that tag.
-  (f) `git diff-tree -r --no-renames --name-only` between the two equals tools/patched_files.txt.
-  (d) check-signatures with tools/signature_additions.txt.
-  (c) the patch files (one `git diff-tree -p` block per file, under its flat name: the path with
-     `/` as `-`, plus `.patch`), generated into a temporary directory, replayed through the patch
-     tool's directory interface on `git archive <base tag>` forward and backward, compared by tree
-     hash.
-Then, each step repeatable after a failure: the package's
-patches/<R>/ receives the files and the provenance file; H's release commit is made by path, of
-those files, .gitmodules and the two trees, whose gitlinks record the tip and the base tag's
-commit; the commit to tag (the new one, or the one an existing tag of this number points at) is
-checked to hold exactly the generated files, the gates' component files and those gitlinks; the
-annotated tag <R>/<feature>/<m> is created in H; and last in the private tree, whose tag
-marks the release as done.
+  1. committed files: in H, <dir>'s README.md, tools/patched_files.txt, tools/signature_additions.txt,
+     tools/required_sessions.txt and the files tools/component_files.txt lists exist; these and, when
+     present, tools/component_files.txt, tools/release_build.sh, tools/license.txt (at most one entry)
+     and every LICENSE from <dir> up to H's top are committed and unchanged (see RELEASE.md, "First-time
+     setup of a feature repository"); H's .gitmodules registers the feature's two trees and <tree> is the
+     private one, clean and on <R>/<feature>, whose tip carries no release tag of this feature yet
+     (commit first; an empty commit releases the same sources under the new number).
+  2. base tag: `git merge-base --all origin/<base> <tip>` is one commit, exactly one release tag
+     <base>/* points at it, and the stock tree stands there (else rerun <H>/init.sh).  Every gate below
+     is relative to that tag.
+  3. changed files: `git diff-tree -r --no-renames --name-only` between the two equals
+     tools/patched_files.txt.
+  4. signatures: check-signatures with tools/signature_additions.txt.
+  5. round trip: the patch files (one `git diff-tree -p` block per file, under its flat name: the path
+     with `/` as `-`, plus `.patch`), generated into a temporary directory, replayed through the patch
+     tool's directory interface on `git archive <base tag>` forward and backward, compared by tree hash.
+Then, each step repeatable after a failure: the package's patches/<R>/ receives the files and the
+provenance file; H's release commit is made by path, of those files, .gitmodules and the two trees,
+whose gitlinks record the tip and the base tag's commit; the commit to tag (the new one, or the one an
+existing tag of this number points at) is checked to hold exactly the generated files, gate 1's files
+and those gitlinks; the annotated tag <R>/<feature>/<m> is created in H; and last in the private tree,
+whose tag marks the release as done.
 """
-# This docstring is what `make-patches --help` prints.  Gate numbers 7, 0 and the letters (f), (d),
-# (c) are MLML's ai-artifacts/ISABELLE_GIT_MIGRATION_PLAN.md §5.1's (gates 1 and (e) are gone since
-# §12's fourth draft, item 6; check (a) of §5.2 since 2026-11-01: a release line's pristine is the
-# official release committed as it is); the write steps are the patch tool plan's decision 16 point 8.
+# This docstring is what `make-patches --help` prints.  The gates and the write steps are the patch
+# tool plan's decision 16 points 7 and 8; a release line's pristine is the official release committed
+# as it is, so no gate checks it.
 from __future__ import annotations
 
 import os
@@ -46,8 +45,8 @@ from pathlib import Path
 
 from . import check_signatures
 from .api import apply_to, unapply_from
-from .dev import (build_string_prefix, exists, git, head_branch, listed, patch_blocks, rev, run, shipped_files,
-                  split_branch, status, tags_at, toplevel)
+from .dev import (build_string_prefix, exists, git, head_branch, listed, patch_blocks, release_inputs, require_committed, rev,
+                  run, split_branch, status, tags_at, toplevel)
 from .errors import Refused
 from .new_tree import registrations
 
@@ -83,28 +82,16 @@ def archive(tree: Path, commit: str, into: Path):
 
 
 def replay(directory: Path, patches: Path, reverse: bool = False):
-    """Gate (c) through the patch tool's directory interface: every patch file of `patches` applied
+    """Gate 5 through the patch tool's directory interface: every patch file of `patches` applied
     to (or reversed from) `directory`, CONFLICT files refused."""
     res = (unapply_from if reverse else apply_to)(directory, patches)
     if res.conflicts:
         files = "".join(f"\n  {lv.target}: " + (next(iter(lv.failures.values()), "").splitlines() or ["?"])[0]
                         for lv in res.conflicts)
-        raise Refused(f"gate (c): the patches do not {'reverse' if reverse else 'apply'} cleanly:{files}")
+        raise Refused(f"gate 5 (round trip): the patches do not {'reverse' if reverse else 'apply'} cleanly:{files}")
 
 
 # --- the feature repository (decision 16 point 7)
-
-def require_committed(top: Path, paths: list[Path]):
-    rel = [os.path.relpath(p, top) for p in paths]
-    for p, r in zip(paths, rel):
-        if not p.is_file():
-            raise Refused(f"{p} is missing")
-        if run(["git", "ls-files", "--error-unmatch", "--", r], cwd=top, check=False).returncode:
-            raise Refused(f"{p} is not committed in the feature repository {top}: commit it first")
-    dirty = run(["git", "status", "--porcelain", "--", *rel], cwd=top).stdout
-    if dirty:
-        raise Refused(f"uncommitted changes in the feature repository {top}: commit them first\n{dirty.rstrip()}")
-
 
 def committed_files(top: Path, commit: str, directory: Path) -> dict[str, str]:
     """path -> blob hash of the files `commit` holds under `directory` of the feature repository."""
@@ -123,16 +110,14 @@ def feature_release(where: Path, feature: str, m: str, package: Path):
         raise Refused(f"the number at the end of the release tag is a positive integer (1, 2, 3, ...), not {m!r}")
     tag = f"{branch}/{m}"
 
-    # 7. the feature repository and the two trees
+    # 1. the committed files of the feature repository, and the two trees
     top = toplevel(package)
     f = next((f for f in registrations(top) if f.branch == branch), None)
     if f is None:
         raise Refused(f"{top}/.gitmodules does not register {branch} (new-tree --home registers it)")
     if top / f.path != tree:
         raise Refused(f"{tree} is not the private tree of {branch}, {top / f.path}: run make-patches there")
-    shipped = [package / rel for rel in shipped_files(package)]
-    lists = [package / "tools" / n for n in ("patched_files.txt", "signature_additions.txt", "required_sessions.txt")]
-    require_committed(top, [*lists, *shipped])
+    require_committed(package)
     if head_branch(tree) != branch:
         raise Refused(f"{tree} is not on {branch}")
     if dirty := status(tree):
@@ -145,40 +130,40 @@ def feature_release(where: Path, feature: str, m: str, package: Path):
         raise Refused(f"{tip[:12]} already carries release tag {' '.join(earlier)}: commit first (an empty commit "
                       "will do) to release this commit's content again under a new number")
     H = git("rev-parse", "HEAD", cwd=top)
-    shipped_rel = [os.path.relpath(p, top) for p in shipped]
+    inputs = [rel for rels in release_inputs(package) for rel in rels]
 
-    # 0. the base tag, where the stock tree stands
+    # 2. the base tag, where the stock tree stands
     base = f.base
     base_commit = f.stock_commit()
     base_tags = tags_at(tree, base_commit, f"{base}/*")
     if len(base_tags) != 1:
-        raise Refused(f"gate 0: merge-base(origin/{base}, {branch}) = {base_commit[:12]} carries {len(base_tags)} release "
+        raise Refused(f"gate 2 (base tag): merge-base(origin/{base}, {branch}) = {base_commit[:12]} carries {len(base_tags)} release "
                       f"tags of {base} ({' '.join(base_tags) or 'none'}), not exactly one: merge a release of {base} "
                       "(fetch first if it was released elsewhere)")
     base_tag = base_tags[0]
     stock = top / f.stock_path
     if git("rev-parse", "HEAD", cwd=stock) != base_commit:
-        raise Refused(f"gate 0: the stock tree {stock} is not at {base_tag} ({base_commit[:12]}): rerun {top}/init.sh")
+        raise Refused(f"gate 2 (base tag): the stock tree {stock} is not at {base_tag} ({base_commit[:12]}): rerun {top}/init.sh")
     print(f"base tag {base_tag} at {base_commit[:12]}, the stock tree's commit")
 
-    # (f) the changed files
+    # 3. the changed files
     changed = sorted(git("diff-tree", "-r", "--name-only", "--no-renames", base_tag, tip, cwd=tree).split("\n"))
     changed = [c for c in changed if c]
     expected = sorted(listed(package / "tools" / "patched_files.txt"))
     if changed != expected:
         extra = sorted(set(changed) - set(expected))
         missing = sorted(set(expected) - set(changed))
-        raise Refused("gate (f): the files changed since the base tag are not tools/patched_files.txt:"
+        raise Refused("gate 3 (changed files): the files changed since the base tag are not tools/patched_files.txt:"
                       + "".join(f"\n  changed but not listed: {p}" for p in extra)
                       + "".join(f"\n  listed but unchanged: {p}" for p in missing))
-    print(f"gate (f): {len(changed)} changed files, exactly tools/patched_files.txt")
+    print(f"gate 3 (changed files): {len(changed)} changed files, exactly tools/patched_files.txt")
 
-    # (d) signatures
+    # 4. signatures
     additions = package / "tools" / "signature_additions.txt"
     heads = listed(additions)
     if problems := check_signatures.check(tree, base_tag, tip, heads, str(additions)):
-        raise Refused("gate (d):\n" + "\n".join(f"ERROR: {p}" for p in problems))
-    print(f"gate (d): signature sections: every entry of {base_tag} unchanged, {len(heads)} additions as listed")
+        raise Refused("gate 4 (signatures):\n" + "\n".join(f"ERROR: {p}" for p in problems))
+    print(f"gate 4 (signatures): every entry of {base_tag} unchanged, {len(heads)} additions as listed")
 
     # provenance
     provenance = [
@@ -200,19 +185,19 @@ def feature_release(where: Path, feature: str, m: str, package: Path):
         patch_names = sorted(p.name for p in gen.glob("*.patch"))
         print(f"{len(patch_names)} patch files generated")
 
-        # (c) round trip on the base tag's archive through the tool's directory interface, compared by tree hash
+        # 5. round trip on the base tag's archive through the tool's directory interface, compared by tree hash
         work = Path(tmp) / "tree"
         work.mkdir()
         archive(tree, base_tag, work)
         replay(work, gen)
         got, want = tree_hash_of_dir(tree, work), git("rev-parse", f"{tip}^{{tree}}", cwd=tree)
         if got != want:
-            raise Refused(f"gate (c): forward application gives tree {got}, the commit's tree is {want}")
+            raise Refused(f"gate 5 (round trip): forward application gives tree {got}, the commit's tree is {want}")
         replay(work, gen, reverse=True)
         got, want = tree_hash_of_dir(tree, work), git("rev-parse", f"{base_tag}^{{tree}}", cwd=tree)
         if got != want:
-            raise Refused(f"gate (c): backward application gives tree {got}, the base tag's tree is {want}")
-        print("gate (c): round trip on the base tag's archive reproduces both trees")
+            raise Refused(f"gate 5 (round trip): backward application gives tree {got}, the base tag's tree is {want}")
+        print("gate 5 (round trip): the base tag's archive reproduces both trees")
         (gen / "provenance.txt").write_text("\n".join(provenance) + "\n")
         print("\n".join(provenance))
 
@@ -244,7 +229,7 @@ def feature_release(where: Path, feature: str, m: str, package: Path):
         else:
             print(f"patches/{release} and the gitlinks already committed in {top}")
 
-        # write step (d): the commit to tag holds exactly the generated files, the gates' component files and the gitlinks
+        # write step (d): the commit to tag holds exactly the generated files, gate 1's files as H holds them and the gitlinks
         tag_exists = exists(top, f"refs/tags/{tag}")
         commit = rev(top, f"refs/tags/{tag}" if tag_exists else "HEAD")
         in_commit = committed_files(top, commit, out)
@@ -252,8 +237,8 @@ def feature_release(where: Path, feature: str, m: str, package: Path):
         differing = sorted(set(in_commit) ^ set(want) | {p for p in want if in_commit.get(p) != want[p]})
         links = {line.split("\t", 1)[1]: line.split()[2] for line in git("ls-tree", commit, "--", *trees, cwd=top).splitlines()}
         differing += [f"{p} (gitlink)" for p, c in zip(trees, (tip, base_commit)) if links.get(p) != c]
-        if not differing and shipped_rel and run(["git", "diff", "--quiet", H, commit, "--", *shipped_rel], cwd=top, check=False).returncode:
-            differing = ["(component files)", *shipped_rel]
+        if not differing and (moved := git("diff", "--name-only", H, commit, "--", *inputs, cwd=package).split()):
+            differing = ["(gate 1's files)", *moved]
         if differing:
             where = f"release tag {tag} already exists at {commit[:12]} and" if tag_exists else f"commit {commit[:12]}"
             raise Refused(f"{where} does not hold the generated files: {' '.join(differing)}"

@@ -6,6 +6,7 @@ and features a package's version.  Unlike engine.Git, git runs here with the use
 it commits, tags and fetches."""
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -105,6 +106,8 @@ def block_path(block: bytes) -> str:
 # --- a feature package's list files
 
 COMPONENT_LIST = "tools/component_files.txt"
+LICENSE_LIST = "tools/license.txt"
+LISTS = ("tools/patched_files.txt", "tools/signature_additions.txt", "tools/required_sessions.txt")
 
 
 def listed(path: Path) -> list[str]:
@@ -121,6 +124,59 @@ def shipped_files(package: Path) -> list[str]:
     return [COMPONENT_LIST, *listed(package / COMPONENT_LIST)] if (package / COMPONENT_LIST).is_file() else []
 
 
+def up_to_top(package: Path) -> list[Path]:
+    """The package directory and every directory above it up to its repository's top."""
+    dirs = [package, *package.parents]
+    return dirs[:dirs.index(toplevel(package)) + 1]
+
+
+def release_inputs(package: Path) -> tuple[list[str], list[str]]:
+    """What a release reads from a package directory, relative to it: (required, checked when
+    present).  Required: the three lists, README.md and the files tools/component_files.txt lists;
+    checked when present: that list, tools/release_build.sh, tools/license.txt and every LICENSE
+    from the package directory up to its repository's top."""
+    package = package.resolve()
+    licenses = [os.path.relpath(d / "LICENSE", package) for d in up_to_top(package)]
+    return ([*LISTS, "README.md", *shipped_files(package)[1:]],
+            [COMPONENT_LIST, "tools/release_build.sh", LICENSE_LIST, *licenses])
+
+
+def license_of(package: Path) -> str | None:
+    """The package's SPDX license expression: the one entry of tools/license.txt; None without the
+    file or an entry."""
+    path = package / LICENSE_LIST
+    entries = listed(path) if path.is_file() else []
+    if len(entries) > 1:
+        raise Refused(f"{path} holds more than one entry: give one SPDX license expression, or none")
+    return entries[0] if entries else None
+
+
+def license_file(package: Path) -> Path | None:
+    """The package's license file: the nearest file named exactly LICENSE from the package
+    directory up to its repository's top (by name, also where the file system ignores case)."""
+    return next((d / "LICENSE" for d in up_to_top(package.resolve())
+                 if "LICENSE" in os.listdir(d) and (d / "LICENSE").is_file()), None)
+
+
+def require_committed(package: Path):
+    """A release reads its inputs (release_inputs) as they are committed: refused when a required one
+    is missing, a present one is not committed, or any of them, present or not, has uncommitted
+    changes (a deletion included), and when tools/license.txt holds more than one entry."""
+    package = package.resolve()
+    top = toplevel(package)
+    required, present = release_inputs(package)
+    for rel in required:
+        if not (package / rel).is_file():
+            raise Refused(f"{os.path.normpath(package / rel)} is missing")
+    for rel in [*required, *present]:
+        if (package / rel).exists() and run(["git", "ls-files", "--error-unmatch", "--", rel], cwd=package, check=False).returncode:
+            raise Refused(f"{os.path.normpath(package / rel)} is not committed in the feature repository {top}: commit it first")
+    dirty = run(["git", "status", "--porcelain", "--untracked-files=all", "--", *required, *present], cwd=package).stdout
+    if dirty:
+        raise Refused(f"uncommitted changes in the feature repository {top}: commit them first\n{dirty.rstrip()}")
+    license_of(package)
+
+
 # --- build strings and package versions
 
 def build_string_prefix(release: str) -> str:
@@ -135,8 +191,8 @@ def isabelle_version(build_string_prefix: str) -> str:
 
 def package_version(release_tag: str) -> str:
     """The version of the package built from a release tag <R>/<feature>/<m>: the release line's
-    isabelle version with a second number (0 when it has none), then m.  Isabelle2026/light_locale/1 ->
-    2026.0.1, Isabelle2025-2/light_locale/1 -> 2025.2.1: three numbers, so lines never share a version
+    isabelle version with a second number (0 when it has none), then m.  Isabelle2026/bicompose_rename_fix/1
+    -> 2026.0.1, Isabelle2025-2/expose_foreign/1 -> 2025.2.1: three numbers, so lines never share a version
     and a newer line's are higher."""
     release, _, m = release_tag.split("/")
     y, _, k = isabelle_version(build_string_prefix(release)).partition(".")

@@ -150,7 +150,7 @@ s_components() {
 s_conflict() {
   echo "--- CONFLICT: exactly one complete diagnostic per command that links isabelle or the chain top"
   fresh conflict "isabelle=2025.2=1" isabelle-t-one isabelle-t-two || return 0
-  mkdir -p "$E/isa/src/Tools"; echo "my own file" > "$E/isa/src/Tools/t_three.ML"   # §6 (f2): conda does not track it
+  mkdir -p "$E/isa/src/Tools"; echo "my own file" > "$E/isa/src/Tools/t_three.ML"   # tools/accept's scenario (f2): conda does not track it
   local full line
   full=$(text 'stopped("t_three")'); line=$(text 'conflict_line("t_three", ["src/Tools/t_three.ML"])')
   c install -p "$E" "${CHANNELS[@]}" isabelle-t-three

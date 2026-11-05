@@ -2,15 +2,17 @@
 # toy-channel.sh <dir> [<release line>]: the toy channels of the hook-layer test and of the GitHub
 # test workflow (patch tool plan decision 15), built under <dir>.  For Isabelle2025-2 (the default):
 #   channel/            the tool; isabelle builds 0 (another ISABELLE_ID), 1 and 2; the features t_one,
-#                       t_two, t_three for builds 1 and 2, through the real renderer; toy-component;
-#                       toy-indirect and toy-slow (the hook-layer test's)
+#                       t_two on t_one, t_three on t_two and t_four on t_one, for builds 1 and 2, through
+#                       the real renderer (t_two with a license); toy-component; toy-indirect and toy-slow
+#                       (the hook-layer test's)
 #   channel-broken/     a tool that raises on import
 #   channel-norelease/  isabelle build 2 with the features of build 1 only
-#   summary.json        tools/check-packages --summary of the build-2 batch, as the release's build job writes it
+#   summary.json        the environments of the build-2 batch of every feature, as the release's build job
+#                       lists them (release-plan, check-packages): t_three's and t_four's
 # For Isabelle2026, a new release line whose first pristine build is build 0: channel/ holds the
-# tool, isabelle 2026 build 0 (pristine), the three features for it and toy-component; summary.json
-# is of the build-0 batch.  The GitHub test workflow serves both lines' channel/ as one channel, as
-# the online channel will: every file but the tool's has a name of its own per line.
+# tool, isabelle 2026 build 0 (pristine), t_one, t_two and t_three for it and toy-component;
+# summary.json is of the build-0 batch.  The GitHub test workflow serves both lines' channel/ as one
+# channel, as the online channel serves them: every file but the tool's has a name of its own per line.
 # Every package is noarch, so one channel serves all five platforms.  RATTLER_BUILD names the
 # rattler-build binary (default: rattler-build on PATH).
 set -euo pipefail
@@ -20,9 +22,9 @@ RB=${RATTLER_BUILD:-rattler-build}
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t \
   GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
 CH="$W/channel"; BAD="$W/channel-broken"; NORE="$W/channel-norelease"; R=${2:-Isabelle2025-2}
-case $R in       # the isabelle version, its pristine builds (each with the features), toy-component's isabelle range and build number
-  Isabelle2025-2) V=2025.2 BUILDS="1 2" RANGE=">=2025.2,<2025.3" COMPONENT_BUILD=0 ;;
-  Isabelle2026)   V=2026   BUILDS=0     RANGE=">=2026,<2026.1"   COMPONENT_BUILD=1 ;;
+case $R in       # the isabelle version, its pristine builds (each with the features), the features, toy-component's isabelle range and build number
+  Isabelle2025-2) V=2025.2 BUILDS="1 2" FEATS="t_one t_two t_three t_four" RANGE=">=2025.2,<2025.3" COMPONENT_BUILD=0 ;;
+  Isabelle2026)   V=2026   BUILDS=0     FEATS="t_one t_two t_three"        RANGE=">=2026,<2026.1"   COMPONENT_BUILD=1 ;;
   *) echo "toy-channel.sh: no toy release line $R (Isabelle2025-2, Isabelle2026)" >&2; exit 2 ;;
 esac
 crlf() { printf '%s\r\n' "$@"; }
@@ -64,16 +66,20 @@ git(src, "add", "-A"); git(src, "commit", "-qm", "pristine"); git(src, "tag", f"
 def edit(rel, old, new):
     p = src / rel; s = p.read_text(); assert old in s, (rel, old); p.write_text(s.replace(old, new, 1))
 
-# name, changes; t_two's a.ML hunk has t_one's line as context (stacked), t_two ships a component.
-# Every feature creates a file: the hook-layer test's interrupted install abandons t_two.
+# name, base, changes; t_two's a.ML hunk has t_one's line as context (stacked), t_two ships a component
+# and has a license.  Every feature creates a file: the hook-layer test's interrupted install abandons
+# t_two.  t_four, on t_one beside t_two, changes a file t_one does not touch and creates one.
 FEATURES = [
-    ("t_one", lambda: (edit("src/Pure/a.ML", "a3\n", "a3\nT1\n"), write(src, "src/Pure/t_one.ML", "t_one\n"))),
-    ("t_two", lambda: (edit("src/Pure/a.ML", "T1\na4\n", "T1\nT2\na4\n"), edit("src/Pure/b.ML", "b5\n", "B5\n"),
-                       write(src, "src/Pure/t_two.ML", "t_two\n"))),
-    ("t_three", lambda: (edit("src/Pure/c.ML", "c2\n", "C2\n"), write(src, "src/Tools/t_three.ML", "t_three\n"))),
+    ("t_one", "pristine", lambda: (edit("src/Pure/a.ML", "a3\n", "a3\nT1\n"), write(src, "src/Pure/t_one.ML", "t_one\n"))),
+    ("t_two", "t_one", lambda: (edit("src/Pure/a.ML", "T1\na4\n", "T1\nT2\na4\n"), edit("src/Pure/b.ML", "b5\n", "B5\n"),
+                                write(src, "src/Pure/t_two.ML", "t_two\n"))),
+    ("t_three", "t_two", lambda: (edit("src/Pure/c.ML", "c2\n", "C2\n"), write(src, "src/Tools/t_three.ML", "t_three\n"))),
 ]
-base = f"{R}/pristine/{PRISTINE}"
-for name, change in FEATURES:
+if R == "Isabelle2025-2":
+    FEATURES.append(("t_four", "t_one", lambda: (edit("src/Pure/b.ML", "b2\n", "B2\n"), write(src, "src/Tools/t_four.ML", "t_four\n"))))
+for name, below, change in FEATURES:
+    base = f"{R}/pristine/{PRISTINE}" if below == "pristine" else f"{R}/{below}/1"
+    git(src, "checkout", "-q", "--detach", base)
     change()
     git(src, "add", "-A"); git(src, "commit", "-qm", name)
     tag = f"{R}/{name}/1"; git(src, "tag", tag)
@@ -90,15 +96,16 @@ for name, change in FEATURES:
         write(pkg, "tools/component_files.txt", "ROOT\nT_Two.thy\n")
         write(pkg, "ROOT", "session T_Two = Pure + theories T_Two\n")
         write(pkg, "T_Two.thy", "theory T_Two imports Pure begin end\n")
+        write(pkg, "tools/license.txt", "# the package's SPDX license expression\nBSD-3-Clause\n")
+        write(pkg, "LICENSE", "The toy license of t_two.\n")
     git(pkg, "init", "-q", "-b", "main"); git(pkg, "add", "-A"); git(pkg, "commit", "-qm", f"{name} release 1")
     git(pkg, "tag", "-a", "-m", "release", tag)
-    base = tag
 PY
 
 # ---------------------------------------------------------------- the toy isabelle package (2025.2: builds 0, 1, 2; 2026: 0)
 # 2025.2's build 0 plays the patched 2025.2-0 (another ISABELLE_ID); the others are pristine builds.  isa/bin's
 # isabelle and isabelle.bat run toy_isabelle.py with the environment's python, which the package
-# depends on (as the CI plan's isabelle package does, plan decision 12 point 2); its post-link only
+# depends on (as isabelle-packaging-ci's isabelle package does, plan decision 12 point 2); its post-link only
 # re-runs the post-link of the packages that depend on isabelle directly (plan §0 items 26, 33, 34).
 isabelle_recipe() {  # <build number> <ISABELLE_ID> <output channel>
   local n=$1 id=$2 out=$3 d="$W/recipes/isabelle-$1-$(basename "$3")"
@@ -184,7 +191,7 @@ TOOL_VERSION=$TOOL_VERSION TOOL_BUILD_NUMBER=1 "$RB" build --recipe "$root/conda
 for b in $BUILDS; do isabelle_recipe "$b" 89701cf1768e "$CH"; done
 n=0
 for b in $BUILDS; do                               # every feature for each pristine build, build numbers 0, 1, ...
-  for f in t_one t_two t_three; do
+  for f in $FEATS; do
     r="$W/recipes/$f-$b"
     python3 "$tools/render-feature-recipe" "$W/features/$f" --isabelle-build "$b" --build-number $n -o "$r" > /dev/null
     "$RB" build --recipe "$r/recipe.yaml" --output-dir "$CH" --no-test > "$r.log" 2>&1 || { tail -20 "$r.log"; exit 1; }
@@ -192,7 +199,7 @@ for b in $BUILDS; do                               # every feature for each pris
   n=$((n + 1))
 done
 
-# an Isabelle_RPC-style component package (plan §6 (c), (e)): it registers share/toy-component with
+# an Isabelle_RPC-style component package (tools/accept's scenarios (c), (e)): it registers share/toy-component with
 # the hook lines every component package uses
 python3 -I - "$W/recipes/component" "$tools" "$RANGE" "$COMPONENT_BUILD" <<'PY'
 import sys
@@ -260,7 +267,12 @@ assert {"isabelle-2025.2-2.conda", "isabelle-t-three-2025.2.1-Isabelle2025_2_0.c
 assert not any(n.endswith("Isabelle2025_2_1.conda") for n in names), sorted(names)
 PY
 fi
-# the batch of the last pristine build (2025.2: build 2) as the release's build job looks at it
-python3 "$tools/check-packages" --chain "$R/t_one/1" "$R/t_two/1" "$R/t_three/1" --summary "$W/summary.json" \
-  "$CH"/noarch/isabelle-patch-control-*.conda "$CH"/noarch/isabelle-t-*-"${R//-/_}_$((n - 1))".conda
+# the batch of the last pristine build (2025.2: build 2) of every feature, as the release's build job plans it and looks at it
+TOOL_FILE=$(cd "$CH/noarch" && ls isabelle-patch-control-*_1.conda)
+TOOL_PREFIX=${TOOL_FILE#isabelle-patch-control-"$TOOL_VERSION"-}; TOOL_PREFIX=${TOOL_PREFIX%_1.conda}
+tags=(); for f in $FEATS; do tags+=("$R/$f/1"); done
+python3 "$tools/release-plan" --channel "file://$CH" --isabelle-build "${BUILDS##* }" --tool-version "$TOOL_VERSION" \
+  --tool-prefix "$TOOL_PREFIX" "${tags[@]}" > "$W/plan.json"
+mapfile -t files < <(python3 -I -c 'import json, sys; print("\n".join(p["file"] for p in json.load(open(sys.argv[1]))["packages"]))' "$W/plan.json")
+python3 "$tools/check-packages" --plan "$W/plan.json" --summary "$W/summary.json" "${files[@]/#/$CH/noarch/}" > /dev/null
 find "$W"/channel* -name '*.conda' -printf '  %h/%f\n' | sed "s|$W/||" | sort

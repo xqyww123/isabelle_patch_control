@@ -238,8 +238,7 @@ def stopped(feature: str) -> str:
 def conflict_full(feature: str, files, tree: Path) -> str:
     """The complete diagnostic, written by the chain top's post-link.  `files` are (path, created) pairs."""
     files = list(files)
-    return "\n".join([conflict(feature, [p for p, _ in files]), stopped(feature), conflict_fix(tree, files, conda=True),
-                      "Upgrading from my-better-isabelle 0.x? See: isabelle-patch-control help"])
+    return "\n".join([conflict(feature, [p for p, _ in files]), stopped(feature), conflict_fix(tree, files, conda=True)])
 
 
 def conflict_line(feature: str, files, phrase: str = IS_CONFLICT, tool: str = TOOL) -> str:

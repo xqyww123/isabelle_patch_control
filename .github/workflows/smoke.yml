@@ -1,0 +1,92 @@
+# The smoke test of a batch, as a reusable workflow: release-features.yml calls it after publishing,
+# tests.yml on the toy channel.  For each environment of the batch (check-packages' summary), the first
+# command is the install line of that package's README, read from inside the package by check-packages,
+# so the documented command and the tested one cannot drift apart.  It runs with the channel in place
+# of the users' address, so that the download counter does not count it.  With a newer isabelle line on
+# the channel it installs that line, as users get it; the batch's own line is checked by roundtrip and
+# accept.  Then `status` ends with the line it prints when every feature is applied.
+name: smoke
+
+on:
+  workflow_call:
+    inputs:
+      environments:
+        description: "The environments of the batch, as check-packages' summary lists them (JSON)"
+        required: true
+        type: string
+      channel:
+        description: "The address the install lines run against (release-features.yml's CHANNEL); ignored with toy_artifact"
+        default: ""
+        type: string
+      public:
+        description: "The users' address in the install lines, which the channel replaces"
+        default: https://conda.qiyuan.me
+        type: string
+      tool_ref:
+        default: ""
+        type: string
+      toy_artifact:
+        description: "An artifact of .conda files that becomes the channel, a file:// one (the toy channel)"
+        default: ""
+        type: string
+
+jobs:
+  smoke:
+    name: "Smoke of ${{ matrix.environment.package }} ${{ matrix.environment.version }} on ${{ matrix.os }}: the README's install command"
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: ${{ fromJSON(inputs.environments) }}
+        os: [ubuntu-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash -l {0}
+    env:
+      CONDA_ALWAYS_YES: "true"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tool_ref }}           # empty: the dispatched commit (github.sha)
+          path: tool
+      - uses: actions/download-artifact@v4
+        if: inputs.toy_artifact != ''
+        with:
+          name: ${{ inputs.toy_artifact }}
+          path: ${{ runner.temp }}/toy-pkgs
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-version: latest      # conda-forge only: no defaults channel, no Terms of Service prompt
+          auto-activate-base: true
+          activate-environment: ""
+      - name: "The channel"
+        env:
+          CHANNEL: ${{ inputs.channel }}
+          TOY: ${{ inputs.toy_artifact }}
+        run: |
+          set -euo pipefail
+          if [ -n "$TOY" ]; then
+            bash tool/tools/local-channel "$RUNNER_TEMP/toy" "" "" "$RUNNER_TEMP/toy-pkgs"
+            CHANNEL=$(python -c "import pathlib, sys; print(pathlib.Path(sys.argv[1]).resolve().as_uri())" "$RUNNER_TEMP/toy")
+          fi
+          [ -n "$CHANNEL" ] || { echo "::error::neither channel nor toy_artifact"; exit 1; }
+          echo "CHANNEL=$CHANNEL" >> "$GITHUB_ENV"
+      - name: "The README's install command, from the channel"
+        env:
+          INSTALL: ${{ matrix.environment.install }}
+          PUBLIC: ${{ inputs.public }}
+        run: |
+          set -euo pipefail
+          [[ "$INSTALL" == *"$PUBLIC"* ]] || { echo "::error::the README's command does not name $PUBLIC"; exit 1; }
+          run_cmd=${INSTALL//"$PUBLIC"/"$CHANNEL"}
+          echo "$run_cmd"
+          eval "$run_cmd"
+      - name: "status: every feature applied"
+        run: |
+          set -euo pipefail
+          conda activate isabelle
+          isabelle-patch-control status | tee "$RUNNER_TEMP/status.txt"
+          # the last line is the installed tool's own text for everything in order (texts.ALL_APPLIED)
+          python -I -c 'import sys; from isabelle_patch_control import texts; sys.exit(open(sys.argv[1]).read().splitlines()[-1:] != [texts.ALL_APPLIED])' \
+            "$RUNNER_TEMP/status.txt" || { echo "::error::status does not end with the line it prints when every feature is applied"; exit 1; }

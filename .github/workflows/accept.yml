@@ -1,7 +1,7 @@
-# §6 of the patch tool plan on the five platform legs (decision 11's accept job), as a reusable
-# workflow: release-features.yml calls it on the batch, tests.yml on the toy channel
-# (tools/tests/toy-channel.sh).  One definition, so a green toy run is a run of the release gate's
-# own job.
+# §6 of the patch tool plan on the five platform legs (decision 11's accept job) in each environment
+# of a batch (check-packages' summary), as a reusable workflow: release-features.yml calls it on the
+# batch, tests.yml on the toy channel (tools/tests/toy-channel.sh).  One definition, so a green toy run
+# is a run of the release gate's own job.
 name: accept
 
 on:
@@ -24,25 +24,24 @@ on:
       isabelle_build:
         required: true
         type: string
-      old_build:
-        default: ""
-        type: string
       non_pristine_build:
         description: "The build of isabelle_version on the online channel not built from the pristine sources; empty skips (e) and (i)"
         default: ""
         type: string
-      top:
+      environments:
+        description: "The environments of the batch, as check-packages' summary lists them (JSON)"
         required: true
-        type: string
-      component:
-        default: ""
         type: string
       other_component:
         description: "An Isabelle_RPC-style component package for (c) and (e); empty skips (e) and (c)'s check of a second component"
         default: ""
         type: string
-      online_channel:
-        description: "https://conda-ci.qiyuan.me for a batch; empty for the toy channel, which must never meet the online one"
+      channel:
+        description: "The batch's own channel (release-features.yml's CHANNEL); empty for the toy channel, which must never meet the online ones"
+        default: ""
+        type: string
+      owner_channel:
+        description: "The owner's channel (release-features.yml's OWNER_CHANNEL); empty for the toy channel"
         default: ""
         type: string
       strict:
@@ -55,12 +54,14 @@ on:
 
 jobs:
   accept:
-    name: "Accept (§6) on ${{ matrix.leg }}"
+    name: "Accept ${{ matrix.environment.package }} ${{ matrix.environment.version }} on ${{ matrix.leg }}"
     runs-on: ${{ matrix.os }}
     timeout-minutes: 240
     strategy:
       fail-fast: false
       matrix:
+        environment: ${{ fromJSON(inputs.environments) }}
+        leg: [linux-64, linux-aarch64, osx-arm64, osx-64, win-64]
         include:
           - {leg: linux-64, os: ubuntu-latest}
           - {leg: linux-aarch64, os: ubuntu-24.04-arm}
@@ -105,12 +106,12 @@ jobs:
         env:
           V: ${{ inputs.isabelle_version }}
           B: ${{ inputs.isabelle_build }}
-          TOP: ${{ inputs.top }}
-          COMPONENT: ${{ inputs.component }}
+          TOP: ${{ matrix.environment.package }}
           OTHER: ${{ inputs.other_component }}
-          OLD: ${{ inputs.old_build }}
+          OLD: ${{ matrix.environment.isabelle_old_build }}
           NON_PRISTINE: ${{ inputs.non_pristine_build }}
-          ONLINE: ${{ inputs.online_channel }}
+          CHANNEL: ${{ inputs.channel }}
+          OWNER_CHANNEL: ${{ inputs.owner_channel }}
           LEG: ${{ matrix.leg }}
           STRICT: ${{ inputs.strict }}
         run: |
@@ -120,9 +121,11 @@ jobs:
           local_url=$(python -c "import pathlib, sys; print(pathlib.Path(sys.argv[1]).resolve().as_uri())" "$RUNNER_TEMP/local")
           args=(--isabelle-version "$V" --isabelle-build "$B" --top "$TOP" --old-build "$OLD" --non-pristine-build "$NON_PRISTINE"
                 --subdir "$LEG" --work "$RUNNER_TEMP/accept" --channel "$local_url")
-          [ -z "$ONLINE" ] || args+=(--channel "$ONLINE" --start-channel "$ONLINE" --start-channel conda-forge)
+          for ch in "$CHANNEL" "$OWNER_CHANNEL"; do
+            [ -z "$ch" ] || args+=(--channel "$ch" --start-channel "$ch")
+          done
+          [ -z "$CHANNEL$OWNER_CHANNEL" ] || args+=(--start-channel conda-forge)
           args+=(--channel conda-forge)
-          [ -z "$COMPONENT" ] || args+=(--component "$COMPONENT")
           [ -z "$OTHER" ] || args+=(--other-component "$OTHER")
           [ "$STRICT" != true ] || args+=(--strict)
           python -u tool/tools/accept "${args[@]}"
@@ -130,7 +133,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: accept-output-${{ inputs.artifact }}-${{ inputs.isabelle_version }}-${{ matrix.leg }}
+          name: accept-output-${{ inputs.artifact }}-${{ matrix.environment.package }}-${{ matrix.environment.version }}-${{ matrix.leg }}
           path: ${{ runner.temp }}/accept/*.txt
           if-no-files-found: ignore
           retention-days: 14
