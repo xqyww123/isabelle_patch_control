@@ -20,7 +20,7 @@ on:
         type: string
       public:
         description: "The users' address in the install lines, which the channel replaces"
-        default: https://conda.qiyuan.me
+        default: https://conda.qiyuan.me  # the users' address, not a download
         type: string
       tool_ref:
         default: ""

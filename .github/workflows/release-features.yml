@@ -67,7 +67,7 @@ concurrency:
 # build job passes the addresses on as outputs.
 env:
   CHANNEL: https://conda-ci.qiyuan.me
-  PUBLIC: https://conda.qiyuan.me
+  PUBLIC: https://conda.qiyuan.me  # the users' address, not a download
   ISABELLE_REPOSITORY: xqyww123/isabelle-patched
   OWNER_CHANNEL: https://conda-ci.qiyuan.me
 
