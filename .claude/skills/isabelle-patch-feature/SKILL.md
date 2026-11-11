@@ -204,9 +204,8 @@ empty commit in the private tree, on order:
          git -C <private tree> diff-tree -r --name-only <base commit> HEAD | grep -x etc/ISABELLE_ID
 
    - Every patch file's path stays within 198 characters on Windows (`<package name>`: `isabelle-`
-     plus `<F>` with `_` as `-`, but `qiyuan-dev-patches` for dev_patches; `<prefix>`: `<R>` with
-     `-` as `_`; `<Y>.<k>`: the first two numbers of the package version, `2026.0` for Isabelle2026,
-     `2025.2` for Isabelle2025-2):
+     plus `<F>` with `_` as `-`; `<prefix>`: `<R>` with `-` as `_`; `<Y>.<k>`: the first two numbers
+     of the package version, `2026.0` for Isabelle2026, `2025.2` for Isabelle2025-2):
 
          git -C <private tree> diff-tree -r --no-renames --name-only <base commit> HEAD | sed 's,/,-,g' |
            awk -v pre='<package name>-<Y>.<k>.99-<prefix>_99/share/isabelle_patch_control/features.d/<F>/' 'length(pre $0 ".patch") > 198'

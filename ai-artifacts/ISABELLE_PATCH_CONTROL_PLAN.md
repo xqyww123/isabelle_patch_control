@@ -799,6 +799,11 @@
           on that channel too"之后），不放行末。设计稿已成 draft 3（accepted）。照它改了 RELEASE.md（:126、:141、:200）与 SKILL（3.4 第 8 步、3.6
           第 4 步删一句）；计划里四处"固定表"加了行内更正。toy-channel 两条线过（环境不变：t_five、t_three；2026 t_three）；最终 pytest 198、
           actionlint 过。等用户令提交推送；新文件只有设计稿（要逐个请批）。推上后告诉 global form 会话照新写法派发。
+          【已提交，未推送】用户"1. 提交 2. 提交"（提交本次改动、设计稿一起提交；没说推送）：8faace4，8 个文件按路径提交。推送等令；推上后
+          告诉 global form 会话（uds:/run/user/1002/cc-socks/4123374.sock）用 `xqyww123/Global_Form@Isabelle2026/global_form/1` 派发。
+      - **名字例外去掉**（2026-11-12，用户问"为什么要有这个特例不能统一呢？"，又"建议去掉例外"）：names.py 删 `_EXCEPTIONS`，tests/test_names.py
+        改期望为 `isabelle-dev-patches`，SKILL 3.4 第 2 步删半句，决定 10 加更正。只是删代码，作者没另写设计稿、没走评审（已向用户说明）。渠道上的
+        工具只有 1.0.0、1.0.1，1.1.0 未发布，所以版本号不动。pytest 198 过。未提交，等令。
       - **补丁工具 macOS 改动已提交推送**（用户在本会话："补丁工具 macOS 改动请提交并推送"，2026-11-11）：提交 3d3b4e7（accept.yml、
         release-features.yml、tests.yml、RELEASE.md、SKILL——SKILL 实际在补丁工具仓库里，MLML 的 .claude/skills/isabelle-patch-feature 是指向它的链接），
         按路径提交，第二步的改动未混入；已推 origin，已告诉 net printing 提交哈希；tests.yml 运行 42956028751 全绿（accept 只剩三条腿）。其他四个仓库
@@ -1387,6 +1392,8 @@ README 已有 "Working in the Isabelle source repository" 一节。都未提交�
   `isabelle-<feature 名把 _ 换成 ->`（`isabelle-expose-foreign`、`isabelle-future-assign-interrupt`、`isabelle-light-locale`、
   `isabelle-local-type-abbrev`、`isabelle-localized-record`、`isabelle-local-datatype`），唯一的例外条目 `dev_patches → qiyuan-dev-patches`
   （light 计划 D1）。【2026-11-04 第 46 条：这条例外对任何人名叫 `dev_patches` 的 feature 都生效，第二步把它移出工具（第一步设计 §11）。】
+  【2026-11-12 第 46 条：例外**删去**（用户"建议去掉例外"）：它没有功能上的理由，只是 D1 先按仓库名定了包名 `qiyuan-dev-patches`、迁移时
+  feature 又叫了 `dev_patches`。dev_patches 的包名照规则是 `isabelle-dev-patches`；dev_patches 还没发布过，仓库名 `qiyuan_dev_patches` 不变。】
 - 版本 = 发布 tag 里的版本号（已被 §0 第 44 条修订：`dev.package_version` 从 tag 算出 `<Y>.<k>.<m>`）。build string
   **`Isabelle2025_2_<该 feature 包的 build 号>`**（第 30 条）。noarch generic。
 - **复用与 build 号由一个函数、一条规则决定**（`tools/common.py` 的 `plan_builds(repodata, wanted, fetch)`，pytest 覆盖；评审四 C2、
