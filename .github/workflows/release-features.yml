@@ -180,6 +180,7 @@ jobs:
             [dot_syntax]="xqyww123/Dot_Syntax ."
             [dev_patches]="xqyww123/qiyuan_dev_patches ."
             [bicompose_rename_fix]="xqyww123/Bicompose_Rename_Fix ."
+            [sledgehammer_fact_trigger]="xqyww123/Sledgehammer_Fact_Trigger ."
           )
           mkdir tars
           features=$(jq -r '.packages[] | select(.tag) | "\(.tag) \(.feature) \(.name)-\(.version) \(.file) \(.build_number) \(.action)"' plan.json)
