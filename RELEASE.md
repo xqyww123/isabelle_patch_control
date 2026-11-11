@@ -123,7 +123,7 @@ Inputs:
 | `isabelle_build` | the build string of the pristine `isabelle` build to pin (required) |
 | `isabelle_from` | `channel` (the build is on conda.qiyuan.me) or `run:<isabelle-packaging-ci run id>` (rehearsal against that run's `conda-packages` artifact, which must carry `isabelle_build` of the batch's `isabelle` version (`local-channel` refuses otherwise), a build the channel does not serve yet (`release-plan --rehearsal` refuses otherwise)) |
 | `tool_ref` | the tag of this repository to build the tool from (default: the triggering ref) |
-| `features` | the feature release tags to publish, space-separated, in any order; no default. A release tag that a listed one is built on, directly or through others, need not be listed when its package is already on the channel for this `isabelle` build (if one is missing, conda cannot solve the environments of the roundtrip, accept and sessions jobs, and the batch stops before anything is published). The tags are all of one release line `<R>` (`release-plan` refuses a batch that spans two). When every feature package is republished for a new `isabelle` build of `<R>`, list, for each feature package with builds of `<R>` on the channel (build string `<build string prefix>_<n>`, for example `Isabelle2026_0`), the release tag `<R>/<feature>/<m>` of its highest version among those builds (`<m>` is that version's last number; `git tag --list` would also bring in tags not yet published), and every release tag those are built on, directly or through others, whose package is on that channel too, all in one dispatch; when that list would name a feature twice, split it into batches that each name every feature at most once, and dispatch them one after another, each once the batch before it is published, so that no release tag is in an earlier batch than a tag it is built on |
+| `features` | the features to publish, space-separated, in any order; no default. Each is `<GitHub repository>@<release tag>`: the feature repository on GitHub, then `@` and the release tag, for example `xqyww123/Global_Form@Isabelle2026/global_form/1`; the build job finds the package directory there by itself. A release tag that a listed one is built on, directly or through others, need not be listed when its package is already on the channel for this `isabelle` build (if one is missing, conda cannot solve the environments of the roundtrip, accept and sessions jobs, and the batch stops before anything is published). The tags are all of one release line `<R>` (`release-plan` refuses a batch that spans two). When every feature package is republished for a new `isabelle` build of `<R>`, list, for each feature package with builds of `<R>` on the channel (build string `<build string prefix>_<n>`, for example `Isabelle2026_0`), the release tag `<R>/<feature>/<m>` of its highest version among those builds (`<m>` is that version's last number; `git tag --list` would also bring in tags not yet published), and every release tag those are built on, directly or through others, whose package is on that channel too. Give each as `<GitHub repository>@<release tag>`, where `https://github.com/<GitHub repository>` is the homepage of its package on the channel (the build job sets it from the `features` word; the owner's channel lists it as `home` in its `channeldata.json`). List them all in one dispatch; when that list would name a feature twice, split it into batches that each name every feature at most once, and dispatch them one after another, each once the batch before it is published, so that no release tag is in an earlier batch than a tag it is built on |
 | `other_component` | an Isabelle_RPC-style component package on the channel that installs on this `isabelle` version, for `tools/accept`'s scenarios (c) and (e), which install a second component; default `isabelle-performant-ml`. GitHub gives an input dispatched empty its default. On a release line the component has no release for yet, (c) fails at creating its environment: release the component for that line first, or name another component that installs |
 | `publish` | default `false`; `publish=true` together with `isabelle_from=run:…` fails at once |
 
@@ -138,10 +138,12 @@ Jobs, in order: **build** (one `ubuntu-latest` job, `rattler-build` 0.69.1) read
 included, whether to reuse the file already on `CHANNEL` or to build a new one and with which build
 number (`tools/common.py: plan_builds`: reuse what is on the channel and is exactly what this batch wants,
 skip served files that are not, build the rest with the next number; a feature package is exactly what the
-batch wants when it pins this batch's `isabelle` build, `common.isabelle_pin`), checks out every feature
-of the batch at its tag, renders each recipe to build (`tools/render-feature-recipe`: version, the pins of
-its direct dependencies, the `isabelle` pin, build string `<build string prefix>_<n>`, hooks, the common
-README text with the package's own names, license and homepage, the component payload if
+batch wants when it pins this batch's `isabelle` build, `common.isabelle_pin`), checks out each release
+tag of the batch from the feature repository that `features` names with it, where the package directory is
+the one directory whose `patches/<R>/provenance.txt` has the line `release_tag: <release tag>`, renders
+each recipe to build (`tools/render-feature-recipe`: version, the pins of its direct dependencies, the
+`isabelle` pin, build string `<build string prefix>_<n>`, hooks, the common README text with the package's
+own names, license and homepage, the component payload if
 `tools/component_files.txt` exists), builds everything into one local channel, and checks the packages
 (`tools/check-packages`: hooks present, `.bat` CRLF, `.sh` LF; exactly the planned files). It computes one entry for
 each package of the batch that no other package of the batch is built on, uploads the artifact
@@ -197,10 +199,9 @@ block of `.github/workflows/release-features.yml`, set `CHANNEL` (the address th
 channel at), `PUBLIC` (the address your users install from) and `ISABELLE_REPOSITORY` (the Isabelle
 repository that holds your release tags and the pristine tag they stand on; a fork of isabelle-patched
 does). Keep `OWNER_CHANNEL`: it serves `isabelle` and the owner's feature packages, which yours may be
-built on. Put your feature repositories in the build job's table, and replace the publish job and its
-secrets with your channel's. In `common-readme.md` and its copy in `README.md`, put
-`-c <your channel>` in front of `-c https://conda.qiyuan.me` in the install and update commands, and
-write "all three `-c` arguments" where it says "both" (`tests/test_docs.py` checks the two commands).
+built on. Replace the publish job and its secrets with your channel's. In `common-readme.md` and its copy
+in `README.md`, put `-c <your channel>` in front of `-c https://conda.qiyuan.me` in the install and update
+commands, and write "all three `-c` arguments" where it says "both" (`tests/test_docs.py` checks the two commands).
 Every batch of your fork also builds the tool package from your fork and publishes it to your channel.
 The repair commands the tool and the hooks print name https://conda.qiyuan.me and conda-forge; for a
 package from your channel, your users add it to them.

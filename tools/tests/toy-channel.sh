@@ -277,9 +277,9 @@ fi
 # the batch of the last pristine build (2025.2: build 2) of every feature, as the release's build job plans it and looks at it
 TOOL_FILE=$(cd "$CH/noarch" && ls isabelle-patch-control-*_1.conda)
 TOOL_PREFIX=${TOOL_FILE#isabelle-patch-control-"$TOOL_VERSION"-}; TOOL_PREFIX=${TOOL_PREFIX%_1.conda}
-tags=(); for f in $FEATS; do tags+=("$R/$f/1"); done
+words=(); for f in $FEATS; do words+=("toy/$f@$R/$f/1"); done      # the repository is not read: the toy builds locally
 python3 "$tools/release-plan" --channel "file://$CH" --isabelle-build "${BUILDS##* }" --tool-version "$TOOL_VERSION" \
-  --tool-prefix "$TOOL_PREFIX" "${tags[@]}" > "$W/plan.json"
+  --tool-prefix "$TOOL_PREFIX" "${words[@]}" > "$W/plan.json"
 mapfile -t files < <(python3 -I -c 'import json, sys; print("\n".join(p["file"] for p in json.load(open(sys.argv[1]))["packages"]))' "$W/plan.json")
 python3 "$tools/check-packages" --plan "$W/plan.json" --summary "$W/summary.json" "${files[@]/#/$CH/noarch/}" > /dev/null
 find "$W"/channel* -name '*.conda' -printf '  %h/%f\n' | sed "s|$W/||" | sort

@@ -749,6 +749,56 @@
         步骤——违背"补丁工具必须通用"。global_form（Isabelle2026/global_form/1，仓库 xqyww123/Global_Form，包目录 .）现在因此派发不了。
         global form 提的做法：(a) features 输入带上仓库，如 `<tag>=<owner/repo>[:<包目录>]`；(b) make-patches 把仓库地址与包目录写进 release tag 的
         注释，workflow 从 isabelle-patched 读（已有的 tag 没有）。它倾向 (a)。
+        用户（2026-11-12）："这个投诉是真的，我需要严厉斥责你"。错在我：第一步明明要求框架不得假设有哪些 feature，我却把这张表留下，还在
+        RELEASE.md"A copy of the release workflow"里写"Put your feature repositories in the build job's table"、在 SKILL 3.6 第 4 步写"加一行"，
+        把不通用写成了规定步骤，评审也没把它当问题。下一件就是去掉这张表（等用户定先后）。
+      - **第二步已提交推送**（用户"批准第二步的提交与推送"）：dd94e20（接在别的会话的 7de9d22 之后），37 个文件，含两个新文件 tests/test_graph.py、
+        ai-artifacts/MULTI_BASE_DESIGN.md；tests.yml 在跑。
+      - **另外四个仓库 macOS 改动**（用户"要提交推送"）：isabelle-packaging-ci 9fc414f、Isabelle_RPC 3717ddf、Performant_Isabelle_ML 8b61e6b 已推；
+        Semantic_Embedding 0081f1b 只提交未推——本地 master 已领先 origin 一个别的会话的提交 2c4acef（Per-entity migration…），推送会把它一起推出去，
+        另有该会话未提交的 migration.py 等改动，已问用户。这些仓库的发布只在 v* tag 或手动派发时跑。
+      - **compact 后从这里接着做（2026-11-12 写，UTC 2026-11-11 21:02）**：
+        - 用户对作者两条建议"按你建议来吧"：(1) 下一件是去掉发布 workflow 里那张 feature → 仓库的表；(2) 先在表里给 global_form 加一行好让它
+          现在能发。(2) 已改（release-features.yml，`[global_form]="xqyww123/Global_Form ."`，actionlint 过），**未提交**；提交与推送要等用户
+          明说（"按你建议来"批的是"加这一行"，没明说推送——compact 后先问一句）。推上后告诉 global form 会话（uds:/run/user/1002/cc-socks/4123374.sock）。
+        - 第二步 dd94e20 的 tests.yml：后台任务 bcmcxfj7p 在等；compact 后用 `gh run list --workflow tests.yml --limit 3` 查结果并报用户。
+        - Semantic_Embedding 0081f1b 未推：作者问了"照推还是等那个会话自己先推"，用户还没答，没有作者建议——compact 后再问。
+        - **去掉那张表的设计**（下一件）：事实——表在 release-features.yml build job 约 172-186 行，没在表里的 feature 在约 189 行报
+          `::error::no repository for $feature in the table`；`features` 输入只有 release tag，tag 不说包在哪个仓库；RELEASE.md"A copy of the release
+          workflow"一节写"Put your feature repositories in the build job's table"，SKILL 3.6 第 4 步写"Add the feature's row to the table"。两条路：
+          (a) 派发时给出 `<tag>=<owner/repo>[:<包目录>]`；(b) make-patches 把 feature 仓库地址与包目录记进 release tag（已有的 tag 没有）。
+          要单独设计、评审、报用户；教训：用户的通用性原则逐字放进评审简报，评审要查"框架里是否写死了任何 feature"。
+        - 其后：名字例外 dev_patches→qiyuan-dev-patches（用户"做完我们手头的之后就来做这个"）；撤下发行线的设计（草稿
+          `ai-artifacts/RETIRE_RELEASE_LINE_DESIGN.md`，未跟踪；D1-D5 待改；配套 SKILL 3.10）。两者先后到时问用户。
+        - 本机的东西：/var/tmp/claude-stage2（测试工作目录、玩具渠道、accept 与钩子测试的环境，几个 GB）与 /var/tmp/claude-review-stage2（评审实验，
+          评审记录永不进仓库）留着，清理要用户下令（上次的做法：存档到 ~/archive/claude-scratchpad/ 校验后删）。rattler-build 0.69.1 在
+          /var/tmp/claude-rattler-build-0.69.1/rattler-build（玩具测试用 RATTLER_BUILD= 指它）。
+        - 不归本会话：bicompose 怎么发由 mlml-71 定；MLML 的子模块指针不动。fast_abbrev_printing 2026.0.2 已由 net printing 发布。
+        - **compact 之后（2026-11-11 21:xx UTC）**：用户"Semantic_Embedding 的 macOS 提交先不推送""请去掉那张"feature → 仓库"的表"。
+          dd94e20 的 tests.yml 运行 43099132495 全绿（18 个任务）。设计稿 `ai-artifacts/RELEASE_WITHOUT_FEATURE_TABLE_DESIGN.md`（draft 1，未跟踪，新文件）：
+          `features` 每个词写成 `<owner>/<repository>@<release tag>`，release-plan 解析并把 `repository` 写进 plan.json；build 步骤按
+          `patches/<R>/provenance.txt` 里 `release_tag: <tag>` 那一行在检出里找包目录（本地 5 个仓库 9 个 tag 都恰好找到表里那个目录）；表与未提交的
+          global_form 行一起删。评审 wf_9a50ccf2-533 在跑（三个视角 + 每条一个辩护 + judge，Opus 5.5 xhigh，简报逐字引用户原则）。
+          【评审结果】15 个 agent、11 条（结果 `/var/tmp/claude-review-table/result/all.json`，不进仓库）。judge：机制成立、不需改设计，未达标只因四处文字
+          （A3），作者可自改后定向复审。交用户定：第 10 节两项功能改变与代价（重发整条线时每个包的仓库从渠道上该包的 homepage 读）。作者自改七条：§0 别说
+          "什么 feature 都不写"（names.py:3 的 dev_patches 包名例外还在，它是下一件）；§1 tag 数是 11 不是 9；别用"打 tag 的地方/存 tag 的仓库"指认仓库
+          （isabelle-patched 也有同名 tag），只用词表里的 feature repository，SKILL 里说 `<feature repository>` 的 `origin`；占位符 `<owner>` 撞了词表里的
+          owner，改写成 `<GitHub repository>@<release tag>`；RELEASE.md:126 重发一句一次写完、说明仓库从包的 homepage 读、去掉"the same way"；plan.json 的
+          `feature` 字段换成 `repository`；§8 的计划行号用 HEAD 行号加引文。驳回八条（见结果文件）。按规矩：报用户、用户同意前不改设计稿。
+          用户："1. 不需要跟我讨论的我不予置评 2. 好"——"好"批的是第 10 节两项功能改变与代价。设计稿 draft 2 已照七条改完；定向复审
+          wf_f34599df-3e0 在跑（两个视角：各修法是否落实、修法弄坏了什么；结果放 `/var/tmp/claude-review-table/`）。复审过后就实现（§3-§7），
+          再跑测试报用户；提交推送等令。
+          【代码已先改（复审只管文字），未提交】release-plan（WORD、`repository` 取代 `feature`、用法与文档串）、tests/test_release_tools.py（`words()`
+          助手按 feature 给 owner/<feature>，拒绝表多一行老写法）、toy-channel.sh（`toy/$f@...`）、release-features.yml（表删、找包目录、头注释、
+          输入描述）。pytest 198、run-all 全过（make-patches 116）、actionlint 过；workflow 的循环原样在 11 个真 tag 上跑（从 GitHub 克隆），rows.txt 与旧表
+          一致；克隆失败的报错看过；变异 4/4 抓到（`/var/tmp/claude-table-impl/mut/`）。toy-channel 两条线在后台跑（日志 `/var/tmp/claude-table-impl/toy*.log`）。
+          文档（RELEASE.md、SKILL 两处）等复审结论再改。
+          【复审结果】6 个 agent、3 条并成两处文字（结果 `/var/tmp/claude-review-table/rereview-result/all.json`）。judge：改完即通过，不再复审，没有要
+          用户定的。两处：SKILL 3.4 第 8 步别说 `<feature repository>` 的 `origin`（那是正在发布的 feature 的仓库，基的 tag 在各自仓库里），改成"那个
+          release tag 的 feature 仓库的 `origin`"、放句末；RELEASE.md:126 那句仓库从 homepage 读，放回第一轮 judge 定的位置（重发句"whose package is
+          on that channel too"之后），不放行末。设计稿已成 draft 3（accepted）。照它改了 RELEASE.md（:126、:141、:200）与 SKILL（3.4 第 8 步、3.6
+          第 4 步删一句）；计划里四处"固定表"加了行内更正。toy-channel 两条线过（环境不变：t_five、t_three；2026 t_three）；最终 pytest 198、
+          actionlint 过。等用户令提交推送；新文件只有设计稿（要逐个请批）。推上后告诉 global form 会话照新写法派发。
       - **补丁工具 macOS 改动已提交推送**（用户在本会话："补丁工具 macOS 改动请提交并推送"，2026-11-11）：提交 3d3b4e7（accept.yml、
         release-features.yml、tests.yml、RELEASE.md、SKILL——SKILL 实际在补丁工具仓库里，MLML 的 .claude/skills/isabelle-patch-feature 是指向它的链接），
         按路径提交，第二步的改动未混入；已推 origin，已告诉 net printing 提交哈希；tests.yml 运行 42956028751 全绿（accept 只剩三条腿）。其他四个仓库
@@ -780,6 +830,7 @@
       1.0.0 的构建提交 05bcee2 之后工具包代码未变，1.0.1 只多这道检查。
     - **写主页链接**（`homepage` 与 `repository`，"按你建议来"）：从发布 workflow 的固定表取 `https://github.com/<仓库>`（workflow 本来就照这一行检出源码），
       不写进 feature 自己的文件；isabelle-base-features 的三个 feature 指向同一个仓库。11-03 核过表里八个仓库都公开。
+      【2026-11-12：表已删（决定 11 的同日更正）；仓库改取派发时 `features` 词里的 `<GitHub repository>`。】
     - **第 7 道检查一并覆盖 `README.md` 与 `tools/release_build.sh`**（后者存在时；"按你建议来"）：早就有的同类缺口（`make_patches.py:133-135` 只查三个清单与
       组件文件，发布提交按路径只提交点名的文件）。这次的风险：bicompose 第 2 版新加的 `release_build.sh` 若忘了提交，tag 里没有它，`sessions` 只打一行"只编 HOL"
       照样绿。与许可证文件走同一处共用定义，进 1.0.1。
@@ -1368,7 +1419,7 @@ README 已有 "Working in the Isabelle source repository" 一节。都未提交�
   `share/doc/<包名>/README.md` 以工具仓库拥有的**一段统一文本**开头（逐字复制，决定 14 的 README 也嵌同一段），后接该 feature 自己的 README。
   【2026-11-04 第 46、47 条（第一步设计 §5.5、§7、§8）：统一文本里的 `<package>`、`<feature>` 由渲染器填成本包自己的名字（`<version>` 不填，留着
   未填的 `<package>`/`<feature>` 就拒绝），不再逐字复制；包另带许可证（`tools/license.txt` 一条 SPDX、最近的 `LICENSE` 作 license_file）与
-  homepage/repository（发布 workflow 的固定表给 `--homepage`）。上面 light 的组件清单只是例子：今天没有任何 feature 仓库提交了 `tools/component_files.txt`。】
+  homepage/repository（发布 workflow 的固定表给 `--homepage`【2026-11-12：表已删，改由 `features` 词里的仓库给】）。上面 light 的组件清单只是例子：今天没有任何 feature 仓库提交了 `tools/component_files.txt`。】
   【2026-11-05 代码评审 wf_db7e8161-b32 的 (A)，用户"按你建议来"：`<package>`、`<feature>` 改为在整份发出的 README（统一文本加功能自己的 README）里填，
   `<version>` 不填；"留着未填就拒绝"那条删去（它只可能被功能自己的 README 在打 tag 后触发）。check-packages 的规则 (e)（每个 entry 的 README 恰一行
   `conda create -n `、以本包名结尾）照旧，文档里不另加规矩（用户看了聚焦复审后："行吧"，即删掉作者加到 RELEASE.md 的那句、代码不动）。】
@@ -1413,7 +1464,11 @@ README 已有 "Working in the Isabelle source repository" 一节。都未提交�
   不同子目录（第三列由 §0 第 43 条加入）。【2026-11-04 第一步设计 §3.5、§6.1：workflow 顶部 `env:` 块放别人的副本要改的值——`CHANNEL`、`PUBLIC`、
   `ISABELLE_REPOSITORY`（存 release tag 的 Isabelle 仓库）——与固定的 `OWNER_CHANNEL: https://conda-ci.qiyuan.me`（`isabelle` 与我们的 feature 包所在；
   用户"为什么不直接强制 conda.qiyuan.me 上的包？"）；表的仓库列另给渲染器 `--homepage https://github.com/<仓库>`。】【2026-11-05 评审
-  wf_e97159a4-b31：第三列（MLML contrib 下的目录名）删去，表为 `feature → (GitHub 仓库, 包目录)`。】
+  wf_e97159a4-b31：第三列（MLML contrib 下的目录名）删去，表为 `feature → (GitHub 仓库, 包目录)`。】【2026-11-12 第 46 条（设计
+  `ai-artifacts/RELEASE_WITHOUT_FEATURE_TABLE_DESIGN.md` draft 3，用户"请去掉那张"feature → 仓库"的表"，两项功能改变"好"）：这张表**删去**。
+  `features` 的每个词写成 `<GitHub repository>@<release tag>`（feature 仓库在 GitHub 上的名字、`@`、发行 tag），release-plan 解析并把
+  `repository` 写进 plan.json（取代 `feature` 字段）；build 在检出里找包目录：`patches/<R>/provenance.txt` 有 `release_tag: <tag>` 那一行的那个
+  目录。`--homepage` 取自这个词的仓库。】
 - 作业：
   1. **`build`**（`ubuntu-latest`，唯一取 `rattler-build` 的 job，asset `rattler-build-x86_64-unknown-linux-musl` 0.69.1）：读线上
      `noarch/repodata.json`，按决定 10 的 `plan_builds` 决定每个包复用还是新建、新建的 build 号；复用的**直接下载**进本地渠道、不重建
@@ -2266,7 +2321,7 @@ C3、C15 两行（rev 5 的引言写"八行"，第五轮 C4 更正）。
 | C1 组件登记 | 第 26 条 (d)：决定 12 第 2 点重跑依赖者的 post-link；§2.3；决定 9 的修复文案；§6 (c)(e)；决定 15 登记断言。**与 judge 的推荐 (a) 不同**：用户选 (d)，不改 pre-unlink |
 | C2 读目标未隔离 | 决定 4 唯一原语；决定 3 恰好一个目标、无 patch 文件 exit 3；决定 15 当前目录敌对用例 |
 | C3 重跑无法发布 | 决定 11：已发布的包直接下载、工具只在未发布时构建、删 `build_number` 输入、只重跑失败 job；§0 第 22 条改"`isabelle` 包的 build 号输入"。**【订正】**rev 4 的复用键"(名, 版本, build string)"在第 30 条之后永不匹配；rev 5 决定 10 的 `plan_builds` 按 `depends` 里的 `isabelle` 钉死复用，并给出判决要的单元测试函数 |
-| C4 tag 无人创建、仓库不存在 | 决定 16 第 7、8 点（rev 5 把写入顺序改为 feature 仓库 tag 先、Isabelle 发布 tag 最后，第四轮 C13）；决定 11 固定表与显式 `features`；§5 第 3 步建仓库、push tag；§0 第 21 条末 HOL 侧发布流程 |
+| C4 tag 无人创建、仓库不存在 | 决定 16 第 7、8 点（rev 5 把写入顺序改为 feature 仓库 tag 先、Isabelle 发布 tag 最后，第四轮 C13）；决定 11 固定表与显式 `features`（【2026-11-12】表已删，`features` 的词带上 feature 仓库）；§5 第 3 步建仓库、push tag；§0 第 21 条末 HOL 侧发布流程 |
 | C5 五腿各自构建 | 决定 11 `build` 一次、五腿下载同一 artifact；`.gitattributes` |
 | C6 八次调用 | 第 27 条：一次调用。judge 的 (a)，用户同意 |
 | C7 多层级规则 | 第 28 条：发布门禁（决定 16 第 5 点）加一律 CONFLICT（决定 6）。judge 的 (a)，用户同意。rev 6：门禁按第 37 条改为决定 16 第 10 点的 checklist，一律 CONFLICT 保留 |

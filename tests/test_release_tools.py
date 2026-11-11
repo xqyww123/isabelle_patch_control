@@ -29,6 +29,11 @@ rp, cp = load("release-plan"), load("check-packages")
 from common import entries  # noqa: E402  (tools/ is on sys.path once a tool is loaded)
 
 
+def words(*tags: str) -> list[str]:
+    """release-plan's words for these release tags: each feature in its own repository owner/<feature>."""
+    return [f"owner/{tag.split('/')[1]}@{tag}" for tag in tags]
+
+
 def tar_zst(files: dict[str, tuple[bytes, int]]) -> bytes:
     raw = io.BytesIO()
     with tarfile.open(fileobj=raw, mode="w") as t:
@@ -105,13 +110,14 @@ def test_plan_against_a_channel_with_a_served_file_not_yet_indexed(tmp_path, ove
                           record("isabelle-expose-foreign", "2025.2.1", 1, "3")])     # pins another build: skipped
     if transport == "http":                                                    # also the HTTP 404 of a file not served
         url = over_http(url)
-    result = rp.plan(url, "2", "1.0.0", "pyh4616a5c", ["Isabelle2025-2/expose_foreign/1", "Isabelle2025-2/light_locale/1"])
+    result = rp.plan(url, "2", "1.0.0", "pyh4616a5c", words("Isabelle2025-2/expose_foreign/1", "Isabelle2025-2/light_locale/1"))
     assert files_of(result) == {
         "isabelle-patch-control": ("reuse", "isabelle-patch-control-1.0.0-pyh4616a5c_0.conda"),
         "isabelle-expose-foreign": ("build", "isabelle-expose-foreign-2025.2.1-Isabelle2025_2_2.conda"),
         "isabelle-light-locale": ("reuse", "isabelle-light-locale-2025.2.1-Isabelle2025_2_1.conda")}
-    assert [(p.get("tag"), p.get("feature"), p.get("build_number")) for p in result["packages"]] == [
-        (None, None, None), ("Isabelle2025-2/expose_foreign/1", "expose_foreign", 2), ("Isabelle2025-2/light_locale/1", "light_locale", None)]
+    assert [(p.get("tag"), p.get("repository"), p.get("build_number")) for p in result["packages"]] == [
+        (None, None, None), ("Isabelle2025-2/expose_foreign/1", "owner/expose_foreign", 2),
+        ("Isabelle2025-2/light_locale/1", "owner/light_locale", None)]
     # each package's indexed records only: the served 2 and 3 are not counted
     assert [p.get("isabelle_old_build") for p in result["packages"]] == [None, "1", "1"]
 
@@ -119,7 +125,7 @@ def test_plan_against_a_channel_with_a_served_file_not_yet_indexed(tmp_path, ove
 def test_an_empty_channel_and_no_other_build(tmp_path):
     empty = tmp_path / "empty"
     (empty / "noarch").mkdir(parents=True)
-    result = rp.plan(f"file://{empty}", "1", "1.0.0", "pyh4616a5c", ["Isabelle2025-2/expose_foreign/1"])
+    result = rp.plan(f"file://{empty}", "1", "1.0.0", "pyh4616a5c", words("Isabelle2025-2/expose_foreign/1"))
     assert files_of(result) == {"isabelle-patch-control": ("build", "isabelle-patch-control-1.0.0-pyh4616a5c_0.conda"),
                                 "isabelle-expose-foreign": ("build", "isabelle-expose-foreign-2025.2.1-Isabelle2025_2_0.conda")}
     assert result["packages"][1]["isabelle_old_build"] == ""
@@ -140,17 +146,17 @@ def test_each_package_has_its_own_old_build(tmp_path):
                              record("isabelle-light-locale", "2025.2.1", 3, "12"),      # this batch's own build: not an old one
                              record("isabelle-expose-foreign", "2025.2.1", 4, "14"),    # a lower feature: no state of (h)
                              other_line])                                        # another release line's pin
-    result = rp.plan(url, "12", "1.0.0", "p", ["Isabelle2025-2/expose_foreign/1", "Isabelle2025-2/light_locale/1"])
+    result = rp.plan(url, "12", "1.0.0", "p", words("Isabelle2025-2/expose_foreign/1", "Isabelle2025-2/light_locale/1"))
     assert old_builds(result) == {"isabelle-expose-foreign": "14", "isabelle-light-locale": "11"}
-    assert old_builds(rp.plan(url, "14", "1.0.0", "p", ["Isabelle2025-2/expose_foreign/1"])) == {"isabelle-expose-foreign": ""}
+    assert old_builds(rp.plan(url, "14", "1.0.0", "p", words("Isabelle2025-2/expose_foreign/1"))) == {"isabelle-expose-foreign": ""}
 
 
 def test_the_isabelle_version_is_the_release_line_of_the_batch(tmp_path):
     """2025.2's build 0 is not pristine (it carries expose_foreign); 2026 has no such build."""
     url = channel(tmp_path, [])
-    old = rp.plan(url, "1", "1.0.0", "p", ["Isabelle2025-2/expose_foreign/1"])
+    old = rp.plan(url, "1", "1.0.0", "p", words("Isabelle2025-2/expose_foreign/1"))
     assert (old["isabelle_version"], old["isabelle_non_pristine_build"]) == ("2025.2", "0")
-    new = rp.plan(url, "0", "1.0.0", "p", ["Isabelle2026/expose_foreign/1", "Isabelle2026/light_locale/1"])
+    new = rp.plan(url, "0", "1.0.0", "p", words("Isabelle2026/expose_foreign/1", "Isabelle2026/light_locale/1"))
     assert (new["isabelle_version"], new["isabelle_non_pristine_build"]) == ("2026", "")
     assert files_of(new)["isabelle-light-locale"] == ("build", "isabelle-light-locale-2026.0.1-Isabelle2026_0.conda")
 
@@ -170,22 +176,23 @@ def test_a_rehearsal_is_refused_only_for_an_isabelle_build_the_channel_serves(tm
     if transport == "http":
         url = over_http(url)
     monkeypatch.setattr("sys.argv", ["release-plan", "--channel", url, "--isabelle-build", "0", "--tool-version", "1.0.0",
-                                     "--tool-prefix", "p", "--rehearsal", "Isabelle2025-2/light_locale/1"])
+                                     "--tool-prefix", "p", "--rehearsal", *words("Isabelle2025-2/light_locale/1")])
     with pytest.raises(rp.Refused, match=r"serves isabelle 2025\.2 0 \(linux-aarch64\).*conda cannot tell the two apart"):
         rp.cli()                                                                                # the workflow's path
-    assert rp.plan(url, "1", "1.0.0", "p", ["Isabelle2025-2/light_locale/1"], rehearsal=True)
-    assert rp.plan(url, "0", "1.0.0", "p", ["Isabelle2026/light_locale/1"], rehearsal=True)     # a new line's first build
-    assert rp.plan(url, "0", "1.0.0", "p", ["Isabelle2025-2/light_locale/1"])                   # not a rehearsal
+    assert rp.plan(url, "1", "1.0.0", "p", words("Isabelle2025-2/light_locale/1"), rehearsal=True)
+    assert rp.plan(url, "0", "1.0.0", "p", words("Isabelle2026/light_locale/1"), rehearsal=True)     # a new line's first build
+    assert rp.plan(url, "0", "1.0.0", "p", words("Isabelle2025-2/light_locale/1"))                   # not a rehearsal
 
 
-@pytest.mark.parametrize("tags, says", [(["light_locale/1"], "is not a release tag"),
-                                        (["Isabelle2025-2/light_locale/0"], "is not a release tag"),
-                                        (["Isabelle2025-2/a/1", "Isabelle2025-2/a/2"], "names a feature twice"),
-                                        (["Isabelle2025-2/a/1", "Isabelle2026/b/1"],
+@pytest.mark.parametrize("given, says", [(["Isabelle2025-2/light_locale/1"], "is not <GitHub repository>@<release tag>"),
+                                        (["owner/light_locale@light_locale/1"], "is not a release tag"),
+                                        (words("Isabelle2025-2/light_locale/0"), "is not a release tag"),
+                                        (words("Isabelle2025-2/a/1", "Isabelle2025-2/a/2"), "names a feature twice"),
+                                        (words("Isabelle2025-2/a/1", "Isabelle2026/b/1"),
                                          "span the release lines Isabelle2025-2 and Isabelle2026: one batch is one isabelle version")])
-def test_plan_refusals(tmp_path, tags, says):
+def test_plan_refusals(tmp_path, given, says):
     with pytest.raises(rp.Refused, match=says):
-        rp.plan(channel(tmp_path, []), "1", "1.0.0", "p", tags)
+        rp.plan(channel(tmp_path, []), "1", "1.0.0", "p", given)
 
 
 NAME = "isabelle-light-locale"

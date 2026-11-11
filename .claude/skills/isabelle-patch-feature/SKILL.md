@@ -254,9 +254,11 @@ empty commit in the private tree, on order:
    repository has no workflows). Dispatch the patch tool's `release-features.yml` with
    `publish=false`; when its roundtrip, accept and sessions jobs are green, dispatch it again with
    `publish=true`. Its `features` input lists the release tags to publish, in any order, with those
-   they are built on that are not yet published for this `isabelle` build. When the `isabelle` conda
-   package gets a new build, every feature package is re-released the same way, with the same
-   versions. The inputs, jobs and recovery: RELEASE.md, "The batch release workflow".
+   they are built on that are not yet published for this `isabelle` build, each as
+   `<GitHub repository>@<release tag>` (for example `xqyww123/Global_Form@Isabelle2026/global_form/1`),
+   where `<GitHub repository>` is the one that the `origin` of the feature repository of that release tag
+   names. When the `isabelle` conda package gets a new build, every feature package is re-released the
+   same way, with the same versions. The inputs, jobs and recovery: RELEASE.md, "The batch release workflow".
 
 ### 3.5 Moving `daily` (on the owner's order)
 
@@ -283,8 +285,7 @@ empty commit in the private tree, on order:
    `tools/release_build.sh` (3.4 step 4), `tools/component_files.txt` if the package also ships an
    Isabelle component, `tools/license.txt` and a `LICENSE` when the package has a license,
    `.gitattributes` (`*.patch -text`), a README. Formats:
-   RELEASE.md, "First-time setup of a feature repository". Add the feature's row to the table in the
-   patch tool's `.github/workflows/release-features.yml`, on order.
+   RELEASE.md, "First-time setup of a feature repository".
 5. The registration commit, on order:
 
        git -C <feature repository> add -- <the new files>

@@ -1,12 +1,12 @@
 # The batch release of the tool package and the feature packages (patch tool plan decision 11;
 # RELEASE.md "The batch release workflow" is the user's description).
 #
-# A batch is the feature release tags `features` lists, in any order, and the tool package.  One build
-# makes every package of the batch, and the bytes accepted are the bytes published: `build` plans with
-# tools/release-plan (reuse what the channel already serves and is exactly what the batch wants, build
-# the rest with the next number), renders and builds the rest, looks inside every package and
-# uploads feature-packages, noarch/*.conda only, the one artifact published.  It also lists the
-# environments the batch is checked in, one for each package of the batch that no other package of
+# A batch is the feature release tags `features` lists, each with its feature repository on GitHub, in any
+# order, and the tool package.  One build makes every package of the batch, and the bytes accepted are the
+# bytes published: `build` plans with tools/release-plan (reuse what the channel already serves and is
+# exactly what the batch wants, build the rest with the next number), renders and builds the rest, looks
+# inside every package and uploads feature-packages, noarch/*.conda only, the one artifact published.  It
+# also lists the environments the batch is checked in, one for each package of the batch that no other package of
 # the batch is built on, holding that package and everything it is built on, and uploads
 # feature-sources: the feature repository of every release tag of the batch, at that tag.  The other
 # jobs run once per environment: `roundtrip` runs tools/check-roundtrip against the installed packages
@@ -40,7 +40,7 @@ on:
         default: ""
         type: string
       features:
-        description: "The feature release tags to publish, space-separated, in any order"
+        description: "The features to publish, space-separated, in any order, each as <GitHub repository>@<release tag>: the feature repository on GitHub, then @ and the release tag (xqyww123/Global_Form@Isabelle2026/global_form/1)"
         required: true
         type: string
       other_component:
@@ -161,36 +161,25 @@ jobs:
             "$RATTLER_BUILD" build --recipe tool/conda/recipe.yaml --output-dir out -c conda-forge
           [ -f "out/noarch/$file" ] || { echo "::error::the tool package is not the planned out/noarch/$file"; ls out/noarch; exit 1; }
 
-      # The fixed table feature -> (GitHub repository, package directory in it).  Each release tag is
-      # cloned, rendered and archived under its key <package>-<version>.
+      # Each release tag is cloned from the feature repository that `features` names with it; its package
+      # directory is the one whose patches/<R>/provenance.txt is that release's (make-patches writes
+      # `release_tag: <tag>` there).  Each is archived under its key <package>-<version>.
       - name: "Check out every feature; render and build the packages to build; the sources of the sessions job"
         env:
           B: ${{ inputs.isabelle_build }}
           TOKEN: ${{ secrets.ISABELLE_PATCHED_READ_TOKEN }}
         run: |
           set -euo pipefail
-          declare -A REPO=(
-            [expose_foreign]="xqyww123/isabelle-base-features expose_foreign"
-            [future_assign_interrupt]="xqyww123/isabelle-base-features future_assign_interrupt"
-            [fast_abbrev_printing]="xqyww123/isabelle-base-features fast_abbrev_printing"
-            [light_locale]="xqyww123/Light_Locale ."
-            [local_type_abbrev]="xqyww123/Local_Type_Abbrev ."
-            [localized_record]="xqyww123/Localized_Record ."
-            [local_datatype]="xqyww123/Local_Datatype ."
-            [dot_syntax]="xqyww123/Dot_Syntax ."
-            [dev_patches]="xqyww123/qiyuan_dev_patches ."
-            [bicompose_rename_fix]="xqyww123/Bicompose_Rename_Fix ."
-            [sledgehammer_fact_trigger]="xqyww123/Sledgehammer_Fact_Trigger ."
-            [default_fact_qualifiers]="xqyww123/Default_Fact_Qualifiers ."
-          )
           mkdir tars
-          features=$(jq -r '.packages[] | select(.tag) | "\(.tag) \(.feature) \(.name)-\(.version) \(.file) \(.build_number) \(.action)"' plan.json)
-          while read -r tag feature key file n action; do
-            [ -n "${REPO[$feature]-}" ] || { echo "::error::no repository for $feature in the table"; exit 1; }
-            read -r repo dir <<< "${REPO[$feature]}"
+          features=$(jq -r '.packages[] | select(.tag) | "\(.tag) \(.repository) \(.name)-\(.version) \(.file) \(.build_number) \(.action)"' plan.json)
+          while read -r tag repo key file n action; do
             url="https://github.com/$repo.git"
             [ -z "$TOKEN" ] || url="https://x-access-token:$TOKEN@github.com/$repo.git"
-            git -c advice.detachedHead=false clone -q --depth 1 --branch "$tag" "$url" "src/$key"
+            git -c advice.detachedHead=false clone -q --depth 1 --branch "$tag" "$url" "src/$key" \
+              || { echo "::error::cannot clone release tag $tag of $repo"; exit 1; }
+            mapfile -t found < <(cd "src/$key" && find . -path "*/patches/${tag%%/*}/provenance.txt" -exec grep -lxF "release_tag: $tag" {} +)
+            [ "${#found[@]}" = 1 ] || { echo "::error::$repo at $tag: ${#found[@]} package directories have patches/${tag%%/*}/provenance.txt of $tag (${found[*]}), not one"; exit 1; }
+            dir=$(dirname "$(dirname "$(dirname "${found[0]}")")"); dir=${dir#./}      # <dir>/patches/<R>/provenance.txt
             # a tar keeps file modes and dotfiles, which an artifact of plain files loses
             git -C "src/$key" archive --prefix="$key/" -o "$PWD/tars/$key.tar" HEAD
             echo "$tag $key $dir" >> tars/rows.txt
