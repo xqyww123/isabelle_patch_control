@@ -6,9 +6,11 @@ and features a package's version.  Unlike engine.Git, git runs here with the use
 it commits, tags and fetches."""
 from __future__ import annotations
 
+import itertools
 import os
 import re
 import subprocess
+import tempfile
 from pathlib import Path
 
 from .errors import Refused
@@ -40,13 +42,73 @@ def split_branch(branch: str) -> tuple[str, str]:
     return parts[0], parts[1]
 
 
-def merge_base(tree: Path, base: str, branch: str) -> str:
-    """The one merge base of `base` and `branch` in the repository of `tree`."""
-    r = run(["git", "merge-base", "--all", base, branch], cwd=tree, check=False)
+def merge_base(tree: Path, base: str, branch: str, *also: str) -> str:
+    """The one merge base of `base` and `branch` in the repository of `tree`; with `also`, of `base`
+    and what the branch and `also` together contain."""
+    r = run(["git", "merge-base", "--all", base, branch, *also], cwd=tree, check=False)
     bases = r.stdout.split()
     if r.returncode > 1 or len(bases) != 1:
-        raise Refused(f"{base} and {branch} have {len(bases)} merge bases ({' '.join(bases) or r.stderr.strip()}), not exactly one")
+        with_also = f" with {' '.join(also)}" if also else ""
+        raise Refused(f"{base} and {branch}{with_also} have {len(bases)} merge bases ({' '.join(bases) or r.stderr.strip()}), "
+                      "not exactly one")
     return bases[0]
+
+
+def combine(repo: Path, commits: dict[str, str]) -> str:
+    """The tree of the changes of `commits` (name -> commit) put together (stage 2 design, section 7):
+    of the commits that no other of them contains, each one's changes since what it shares with the
+    others, applied one after another as the patch tool applies a patch, in every order, with the same
+    result; else refused, naming those whose changes meet.  Several merge bases count as the tree git's
+    own merge would use, their combination."""
+    independent = set(git("merge-base", "--independent", *commits.values(), cwd=repo).split())
+    named: dict[str, str] = {}
+    for n, c in commits.items():
+        if c in independent and c not in named.values():
+            named[n] = c
+    if len(named) == 1:
+        return git("rev-parse", f"{next(iter(named.values()))}^{{tree}}", cwd=repo)
+    shared = {n: git("merge-base", "--all", c, *(o for m, o in named.items() if m != n), cwd=repo).split()
+              for n, c in named.items()}
+    x = combine(repo, {b: b for bs in shared.values() for b in bs})
+    diffs = {n: run(["git", "diff-tree", "-r", "-p", "--binary", "--no-renames", combine(repo, {b: b for b in shared[n]}), c],
+                    cwd=repo, text=False).stdout for n, c in named.items()}
+
+    def changed(since: str, commit: str) -> set[str]:
+        return set(filter(None, git("diff-tree", "-r", "--name-only", "--no-renames", since, commit, cwd=repo).split("\n")))
+
+    def meets(m: str, n: str) -> bool:
+        """Whether m and n, since their own merge base, change a file in common."""
+        since = combine(repo, {b: b for b in git("merge-base", "--all", named[m], named[n], cwd=repo).split()})
+        return bool(changed(since, named[m]) & changed(since, named[n]))
+
+    trees = set()
+    for order in itertools.permutations(named):
+        with tempfile.TemporaryDirectory(prefix="combine-") as tmp:
+            env = {**os.environ, "GIT_INDEX_FILE": f"{tmp}/index"}
+            run(["git", "read-tree", x], cwd=repo, env=env)
+            for n in order:
+                r = run(["git", "apply", "--cached", "--allow-empty", "--whitespace=nowarn", "--no-ignore-whitespace"], cwd=repo,
+                        env=env, input=diffs[n], check=False, text=False)
+                if r.returncode:
+                    meet = [m for m in named if m != n and meets(m, n)]
+                    line = (r.stderr.decode(errors="replace").strip().splitlines() or ["?"])[-1]
+                    raise Refused(f"the changes of {' and '.join([*meet, n])} cannot be applied one after the other in every "
+                                  f"order ({line}): they cannot be installed together")
+            trees.add(run(["git", "write-tree"], cwd=repo, env=env).stdout.strip())
+    if len(trees) > 1:
+        raise Refused(f"the changes of {' and '.join(named)} give different files in different orders: they cannot be "
+                      "installed together")
+    return trees.pop()
+
+
+def merge_commit(repo: Path, commits: dict[str, str], message: str) -> str:
+    """A commit whose tree is `combine(commits)` and whose parents are exactly the commits; one commit
+    is itself."""
+    parents = list(dict.fromkeys(commits.values()))
+    if len(parents) == 1:
+        return parents[0]
+    tree = combine(repo, commits)
+    return git("commit-tree", "--no-gpg-sign", tree, *(x for c in parents for x in ("-p", c)), "-m", message, cwd=repo)
 
 
 def status(tree: Path) -> str:

@@ -278,7 +278,7 @@ def test_pre_unlink_residue_after_a_conflict(prefix):
         "If you are removing f3, clean up now (nothing will remind you later): first delete every file marked "
         "\"(created by a feature)\" in these messages; then run: isabelle-patch-control apply (if that command is no longer "
         "found, no feature package is left and you are done)\n")
-    assert api.status(prefix.tree, prefix.features_d).levels["src/Pure/a.ML"].level == 1   # what could move, moved
+    assert api.status(prefix.tree, prefix.features_d).levels["src/Pure/a.ML"].level == {1}   # what could move, moved
     text = prefix.hook("pre-unlink", "f1")
     assert f"  src/Pure/new1.ML   {texts.CREATED}" in text and "reinstall the isabelle package" not in text
 
@@ -293,7 +293,7 @@ def test_pre_unlink_residue_after_a_lock_timeout(prefix, monkeypatch):
         finally:
             fcntl.flock(f, fcntl.LOCK_UN)
     assert text == said(texts.residue("f2", texts.REASON_LOCK, [("README", False), ("bin/new2", True), ("src/Pure/b.ML", False)],
-                                      prefix.tree, lock_package=("isabelle-f3", "2025.2.1")))
+                                      prefix.tree, lock_packages=[("isabelle-f3", "2025.2.1")]))
     assert (f"run:\n  conda install -p {prefix.path} {texts.CHANNELS} isabelle-f3=2025.2.1\n  conda remove -p {prefix.path} isabelle-f3\n") in text
     assert texts.UPDATE_LINE in text and "reinstall the isabelle package" not in text and "delete every file" not in text
 

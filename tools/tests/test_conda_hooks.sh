@@ -353,7 +353,7 @@ s_interrupt() {
   check "the reinstall succeeded" rc0
   check "t_one applied, t_two gone, exit 0" states_rc 0 "$E" "applied t_one"
   check "bytes: t_one" bytes "$E" 1 t_one -- t_one
-  check "b.ML (t_two's alone) is the original" bash -c "printf 'b%s\n' 1 2 3 4 5 6 7 8 | cmp -s - '$E/isa/src/Pure/b.ML'"
+  check "b.ML (t_two's alone) is the original" bash -c "printf 'b%s\n' \$(seq 1 20) | cmp -s - '$E/isa/src/Pure/b.ML'"
   check "no staging directory" bash -c "! compgen -G '$E/isa.staging*' >/dev/null"
   check "t_two no longer registered" bash -c "! /usr/bin/grep -qF share/isabelle-t-two '$(userdir "$E")/etc/components' 2>/dev/null"
 }

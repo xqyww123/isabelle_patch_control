@@ -89,14 +89,20 @@ class Toy:
     def delete(self, rel: str):
         (self.repo / rel).unlink()
 
-    def feature(self, name: str, changes) -> Path:
-        """Commit `changes()` as feature `name` on top of the chain and write its feature directory."""
+    def feature(self, name: str, changes, bases: tuple[str, ...] | None = None) -> Path:
+        """Commit `changes()` as feature `name` and write its feature directory: on top of the last
+        feature (default), or on the features `bases` names (none: Isabelle itself), whose release
+        commits are merged first, as `new-tree --merge` and the developer's merge do."""
+        base_tags = [self.tags[-1]] if bases is None else [self.tag_of(b) for b in bases] or [self.tags[0]]
+        self.git("checkout", "-q", "--detach", base_tags[0])
+        if len(base_tags) > 1:
+            self.git("merge", "-q", "--no-edit", *base_tags[1:])
+        base = self.git("rev-parse", "HEAD").strip()
         changes()
         self.git("add", "-A")
         self.git("commit", "-qm", name)
         tag = f"{RELEASE}/{name}/1"
         self.git("tag", tag)
-        base = self.tags[-1]
         d = self.features_d / name
         d.mkdir()
         diff = self.git("diff-tree", "-r", "-p", "--no-renames", base, tag, text=False)
@@ -104,7 +110,7 @@ class Toy:
             (d / file).write_bytes(block)
         (d / "provenance.txt").write_text(
             f"feature: {RELEASE}/{name}\nrelease_tag: {tag}\ncommit: {self.git('rev-parse', tag).strip()}\n"
-            f"base_tag: {base}\nbase_commit: {self.git('rev-parse', base).strip()}\n"
+            f"base_tag: {' '.join(base_tags)}\nbase_commit: {base}\n"
             f"build_string_prefix: Isabelle2025_2\n")
         self.tags.append(tag)
         self.names.append(name)

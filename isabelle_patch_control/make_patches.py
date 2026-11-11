@@ -3,8 +3,8 @@
 Release <m> (1, 2, 3, ...) of a feature, run in the feature's private tree <tree> (default: the current
 directory).  No network, nothing pushed.  <R> defaults to the release line of the branch checked out
 there.  The package directory <dir> lies in the feature repository H that registers the tree (new-tree
---home); it receives patches/<R>/*.patch and patches/<R>/provenance.txt.  The base is the one H's
-.gitmodules records; branches and tags are the private tree's own (fetch first when the base was
+--home); it receives patches/<R>/*.patch and patches/<R>/provenance.txt.  The bases are the ones H's
+.gitmodules records; branches and tags are the private tree's own (fetch first when a base was
 released elsewhere).
 
 Gates, in order, all before anything is written or tagged:
@@ -15,18 +15,21 @@ Gates, in order, all before anything is written or tagged:
      setup of a feature repository"); H's .gitmodules registers the feature's two trees and <tree> is the
      private one, clean and on <R>/<feature>, whose tip carries no release tag of this feature yet
      (commit first; an empty commit releases the same sources under the new number).
-  2. base tag: `git merge-base --all origin/<base> <tip>` is one commit, exactly one release tag
-     <base>/* points at it, and the stock tree stands there (else rerun <H>/init.sh).  Every gate below
-     is relative to that tag.
+  2. base tags: for each base, `git merge-base --all origin/<base> <tip>` is one commit and exactly one
+     release tag <base>/* points at it.  The base commit is that commit with one base; with several, the
+     most recent commit of the tip's history whose parents are exactly those commits (new-tree --merge
+     makes it), or that commit itself when they are all one commit, and its tree must be their changes
+     put together (it adds nothing to them).  The stock
+     tree stands at the base commit (else rerun <H>/init.sh).  Every gate below is relative to it.
   3. changed files: `git diff-tree -r --no-renames --name-only` between the two equals
      tools/patched_files.txt.
   4. signatures: check-signatures with tools/signature_additions.txt.
   5. round trip: the patch files (one `git diff-tree -p` block per file, under its flat name: the path
      with `/` as `-`, plus `.patch`), generated into a temporary directory, replayed through the patch
-     tool's directory interface on `git archive <base tag>` forward and backward, compared by tree hash.
+     tool's directory interface on `git archive <base commit>` forward and backward, compared by tree hash.
 Then, each step repeatable after a failure: the package's patches/<R>/ receives the files and the
 provenance file; H's release commit is made by path, of those files, .gitmodules and the two trees,
-whose gitlinks record the tip and the base tag's commit; the commit to tag (the new one, or the one an
+whose gitlinks record the tip and the base commit; the commit to tag (the new one, or the one an
 existing tag of this number points at) is checked to hold exactly the generated files, gate 1's files
 and those gitlinks; the annotated tag <R>/<feature>/<m> is created in H; and last in the private tree,
 whose tag marks the release as done.
@@ -45,8 +48,8 @@ from pathlib import Path
 
 from . import check_signatures
 from .api import apply_to, unapply_from
-from .dev import (build_string_prefix, exists, git, head_branch, listed, patch_blocks, release_inputs, require_committed, rev,
-                  run, split_branch, status, tags_at, toplevel)
+from .dev import (build_string_prefix, combine, exists, git, head_branch, listed, patch_blocks, release_inputs, require_committed,
+                  rev, run, split_branch, status, tags_at, toplevel)
 from .errors import Refused
 from .new_tree import registrations
 
@@ -132,28 +135,33 @@ def feature_release(where: Path, feature: str, m: str, package: Path):
     H = git("rev-parse", "HEAD", cwd=top)
     inputs = [rel for rels in release_inputs(package) for rel in rels]
 
-    # 2. the base tag, where the stock tree stands
-    base = f.base
+    # 2. the base tags, and the base commit, where the stock tree stands
+    commits = f.merge_bases()
+    base_tags = []
+    for base, commit in commits.items():
+        tags = tags_at(tree, commit, f"{base}/*")
+        if len(tags) != 1:
+            raise Refused(f"gate 2 (base tags): merge-base(origin/{base}, {branch}) = {commit[:12]} carries {len(tags)} release "
+                          f"tags of {base} ({' '.join(tags) or 'none'}), not exactly one: merge a release of {base} "
+                          "(fetch first if it was released elsewhere)")
+        base_tags += tags
     base_commit = f.stock_commit()
-    base_tags = tags_at(tree, base_commit, f"{base}/*")
-    if len(base_tags) != 1:
-        raise Refused(f"gate 2 (base tag): merge-base(origin/{base}, {branch}) = {base_commit[:12]} carries {len(base_tags)} release "
-                      f"tags of {base} ({' '.join(base_tags) or 'none'}), not exactly one: merge a release of {base} "
-                      "(fetch first if it was released elsewhere)")
-    base_tag = base_tags[0]
+    if len(commits) > 1 and (want := combine(tree, commits)) != git("rev-parse", f"{base_commit}^{{tree}}", cwd=tree):
+        more = git("diff-tree", "-r", "--name-only", "--no-renames", want, f"{base_commit}^{{tree}}", cwd=tree).split()
+        raise Refused(f"gate 2 (base tags): {base_commit[:12]}, the merge of the bases, holds changes beyond them: {' '.join(more)}")
     stock = top / f.stock_path
     if git("rev-parse", "HEAD", cwd=stock) != base_commit:
-        raise Refused(f"gate 2 (base tag): the stock tree {stock} is not at {base_tag} ({base_commit[:12]}): rerun {top}/init.sh")
-    print(f"base tag {base_tag} at {base_commit[:12]}, the stock tree's commit")
+        raise Refused(f"gate 2 (base tags): the stock tree {stock} is not at the base commit {base_commit[:12]}: rerun {top}/init.sh")
+    print(f"base tags {' '.join(base_tags)}; base commit {base_commit[:12]}, the stock tree's commit")
 
     # 3. the changed files
-    changed = sorted(git("diff-tree", "-r", "--name-only", "--no-renames", base_tag, tip, cwd=tree).split("\n"))
+    changed = sorted(git("diff-tree", "-r", "--name-only", "--no-renames", base_commit, tip, cwd=tree).split("\n"))
     changed = [c for c in changed if c]
     expected = sorted(listed(package / "tools" / "patched_files.txt"))
     if changed != expected:
         extra = sorted(set(changed) - set(expected))
         missing = sorted(set(expected) - set(changed))
-        raise Refused("gate 3 (changed files): the files changed since the base tag are not tools/patched_files.txt:"
+        raise Refused("gate 3 (changed files): the files changed since the base commit are not tools/patched_files.txt:"
                       + "".join(f"\n  changed but not listed: {p}" for p in extra)
                       + "".join(f"\n  listed but unchanged: {p}" for p in missing))
     print(f"gate 3 (changed files): {len(changed)} changed files, exactly tools/patched_files.txt")
@@ -161,16 +169,16 @@ def feature_release(where: Path, feature: str, m: str, package: Path):
     # 4. signatures
     additions = package / "tools" / "signature_additions.txt"
     heads = listed(additions)
-    if problems := check_signatures.check(tree, base_tag, tip, heads, str(additions)):
+    if problems := check_signatures.check(tree, base_commit, tip, heads, str(additions)):
         raise Refused("gate 4 (signatures):\n" + "\n".join(f"ERROR: {p}" for p in problems))
-    print(f"gate 4 (signatures): every entry of {base_tag} unchanged, {len(heads)} additions as listed")
+    print(f"gate 4 (signatures): every entry of the base commit unchanged, {len(heads)} additions as listed")
 
     # provenance
     provenance = [
         f"feature: {branch}",
         f"release_tag: {tag}",
         f"commit: {tip}",
-        f"base_tag: {base_tag}",
+        f"base_tag: {' '.join(base_tags)}",
         f"base_commit: {base_commit}",
         f"build_string_prefix: {build_string_prefix(release)}",
     ]
@@ -179,25 +187,25 @@ def feature_release(where: Path, feature: str, m: str, package: Path):
         # generation, into the temporary directory: the package is not touched before every gate passed
         gen = Path(tmp) / "patches"
         gen.mkdir()
-        diff = run(["git", "diff-tree", "-r", "-p", "--no-renames", base_tag, tip], cwd=tree, text=False).stdout
+        diff = run(["git", "diff-tree", "-r", "-p", "--no-renames", base_commit, tip], cwd=tree, text=False).stdout
         for file, block in patch_blocks(diff).items():                 # bytes throughout: CRs and non-UTF-8 survive
             (gen / file).write_bytes(block)
         patch_names = sorted(p.name for p in gen.glob("*.patch"))
         print(f"{len(patch_names)} patch files generated")
 
-        # 5. round trip on the base tag's archive through the tool's directory interface, compared by tree hash
+        # 5. round trip on the base commit's archive through the tool's directory interface, compared by tree hash
         work = Path(tmp) / "tree"
         work.mkdir()
-        archive(tree, base_tag, work)
+        archive(tree, base_commit, work)
         replay(work, gen)
         got, want = tree_hash_of_dir(tree, work), git("rev-parse", f"{tip}^{{tree}}", cwd=tree)
         if got != want:
             raise Refused(f"gate 5 (round trip): forward application gives tree {got}, the commit's tree is {want}")
         replay(work, gen, reverse=True)
-        got, want = tree_hash_of_dir(tree, work), git("rev-parse", f"{base_tag}^{{tree}}", cwd=tree)
+        got, want = tree_hash_of_dir(tree, work), git("rev-parse", f"{base_commit}^{{tree}}", cwd=tree)
         if got != want:
-            raise Refused(f"gate 5 (round trip): backward application gives tree {got}, the base tag's tree is {want}")
-        print("gate 5 (round trip): the base tag's archive reproduces both trees")
+            raise Refused(f"gate 5 (round trip): backward application gives tree {got}, the base commit's tree is {want}")
+        print("gate 5 (round trip): the base commit's archive reproduces both trees")
         (gen / "provenance.txt").write_text("\n".join(provenance) + "\n")
         print("\n".join(provenance))
 

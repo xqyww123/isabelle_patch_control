@@ -11,7 +11,7 @@ one exact `isabelle` build (`isabelle ==<isabelle version> <build string>`, for 
 `isabelle ==2026 0`), so every new `isabelle` build is followed by a re-release of every feature
 package: same version, build number plus one, new pin.
 
-Words. This file uses the SKILL's words (feature, feature repository, base, base tag, release line,
+Words. This file uses the SKILL's words (feature, feature repository, base, base tag, base commit, release line,
 shared tree, private tree, stock tree; its section 1), and these. The *owner* is the person who owns
 isabelle-patched, the feature repositories and the channel. A *release tag* `<R>/<feature>/<m>`
 (`m` = 1, 2, 3, …) marks a released commit. A release line `<R>` has a *build string prefix*, `<R>`
@@ -25,8 +25,8 @@ are higher. The *package directory* (`make-patches --package <dir>`) holds the
 name*: the path with `/` replaced by `-`, plus `.patch`; and `provenance.txt`). When a feature
 repository holds one feature, its package directory is the repository itself; when it holds several,
 each has its own subdirectory, and `--package` names it. A *level* is the tool's reading of one
-file on a user's machine: the number of the highest feature whose change the file carries (0 for
-the pristine content); a file that fits two levels reads as `CONFLICT`.
+file on a user's machine: the installed features whose changes the file carries (none for the
+pristine content); a file that fits two levels reads as `CONFLICT`.
 
 ## First-time setup of a feature repository
 
@@ -34,7 +34,7 @@ Before a feature can be released, its package directory holds, committed:
 
 - `tools/patched_files.txt`: every path the feature changes, relative to the Isabelle tree, one per
   line in any order (`make-patches` gate 3, changed files, requires the set to equal the output of
-  `git diff-tree -r --no-renames --name-only <base tag> <tip>`, which is how the SKILL makes it).
+  `git diff-tree -r --no-renames --name-only <base commit> <tip>`, which is how the SKILL makes it).
 - `tools/signature_additions.txt`: every signature entry the feature adds to an `.ML` file, as
   `<path> <SIGNATURE NAME> <keyword> <name>` (gate 4, signatures, `isabelle-patch-control check-signatures`);
   empty if none.
@@ -64,19 +64,21 @@ Before a feature can be released, its package directory holds, committed:
   version `2026.0.1` was made from `Isabelle2026/<feature>/1`." Write `<m>`, not `<version>`:
   `common-readme.md` uses `<version>` for the `isabelle` version.
 
-A feature's base is recorded as `base =` in the feature repository's `.gitmodules` (SKILL, section
-1); its package depends on the base's package at exactly that package's version (`==<version>`,
-for example `==2026.0.1`), which the recipe renderer computes from `base_tag`.
+A feature's bases are recorded as `base =` in the feature repository's `.gitmodules`, separated by
+spaces (SKILL, section 1); its package depends on each base's package at exactly that package's version
+(`==<version>`, for example `==2026.0.1`), which the recipe renderer computes from `base_tag`.
 
 ## Why the release steps are in this order
 
 The checklist comes before the build and before `make-patches`: a failed point means a new commit,
 and `make-patches` tags the release, so a failed point after it would use up the number `<m>`.
-`make-patches` checks its gates (committed files, base tag, changed files, signatures, round trip
+`make-patches` checks its gates (committed files, base tags, changed files, signatures, round trip
 through the tool; `make-patches --help`) before it writes anything; then each of its write steps can be rerun after a
 failure, and the tag in the private tree comes last: it marks the release as done. The features
 built on a released feature merge the release and are released in turn, because each package pins
-its base's package at one exact version.
+its bases' packages at one exact version; and conda installs one version of a package, so a feature
+takes a newer release of a feature below it only once each of its bases built on that feature has
+released on it.
 
 ## Before releasing a feature: why each checklist point matters
 
@@ -202,3 +204,12 @@ write "all three `-c` arguments" where it says "both" (`tests/test_docs.py` chec
 Every batch of your fork also builds the tool package from your fork and publishes it to your channel.
 The repair commands the tool and the hooks print name https://conda.qiyuan.me and conda-forge; for a
 package from your channel, your users add it to them.
+
+When your features are built on the owner's feature packages, your Isabelle repository is also the
+`origin` of your shared trees, so it must hold the branch of each such base, up to the release you
+merge, and its release tags; a GitHub fork copies them only once. Before merging a new release of
+such a base, bring it over, in a clone of your Isabelle repository (your shared tree will do):
+
+    git fetch https://github.com/xqyww123/isabelle-patched '+refs/heads/<R>/<base>:refs/heads/<R>/<base>' '+refs/tags/<R>/<base>/*:refs/tags/<R>/<base>/*'
+    git push origin <R>/<base> 'refs/tags/<R>/<base>/*'
+

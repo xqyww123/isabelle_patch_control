@@ -75,6 +75,7 @@ git rm -q etc/x; git add -A; git commit -q -m "feature"
 git push -q origin R/pristine R/base R/feat "R/pristine/$id" R/base/1; git switch -q R/base
 base1=$(git rev-parse R/base)
 mkdir -p "$work/contrib/R/contrib" "$work/contrib/R/lib/classes" "$work/contrib/R/src/Tools/Demo/lib"   # the shared tree's products
+git init -q "$work/contrib/R"; git -C "$work/contrib/R" remote add origin "$URL"                    # and its origin
 
 # the feature repository H: the package directory is its root
 H=$work/contrib/H; git init -q -b main "$H"; mkdir -p "$H/tools"; cd "$H"
@@ -244,6 +245,31 @@ expect refused "fail after (e) again"                            -- mp --package
 rm "$gd/refs/tags/R/feat/13.lock"; new_tip "a commit between (e) and the rerun"
 expect refused "rerun with another tip: the tagged commit has another gitlink" -- mp --package "$cpkg" R/feat 13
 saw "names the gitlink" "worktrees/R-feat (gitlink)"
+
+echo "--- a feature on two bases (stage 2 design, section 7)"
+cd "$seed"; git switch -q -c R/other "R/pristine/$id"; echo other >> lib/scripts/getsettings
+sed -i '1i (* other *)' src/Pure/b.ML; git commit -q -am other                 # R/base changes b.ML too, at its end
+git tag -a -m 1 R/other/1; git push -q origin R/other R/other/1; other1=$(git rev-parse R/other); git switch -q R/base
+basetag=$(git -C "$seed" describe --tags --exact-match R/base)
+two=$H/worktrees/R-two; tpkg=$H/two
+isabelle-patch-control new-tree --home "$H" --base R/base --base R/other R/two >/dev/null
+mkdir -p "$tpkg/tools"; echo '# two' > "$tpkg/README.md"; echo etc/two.txt > "$tpkg/tools/patched_files.txt"
+: > "$tpkg/tools/signature_additions.txt"; echo Pure > "$tpkg/tools/required_sessions.txt"
+git -C "$H" add two; git -C "$H" commit -q -m two -- two
+cd "$two"; echo two > etc/two.txt; git add etc/two.txt; git commit -q -m two
+expect ok      "release 1 of R/two, built on R/base and R/other"  -- mp --package "$tpkg" R/two 1
+check "the provenance file names both base tags" '/usr/bin/grep -qx "base_tag: $basetag R/other/1" "$tpkg/patches/R/provenance.txt"'
+check "only R/two's own change is cut" '[[ $(cd "$tpkg/patches/R" && ls *.patch) == etc-two.txt.patch ]]'
+check "the release commit records the stock tree at the merge of the bases" '[[ $(git -C "$H" rev-parse R/two/1^{commit}:worktrees/R-two-stock) == $(git -C "$two" rev-parse HEAD~1) ]]'
+m0=$(git -C "$two" rev-parse HEAD~1)
+check "the merge of the bases is what git's own merge of them gives" '[[ $(git -C "$two" rev-parse "$m0^{tree}") == $(git -C "$two" merge-tree --write-tree "$basetag" R/other/1) ]]'
+GIT_INDEX_FILE=$work/bad-index git -C "$two" read-tree "$m0"
+blob=$(echo extra | git -C "$two" hash-object -w --stdin)
+GIT_INDEX_FILE=$work/bad-index git -C "$two" update-index --add --cacheinfo "100644,$blob,etc/extra.txt"
+bad=$(git -C "$two" commit-tree "$(GIT_INDEX_FILE=$work/bad-index git -C "$two" write-tree)" -p "$(git -C "$two" rev-parse "$basetag^{commit}")" -p "$other1" -m "a merge of the bases with a change of its own")
+git -C "$two" merge -q --no-edit "$bad"; bash "$H/init.sh" >/dev/null
+expect refused "a merge of the bases that holds a change of its own" -- mp --package "$tpkg" R/two 2
+saw "names the change" "holds changes beyond them: etc/extra.txt"
 
 echo "--- $pass passed, $fail wrong (toy repository: $work)"
 [[ $fail == 0 ]]

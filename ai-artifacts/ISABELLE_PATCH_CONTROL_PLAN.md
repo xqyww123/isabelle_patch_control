@@ -658,6 +658,113 @@
         本计划在 a5e36b1 之后又手改了几行（提交后的记录），未提交。
         conda 会话报：`download-counter.py check` 对 a5e36b1 报两行误报（release-features.yml 的 `PUBLIC:`、smoke.yml 里 `public` 的默认值），因为第一步把
         HEAD 原有的行尾标记 `# the users' address, not a download` 弄丢了。两行补回标记，检查不再报。用户："提交并推送"（2026-11-08），随这次一起提交本计划的记录。
+        提交 1ee67e8 已推 origin，tests.yml 运行 42508581405 全绿。第一步结束。
+      - **compact 后从这里接着做（2026-11-10 写）**：
+        - 本机清理已做（用户"很好，请清理"）：评审记录与各次运行日志存档 `~/archive/claude-scratchpad/release-path-stage1-reviews-and-logs-2026-11-10.tar.zst`
+          （380K，已校验）；`/var/tmp` 下 claude-stage1、claude-accept-local、claude-code-review-stage1、claude-design-graph、claude-review-stage1、
+          claude-rereview-stage1、claude-doc-sweep、claude-overeng-audit 已删。rattler-build 0.69.1 另存在 `/var/tmp/claude-rattler-build-0.69.1/rattler-build`
+          （玩具测试用 `RATTLER_BUILD=` 指它）。
+        - 下一件：**撤下发行线的设计**（用户"建议 compact 后就来做这个"）。草稿 `ai-artifacts/RETIRE_RELEASE_LINE_DESIGN.md`（未跟踪；D1-D5 待作者改；配套
+          SKILL 3.10）。之前的评审记录在上面的存档里（若有 claude-review-retire 目录，那是旧的，没动）。
+        - 再下一件：**第二步，一个 feature 直接建在多个 feature 包上**——用户"这个你还没支持？这个很重要的，必须做的！"。要改工具核心（来历文件的单个
+          `base_tag`、make-patches 第 2 道检查、new-tree `--base`、`link_chain` 与层级模型、渲染器的依赖、check-bytes 的链、tools/accept 的场景、
+          common-readme.md:6-9、AGENTS.md:21-28、reference.md:40-58）；设计稿 §11 列了清单，另有一条：new-tree 写死的 isabelle-patched 地址改取共享树的
+          `origin`。要单独设计、评审；教训：不加只为假想情况的检查与测试（第 46 条过度设计审查）。
+        - 不归本会话：bicompose 怎么发由 mlml-71 定（用户"交给 the agent 自己去决定，你别管"）；MLML 的子模块指针不动（用户"别"）。
+        - light_locale→concepts 改名尚未发生（contrib/ 下仍是 light_locale）；改名时补丁工具只改发布 workflow 表里一行与 SKILL 两处例子。
+      - **第二步提前**（2026-11-10 compact 后）：用户"先来做 一个 feature 直接建在多个 feature 吧"；"我认为我的需求很清晰，请你自主设计，设计后评审，
+        如果有功能性上的改变，必须得到我的批准；如果某个设计的代价很高，也需要我批准"。撤下发行线排到第二步之后。设计稿
+        `ai-artifacts/MULTI_BASE_DESIGN.md`（draft 1，未跟踪）：核心是"一个文件的层级 = 它带着哪些已装 feature 的改动"这个集合，一条链时与今天逐字
+        相同；多基的 feature 对着各基发布的合并来切补丁，合并提交由工具在每台机器上算出同一个。实测：git 2.43 下相隔 14 行的两处改动两种顺序打出
+        同样字节，相邻两行的打不上；`merge-tree --write-tree` + 固定身份与日期的 `commit-tree` 两次得同一哈希（设了 `commit.gpgSign` 也一样）。
+        事实：light_locale 与 fast_abbrev_printing 都改 src/Pure/ROOT.ML 与 proof_context.ML，所以"不相干的 feature 不许改同一文件"的方案被否。
+        评审 wf_ed25f7bd-be6（四个视角 + 每条一个辩护 + judge，Opus 5.5 xhigh）：19 条，judge"中心思想成立、未就绪"，改后要定向重评。
+        作者的一处事实错误被查出：light_locale 建在 fast_abbrev_printing 上（两条线都是），所以它们不是"不相干却改同一文件"的例子；
+        否掉更省事做法的真实理由是它禁止 t_five 那种两个基都改同一文件的形状、以及两家各往 ROOT.ML 加 ML_file 的 Pure feature。
+        交用户定的四件：(1) core-1 两个不相干 feature 改同一文件挨得太近（3 行内）时怎么办，建议照今天"不能一起装"那样拒绝（exit 3），
+        草稿的 CONFLICT 会让用户去重装 isabelle、删用户目录且修不好；(2) developer-1 多基 feature 对着什么切补丁，建议"各基的改动按工具的
+        方式一个个打上去"（临时 index 里 git apply --cached），而不是 git 的 merge-tree，这样挨得太近在 new-tree/make-patches 时就拒；
+        (3) developer-4 stock 树在 .gitmodules 加 `update = none`，免得 `git clone --recurse-submodules` 卡在 GitHub 上没有的提交；
+        (4) elegance-5 名字例外 dev_patches→qiyuan-dev-patches 不在本步做，是对第一步设计 §11 的偏离，请用户确认。作者自改的：环境顺序改成
+        conda 的链接顺序（按深度再按包名）；底下同一 feature 的不同发布只写 checklist 句；基提交在私有树里做、按哈希取进 stock 树；完整诊断
+        由"被挡的 feature 及其上面的"中排最后的那个写；锁超时的恢复点名 F 及其上面的全部顶；check-bytes 按集合查前后像；若干措辞。
+        已向用户报，等答复，答复前不改设计。
+        用户答第 (1) 件（2026-11-10）："让我一般地回答：如果多个互不依赖的 features 无法被同时以任意顺序安装时，就直接报错，拒绝"。作者的理解
+        （已向用户复述、待确认）：互不依赖 = 谁也不在谁下面；它们改同一文件时，每种先后顺序都必须打得上、且打出同样的字节，否则 exit 3 拒绝
+        （比作者原建议严：原建议只试环境的那一种顺序）。引擎做法：一个有几个顶的层级，从去掉每个顶的层级各算一次，必须都成功且字节相同；
+        只有一个顶的层级照旧一步（一条链不变）。同样的改动出现在两个 feature 里也被拒。对第 (2) 件的推论（待用户确认）：make-patches 把各基的
+        改动按各基的每种先后顺序打一遍，结果须一致，否则拒。
+        用户答设计 §12 的功能改变清单（含第 (2) 件"照工具的方式合起来"）："先这样来，之后有问题再改"。第 (4) 件："做完我们手头的之后就来做这个"
+        （名字例外排在第二步之后、撤下发行线之前还是之后未说，到时问）。第 (3) 件用户问"哪个提交？具体什么情况？"，已从头解释，等答复。
+        用户随即提议（2026-11-10）："为什么要合并？the releasing target feature 就应该构建在这样一个合并上对吗？我建议是去检查 the releasing target
+        feature 用于生成其 patches 的 base commit 刚好就是所有 dependent features' commits of the expected version 没有任何新的改动。你觉得如何？"
+        作者赞同：合并提交 M 放进 feature 自己的分支历史（父提交恰好是各基的发布提交、内容恰好是各基改动合起来），随分支推上 GitHub；
+        补丁 = diff(M, tip)；stock 树停在 M；工具不再造固定身份的提交，第 (3) 件的问题随之消失（不需要 `update = none`）。make-patches 第 2 道：
+        各基最后合进来的提交各恰有一个 release tag（同今天）；在 tip 的历史里找父提交恰为这些提交的合并 M；M 的内容须等于各基改动按每种顺序
+        合起来的结果（即"没有任何新的改动"，也落实第 (1) 件的任意顺序规则）。一个基时 M 就是基的发布提交本身。剩一问交用户：M 由谁做——git 不
+        切换某棵树就做不出"只以各基为父"的合并，而规矩禁止切换私有树；作者建议 new-tree 里一个小用法做出 M 并打印哈希，开发者照今天 3.3 那样
+        `git merge --no-commit <M>`；另一做法是 SKILL 里用临时 worktree 的纯 git 步骤。等答复。
+        用户："可以在 new-tree 里加一个小用法，语法让我看一眼"；作者给出 `new-tree --home <repo> --merge <R>/<base> [--merge …] <R>/<feature>`
+        （点名的基取其分支最新提交，没点名的保持已合进来的那个；只写一个提交对象、打印哈希与下一条 `git merge --no-commit`；一个基时
+        就是今天 3.3），用户："可以"。第 (3) 件因此消失。设计稿 draft 2（2026-11-11）已按以上全部改写；定向重评 wf_d7f09e27-b15 进行中
+        （三个视角：层级与拒绝、开发者一侧、第一轮修法是否做对；每条一个辩护；judge）。结果出来后向用户报，同意前不动代码。
+        重评结果：11 条，judge"改完即可接受，不必再评，无须用户定的"。作者要改的（待用户同意后改稿）：任何通过的候选记录了失败就拒、
+        不论通过几个；第 2 步措辞；拒绝点名第一处失败的那一对；帮助里"同一个基上的两个不能一起用"那句改成新规则（新的用户可见文字）；
+        一个基在另一个基下面时 `--independent` 去掉被包含的、`--merge` 按"分支 + 点名的基的最新提交"取各基；几个共同祖先时先把它们合起来
+        当起点（git 的虚拟合并基）；`git apply --cached` 加 `--whitespace=nowarn --no-ignore-whitespace`；SKILL 3.4 第 1 步改成"出现在两个列表里的
+        feature 最高编号须相同"，3.3 与 3.4 第 7 步补顺序句与"几个基一起 --merge"，第 3 步 `<base commit>`；第 6 节两句、第 7 节一句改正。
+        用户（2026-11-11）："不需要跟我讨论的我不予置评"。设计稿 draft 3 已照改（状态：accepted），接着实现。实现顺序：先工具核心与测试，
+        RELEASE.md 与 SKILL 的第二步改动放在 macOS 那次提交之后做，免得两件事混在同一文件的同一次提交里。
+        实现进度（2026-11-11，未提交）：features.link/ordered/below，engine 的集合层级与"不能一起装"的拒绝，model/api/cli/conda_hook/texts，dev.combine 与
+        merge_commit，new-tree 的多 --base 与 --merge（仓库地址取共享树 origin），make-patches 第 2 道，common.direct_dependencies，渲染器钉
+        >=1.1，工具 1.1.0，check-bytes 按集合查，accept 按 conda 顺序；help（AGENTS.md）、README 与 common-readme、reference.md、develop.md 已改。
+        测试：pytest 197 过（新文件 tests/test_graph.py 13 条；4 个变异各被对应测试抓到），test_trees.sh 84、test_make_patches.sh 115 过；
+        玩具渠道加 t_five（建在 t_two 与 t_four 上，b.ML 改成 20 行），summary 两个环境 t_three 与 t_five；check-roundtrip 在 t_five 环境过。
+        本机 accept（两个环境）在跑：/var/tmp/claude-stage2/acc/run.out。之后跑 test_conda_hooks.sh。新文件 tests/test_graph.py 提交前要用户逐个批准。
+        accept t_five 环境首轮 64 过 1 错：(f1) 在 t_two 上被跳过——(b)(f) 的环境原先装"排序上在主体之前的全部"，t_four 与 t_two 不相干却排在前、
+        也改 b.ML；照设计 §8 改成"主体与它下面的"。新代码：t_three 环境 69 过 0 错；t_five 的 a b f 重跑 34 过 0 错（其余场景首轮已过）。
+        钩子层测试（真 conda）117 过 0 错。macOS 那次提交之后，RELEASE.md（多个基、顺序句、给别的发布者的一段）与 SKILL（第 1 节 bases 与
+        base commit、3.3 用 new-tree --merge、3.4 第 1 步检查句、checklist 命令改 <base commit>、第 7 步 grep 与顺序、3.6、3.7、3.9）已改。
+        第二步实现完成，全部本机测试通过，未提交。下一步问用户：要不要跑代码评审；提交时两个新文件（tests/test_graph.py、
+        ai-artifacts/MULTI_BASE_DESIGN.md）逐个批准。用户："1. 做 2. 都批准"（两个新文件都批准提交；提交本身仍等下令）。
+        代码评审起跑：diff 存 /var/tmp/claude-review-stage2/code/stage2.diff（相对 3d3b4e7，不含 ai-artifacts）。评审 wf_7128a081-b5a。
+        net printing 告知（2026-11-11）：按用户令把 cslh19 的补丁工具从 05bcee2 快进到 3d3b4e7（只 fetch 与 merge --ff-only，没 pip install）；
+        isabelle-fast-abbrev-printing 2026.0.2 已发布（运行 42956090557，三条腿的 sessions 与 accept 全绿）。
+        代码评审 wf_7128a081-b5a：18 条，judge"改后可收、无须用户定、建议对重写的约 60 行定向复审"；已向用户报，用户"不需要跟我讨论的话，
+        我不予置评"。已改：dev.combine 每个基从它与其他基共有的部分算起（三个基、两个共享底下 feature 时原先错拒；设计 §7 已手改并注明）；
+        register 先在共享树里做合并再 submodule add；Feature.base_commit 一处决定基提交（几个基在同一提交时原先拒绝；--merge 已有就打印
+        已有的，设计 §7 已手改）；拒绝只点名改了同一文件的基；merge_base 的拒绝写上一起计算的引用；engine.tops 共用；"clash"一词改回
+        cannot_combine / "不能一起装"（我造的词，违反不造词规矩）；总帮助 [--base ...]；RELEASE.md 术语表与 base commit、develop/reference
+        的基提交；api 标注、texts 参数 lacking、check-bytes 去掉 creator。测试：test_trees 91（四个变异各被抓到：octopus、无 also、按基数、
+        总新做——最后一个起初没抓到，因同一秒内 commit-tree 得同一哈希，改用另一 GIT_COMMITTER_DATE 重跑）、test_make_patches 116
+        （两个基都改 b.ML，对照 git merge-tree）、test_graph 锁超时加 g5。
+        定向复审 wf_e2139a75-4ac：judge"改后可收、不必再评、无须用户定"，三件（各被两个评审独立报出）：(1) 一个基只是合并了别的基
+        已有的东西时 diff 为空，git apply 拒空输入，combine 误拒——加 `--allow-empty`（git 2.35 起有），test_trees 加"两个都只开在 R/c、R/d 上的
+        feature 再作为基"；(2) 拒绝点名改成两两比较：失败的基 n，与每个别的基 m 从它们自己的合并基算起改了同一文件才点名（judge 驳回了
+        "从 n 的起点比"的修法，会冤枉无关的基）；(3) new-tree/make-patches 的 --help 与 SKILL 第 1 节补"它们都在同一提交时就是那个提交"。
+        设计 §7 两句已手改（git apply 参数、点名规则）。test_trees 92、test_make_patches 116、pytest 197 全过。已向用户报，等"提交并推送"。
+      - **会话 global form 转来用户的投诉**（2026-11-12，仅是报告，不是用户的命令；用户说会亲自来谈，在那之前不改）：发布 workflow 的 build job
+        里写死了一张 feature → (GitHub 仓库, 包目录) 的表（release-features.yml 约 172 行），表里没有的 feature 被拒（约 189 行），所以每个新
+        feature 都要往补丁工具提交一行（84e1d60、7de9d22 是别的会话加的两行，HEAD 现为 7de9d22），RELEASE.md 与 SKILL 3.6 第 4 步把这写成了固定
+        步骤——违背"补丁工具必须通用"。global_form（Isabelle2026/global_form/1，仓库 xqyww123/Global_Form，包目录 .）现在因此派发不了。
+        global form 提的做法：(a) features 输入带上仓库，如 `<tag>=<owner/repo>[:<包目录>]`；(b) make-patches 把仓库地址与包目录写进 release tag 的
+        注释，workflow 从 isabelle-patched 读（已有的 tag 没有）。它倾向 (a)。
+      - **补丁工具 macOS 改动已提交推送**（用户在本会话："补丁工具 macOS 改动请提交并推送"，2026-11-11）：提交 3d3b4e7（accept.yml、
+        release-features.yml、tests.yml、RELEASE.md、SKILL——SKILL 实际在补丁工具仓库里，MLML 的 .claude/skills/isabelle-patch-feature 是指向它的链接），
+        按路径提交，第二步的改动未混入；已推 origin，已告诉 net printing 提交哈希；tests.yml 运行 42956028751 全绿（accept 只剩三条腿）。其他四个仓库
+        （isabelle-packaging-ci、Isabelle_RPC、Performant_Isabelle_ML、Semantic_Embedding）的 macOS 改动仍未提交，等用户下令。
+      - **macOS 移出发布流程**（2026-11-11）：用户"osx 太慢了，把它统一从 release pipelines 中移除吧"；问清后：只去掉在 Mac 上做检查的任务
+        （装、跑、建 heap），Mac 版的包照常构建、发布；范围是所有仓库（补丁工具、isabelle-packaging-ci、Isabelle_RPC、Performant_Isabelle_ML、
+        Semantic_Embedding、nunchaku）。提交与推送仍等用户下令。已改（未提交）：补丁工具 accept.yml 去掉 osx-arm64/osx-64 两腿、
+        release-features.yml 的 sessions 去掉 osx-64、tests.yml 头注释"五腿"→"三腿"、RELEASE.md 两处、MLML 的 SKILL 3.4 第 4 步一条；
+        isabelle-packaging-ci build.yml 删 install-macos 整个 job 与注释、release.yml smoke 去掉两个 macOS runner、PACKAGING_DESIGN.md §5.5；
+        Isabelle_RPC attached_tests 去掉两个 macOS；Performant_Isabelle_ML verify 去掉两个 macOS；Semantic_Embedding release-conda.yml verify
+        去掉 osx 两腿、wheels.yml 删 intel-mac job（publish 的 needs 随之改）、verify-pypi.yml 删两行 macOS。保留的（构建，不是检查）：
+        Performant 的 native、Semantic_Embedding 的 conda-build 与 wheel、nunchaku 的 release-binary、packaging-ci 的 release-rocksdict，以及
+        这些构建任务里顺带的快速自检步骤。actionlint 全过（packaging-ci publish-conda.yml 的 workflow_sha 告警是 HEAD 上原有的）。
+        packaging-ci 的 scripts/verify_gui_macos.sh 已无人调用：用户"保留"；补丁工具 tests.yml 自己那条 macOS 上的 pytest 腿：用户"留着"。
+        会话 net printing（fast_abbrev_printing）等补丁工具这次改动推上 main 后，从 main 派发 Isabelle2026/fast_abbrev_printing/2 publish=true
+        （其试跑 42944009866 除 osx-64 sessions 外全绿，那条腿被用户取消）；已回复它：提交与推送等用户下令，推上后告诉它提交哈希。
     - **我们自己的包**：全部排成一条链；给我们自己的 feature 定基时只接在链上，不分叉。
     - **评审为什么没查出来**（作者先说成"简报只让评审对照计划"，是没核实的猜测；用户："那你在评审个啥？？？评审就是为了检查计划中的问题啊！！"）。核了简报原文：
       计划评审一至五轮（10-22 至 10-24）审的就是计划本身，第四、五轮还要求冒烟照抄 README 那一行，没人发现它点名了一个渠道上不一定有的包。11-01 `sessions` 的设计评审简报

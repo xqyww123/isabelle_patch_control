@@ -1,6 +1,7 @@
 """The engine (plan decisions 4-6): the one function that starts git outside the developer
 subcommands, the lock on the tree, the work directory, the per-file replay that gives a file its
-level, and the writes into the tree.
+level, and the writes into the tree.  A level is the set of the numbers of the installed features
+whose changes a file carries (stage 2 design, section 4).
 
 git runs only inside a directory this module created (the staging directory or a temporary one),
 never in the tree and never in the caller's current directory.  The tree is changed only by
@@ -157,7 +158,7 @@ def _remove_tree(d: Path, *, best_effort: bool = False):
 @dataclass(frozen=True)
 class PatchFile:
     """One patch file of one feature: it changes exactly one path of the tree."""
-    feature: int                    # the feature's number in the chain, 1-based
+    feature: int                    # the feature's number in the environment's order, 1-based
     path: Path                      # the .patch file
     target: str                     # tree-relative, '/'-separated
     creates: bool
@@ -169,27 +170,45 @@ def tree_path(tree: Path, target: str) -> Path:
     return tree.joinpath(*target.split("/"))
 
 
+Level = frozenset[int]
+
+
+def tops(level, below: dict[int, frozenset[int]]) -> list[int]:
+    """The features of a level that no other feature of it is above, in the environment's order."""
+    return sorted(k for k in level if not any(k in below[j] for j in level))
+
+
+def candidate_levels(features: list[int], below: dict[int, frozenset[int]]) -> tuple[Level, ...]:
+    """Every set of `features` (in the environment's order) that holds, with each of them, those of
+    them below it; each set comes after the sets it is built from."""
+    own = frozenset(features)
+    sets = [frozenset()]
+    for f in features:
+        sets += [s | {f} for s in sets if below[f] & own <= s]
+    return tuple(sets)
+
+
 @dataclass
 class Levels:
-    """What replaying a file's patches says about it (decision 6).
+    """What replaying a file's patches says about it (decision 6; stage 2 design, section 4).
 
-    `tables[L]` exists for every level L the file matches; it maps every candidate level to the
-    file's content at that level (None = the file does not exist), computed while checking L.
-    Exactly one match is the file's level; none or several is CONFLICT."""
+    `tables[S]` exists for every level S the file passes; it maps the levels to the file's content
+    there (None = the file does not exist), computed while checking S.  Exactly one passing level is
+    the file's level; none or several is CONFLICT.  `cannot_combine`: two features, neither below the other,
+    whose changes to the file do not apply in every order with the same result, found while checking
+    a passing level: the command refuses."""
     target: str
-    patches: tuple[PatchFile, ...]            # ascending by feature
-    tables: dict[int, dict[int, bytes | None]] = field(default_factory=dict)
-    failures: dict[int, str] = field(default_factory=dict)   # rejected level -> git's complaint
+    patches: tuple[PatchFile, ...]            # in the environment's order
+    candidates: tuple[Level, ...]
+    tables: dict[Level, dict[Level, bytes | None]] = field(default_factory=dict)
+    failures: dict[Level, str] = field(default_factory=dict)   # rejected level -> git's complaint
+    cannot_combine: tuple[int, int] | None = None
 
     @property
-    def candidates(self) -> tuple[int, ...]:
-        return (0, *(p.feature for p in self.patches))
-
-    @property
-    def level(self) -> int | None:
+    def level(self) -> Level | None:
         return next(iter(self.tables)) if len(self.tables) == 1 else None
 
-    def content_at(self, level: int) -> bytes | None:
+    def content_at(self, level: Level) -> bytes | None:
         assert self.level is not None, "a CONFLICT file has no content table"
         return self.tables[self.level][level]
 
@@ -199,15 +218,15 @@ class Levels:
         does not touch it."""
         return self.patches[0].creates
 
-    def mode_at(self, level: int) -> int | None:
+    def mode_at(self, level: Level) -> int | None:
         """The permission bits a file that does not exist in the tree gets at `level`: from the
         patch that creates it, else from the patch that deletes it (mode changes are never
         released, so every patch that mentions the mode agrees)."""
         for p in reversed(self.patches):
-            if p.feature <= level and p.creates:
+            if p.feature in level and p.creates:
                 return p.mode
         for p in self.patches:
-            if p.feature > level and p.deletes:
+            if p.feature not in level and p.deletes:
                 return p.mode
         return None
 
@@ -239,32 +258,54 @@ class Replayer:
                           f"{len(targets)} ({', '.join(targets) or 'none'})")
         return PatchFile(feature, patch, targets[0], creates, deletes, mode)
 
-    def levels(self, target: str, content: bytes | None, patches: list[PatchFile]) -> Levels:
-        """Decision 6: the file is at level L when reversing the patches <= L (descending) and
-        forward-applying the patches > L (ascending) both succeed, each chain replayed step by
-        step on its own copy starting from the file's current content."""
-        lv = Levels(target, tuple(sorted(patches, key=lambda p: p.feature)))
-        cands = lv.candidates
-        for L in cands:
-            table = {L: content}
-            below = [p for p in lv.patches if p.feature <= L]
-            above = [p for p in lv.patches if p.feature > L]
-            ok, cur = True, content
-            for p in reversed(below):
+    def levels(self, target: str, content: bytes | None, patches: list[PatchFile],
+               below: dict[int, frozenset[int]]) -> Levels:
+        """Decision 6 (stage 2 design, section 4): the file is at level S when reversing the patches
+        of S from the last to the first succeeds step by step, and from the contents this gives every
+        other level T is computed, smallest first, from T without one of its tops by forward-applying
+        that top's patch: a level with one top in one step that must succeed, a level with several
+        tops from each of them, which must all succeed with the same content, else their features
+        cannot be installed together.  Each check runs on its own copy, from the file's current content."""
+        patches = sorted(patches, key=lambda p: p.feature)
+        lv = Levels(target, tuple(patches), candidate_levels([p.feature for p in patches], below))
+        patch = {p.feature: p for p in patches}
+        by_size = sorted(lv.candidates, key=len)
+        for S in lv.candidates:
+            table, apart, ok, cur, left = {S: content}, None, True, content, S
+            for p in reversed([p for p in patches if p.feature in S]):
                 rc, out, cur = self._step(target, cur, p, reverse=True)
                 if rc:
-                    ok, lv.failures[L] = False, out
+                    ok, lv.failures[S] = False, out
                     break
-                table[cands[cands.index(p.feature) - 1]] = cur
-            cur = content
-            for p in above if ok else []:
-                rc, out, cur = self._step(target, cur, p, reverse=False)
-                if rc:
-                    ok, lv.failures[L] = False, out
-                    break
-                table[p.feature] = cur
+                left -= {p.feature}
+                table[left] = cur
+            for T in by_size if ok else []:
+                top = tops(T, below)
+                if not T or (len(top) == 1 and T in table):
+                    continue
+                got = []
+                for u in top:
+                    if T - {u} in table:
+                        rc, out, c = self._step(target, table[T - {u}], patch[u], reverse=False)
+                        got.append((u, rc, out, c))
+                if len(top) == 1:
+                    for _, rc, out, c in got:
+                        if rc:
+                            ok, lv.failures[S] = False, out
+                        table[T] = c
+                    if not ok:
+                        break
+                    continue
+                failed = [u for u, rc, _, _ in got if rc]
+                contents = [c for _, rc, _, c in got if not rc] + ([table[T]] if T in table else [])
+                if failed or len(set(contents)) > 1:          # T has no content
+                    first = failed[0] if failed else top[0]
+                    apart = apart or (first, next(u for u in top if u != first))
+                elif contents:
+                    table[T] = contents[0]
             if ok:
-                lv.tables[L] = table
+                lv.tables[S] = table
+                lv.cannot_combine = lv.cannot_combine or apart
         return lv
 
     def _step(self, target: str, content: bytes | None, patch: PatchFile, reverse: bool):
@@ -288,7 +329,7 @@ class Replayer:
             copy.write_bytes(content)
         return copy
 
-    def install(self, tree: Path, lv: Levels, level: int):
+    def install(self, tree: Path, lv: Levels, level: Level):
         """Move the file to `level` (decision 5): the content computed by the replay, written in
         the work directory with its permission bits set, then one os.replace; or one os.unlink."""
         dest = tree_path(tree, lv.target)

@@ -37,33 +37,44 @@ read from `etc/ISABELLE_IDENTIFIER`, the build from `etc/ISABELLE_ID`; the tool 
 
 ## How the installed features fit together, and the levels
 
-The installed feature directories must fit together in one order: the bottom is the tree's own tag
-`<release>/pristine/<etc/ISABELLE_ID>`; at each step exactly one directory's `base_tag` equals the
-current tag, and its `release_tag` is the next. So every feature package needs its base's package,
-and two feature packages built on the same base do not work together: conda installs both, and the
-tool refuses them. A directory whose
-base is a pristine tag of another release or build means the tree is not the build the packages
-were made for (the `conda install --update-all` command the message gives fixes it); this is
-reported first, whatever else is wrong. Otherwise a directory whose base no installed directory
-releases means that its base is not installed at the version it needs (`… Install matching
-versions of these packages.`, naming the package, its version and the base version it needs); two
-directories made for the same base are refused too (`… cannot be installed together`, naming both;
-AGENTS.md says which one to remove). All three are exit 3. No
-feature directory at all is `No feature packages are installed, so there is nothing to apply.`,
-exit 0, whatever the build.
+Each feature directory's `base_tag` names the tags it is built on, its *bases*, separated by spaces:
+the tree's own pristine tag `<release>/pristine/<etc/ISABELLE_ID>`, or the `release_tag` of other
+feature directories. A feature's bases, their bases and so on are *below* it, and it is *above* them.
+A directory whose base is a pristine tag of another release or build means the tree is not the build
+the packages were made for (the `conda install --update-all` command the message gives fixes it);
+this is reported first, whatever else is wrong. Otherwise a directory with a base that no installed
+directory releases means that base is not installed at the version it needs (`… Install matching
+versions of these packages.`, naming the package, its version and the base version it needs). Both
+are exit 3. No feature directory at all is `No feature packages are installed, so there is nothing to
+apply.`, exit 0, whatever the build. The installed features are numbered 1, 2, … in the order conda
+installs them: by depth (1 for a feature built on Isabelle itself, otherwise one more than its
+deepest base), then by package name; so every feature comes after the features below it.
 
-Every patch file changes exactly one path. A file that features `t1 < … < tm` change is *at level L*
-(L one of `0, t1, …, tm`) when, on a copy of its current content, reversing the patches of the
-features `≤ L` from the top down succeeds step by step, and forward-applying the patches of the
-features `> L` from the bottom up succeeds step by step. Exactly one such L is the file's level; none
-or several is `CONFLICT` (a file that fits two levels is one whose content is the same at two levels,
-which the release checklist in [RELEASE.md](RELEASE.md) rules out for released
-features; a hand edit is the usual cause of fitting none). A file that does not exist is a content
-like any other, so a created file is at its creator's level when present with that content and one
-level lower when absent.
+Every patch file changes exactly one path. For a file, let P be the features whose patches change
+it. A *level* of the file is a set of features of P that holds, with each of its features, every
+feature of P below it; its *tops* are its features that no other feature of it is above; its content
+is the original content with the level's patches applied. The file *is at level S* when, on a copy of
+its current content, reversing the patches of S from the last to the first succeeds step by step, and
+from the contents this gives every other level is computed, smallest first, from the level without
+one of its tops by forward-applying that top's patch: a level with one top in one step that must
+succeed, a level with several tops from each of them. Exactly one such S is the file's level; none or
+several is `CONFLICT` (a file that fits two levels is one whose content is the same at two levels,
+which the release checklist in [RELEASE.md](RELEASE.md) rules out for released features; a hand edit
+is the usual cause of fitting none). For features that form a line, the levels are `0, t1, …, tm` as
+numbers and the check is the same `git apply` calls in the same order. A file that does not exist is
+a content like any other, so a created file is at its creator's level when present with that content
+and one level lower when absent.
 
-A feature's state follows from its files: `applied` when all are at or above its number,
-`not-applied` when all are below, `half-applied` otherwise, `CONFLICT` when any of its files is.
+Two features, neither below the other, that change one file must apply in every order with the same
+result: when one of the several ways of computing a level with several tops fails, or two of them give
+different contents, every command refuses before it writes anything (exit 3, `<package> <version> and
+<package> <version> cannot be installed together: their changes to <file> cannot be applied in every
+order.`, naming the first pair whose changes meet; AGENTS.md says which one to remove). Two features
+that make the same change are refused this way too.
+
+A feature's state follows from its files: `applied` when every file it changes carries it (it is in
+the file's level), `not-applied` when none does, `half-applied` otherwise, `CONFLICT` when any of its
+files is.
 `--feature F` names a feature by its feature name (`<feature>`) or by its package name
 (`<package>`).
 
@@ -72,7 +83,7 @@ A feature's state follows from its files: `applied` when all are at or above its
 ### `status [--feature F]`
 
 Prints the tree it checked and the number of feature packages, then one sentence per feature,
-bottom first, ``Feature `<name>` <phrase>…``, where the phrase gives the state: `is applied`
+in their order, ``Feature `<name>` <phrase>…``, where the phrase gives the state: `is applied`
 (`applied`; it goes on with ``, but `<feature>` below it is not`` when a feature below it is not
 applied), `is not applied yet` (`not-applied`), `is only partly applied` (`half-applied`, with how
 many of its files lack its changes), `cannot be applied` (`CONFLICT`, naming the files). The last
@@ -86,7 +97,7 @@ deleted first, and the reinstall applies the features again), elsewhere by hand 
 repeats `--isabelle-home` and `--features-dir` when they were given, so that it reaches the same
 tree. The texts are in `isabelle_patch_control/texts.py`. With `-v`, the `features.d` root follows
 the first sentence, and after each feature its package name, release tag and files, with their
-level and the feature it stands for (`level 3 (f3)`, `level 0 (original)`), files not in the
+level by its tops (`level 3 (f3)`, `level 3+5 (f3, f5)`, `level 0 (original)`), files not in the
 `isabelle` package marked `(created by a feature)`, and for a CONFLICT file the levels it fits or
 `no level` and git's complaint per rejected level.
 
@@ -96,11 +107,11 @@ is refused (exit 3) before the lock is taken and before anything is printed.
 
 ### `apply [--feature F] [--dry-run]`
 
-Moves every file whose level is below its target up to it. The target is the top feature, or F,
-and always below the lowest feature that owns a CONFLICT file: that feature and the ones above it are
-left alone. A file's own target is the highest level `≤` that target among the levels the file can
-have, so a file no feature in range changes is not touched, and on a fully applied tree nothing
-moves and `--dry-run` prints `Nothing would change.`
+Adds to every file the features asked for (every feature, or F and the features below it) that
+change it, except every feature that owns a CONFLICT file and the features above it, which are left
+alone; a feature unrelated to those is still applied. `apply` only adds, so a file no feature in
+range changes is not touched, and on a fully applied tree nothing moves and `--dry-run` prints
+`Nothing would change.`
 
 Prints, under `-v`, the same first line as `status` and the `features.d` root, then `These files
 changed:` and each move as `  <path>  level a (<feature>) -> level b (<feature>)`; `--dry-run` prints
@@ -118,9 +129,9 @@ nothing; it also runs on a read-only tree.
 
 ### `unapply [--feature F] [--dry-run]`
 
-Moves every file whose level is above its target down to it: to level 0 (the pristine sources),
-or, with F, to just below F, which reverses F and every feature above it. CONFLICT files cannot be
-moved; everything else is. Prints `Isabelle sources under <tree> changed (undone: …)`, listing
+Takes away from every file the features asked for: every feature (back to the pristine sources), or,
+with F, F and every feature above it; a feature neither below nor above F stays applied. CONFLICT files
+cannot be moved; everything else is. Prints `Isabelle sources under <tree> changed (undone: …)`, listing
 the features it fully reversed (not a CONFLICT feature, even when some of its other files moved),
 and, when the whole tree is back at the pristine sources, the line about deleting `heaps/` so that
 the shipped heaps are used again. Last, for every CONFLICT feature from F up, ``Feature `<name>`
@@ -133,7 +144,7 @@ not listed, and does not change the exit code.
 
 The directory interface: `<dir>` is the tree and `<feature dir>` the only feature; no provenance
 file is read, no lock is taken, the copies live in a temporary directory next to `<dir>`. Used by
-the release gates (`make-patches`) on an archive of the base release. Prints the moves under
+the release gates (`make-patches`) on an archive of the base commit. Prints the moves under
 `-v` and the CONFLICT sentence as `apply` does, without the `status` hint, nothing else: success is
 exit 0 and silence (the texts about heaps and the conda environment do not apply to an arbitrary
 directory). Exit 1 on a CONFLICT.
@@ -149,7 +160,8 @@ feature packages always exit 0, so conda never rolls a transaction back because 
 pre-unlink cannot tell which files still carry the feature's changes) it writes nothing and exits
 non-zero, and the hook script's own fallback line speaks instead. post-link applies every installed feature;
 a hook writes only what its run changed, and the complete diagnostic of a CONFLICT is written by the
-hook of the top feature package only (the others write one line); any refusal is reported with the
+hook of the last feature package, in the order of the installed features, among the stopped feature
+and those above it (the others write one line); any refusal is reported with the
 command to run afterwards. pre-unlink reverses the feature and everything above it and never
 applies; when some of the feature's files still carry its changes afterwards (a CONFLICT, the lock
 held by another run, a file that could not be written) it writes which files, why, and what to do,

@@ -130,5 +130,3 @@ def test_refusals(chain3, pkgs):
     t = chain3.tree()
     with pytest.raises(cb.Refused, match="no --feature package holds"):
         check(t, pkgs, ["f9"])
-    with pytest.raises(cb.Refused, match="do not form one chain"):
-        check(t, (pkgs[0], [p for p in pkgs[1] if "f2" not in p.name]))

@@ -18,9 +18,9 @@ The text between the two rules below is the text every feature package's README 
 Isabelle is the conda package `isabelle`, the official release unchanged. A *feature package*
 changes Isabelle's sources inside your environment when it is installed and puts them back when it
 is removed. The tool that does this, `isabelle-patch-control`, comes in with the feature packages as
-their dependency. A feature package is built on Isabelle itself or on one other feature package,
-which conda installs with it, so `status` may list more features than you named. Two feature
-packages built on the same feature package, or both directly on Isabelle, do not work together.
+their dependency. A feature package is built on Isabelle itself or on other feature packages, which
+conda installs with it, so `status` may list more features than you named. Two feature packages,
+neither built on the other, that change the same part of a file do not work together.
 
 Install Isabelle with the feature package `<package>`:
 

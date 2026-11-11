@@ -11,10 +11,12 @@ Every command runs the same sequence; `status` and `--dry-run` stop before the l
 1. **Resolve** the tree and the `features.d` root (`cli.resolve` for the command line,
    `features.locate` for a conda prefix, plan decision 2); read `etc/ISABELLE_IDENTIFIER` and
    `etc/ISABELLE_ID`; refuse a tree with a `.git`.
-2. **Link the chain** (`features.link_chain`, decision 3): every feature directory with a
-   `provenance.txt` (a missing root is an empty chain), linked by exact tags from the tree's
-   pristine tag upwards; `--feature F` is looked up here (`features.feature_number`), so every
-   refusal of a command's start comes before the lock.
+2. **Link the installed features** (`features.link`, decision 3; stage 2 design, section 3): every
+   feature directory with a `provenance.txt` (a missing root is none), each base tag the tree's
+   pristine tag or another directory's release tag, in the environment's order (`features.ordered`:
+   by depth, then by package name, as conda links them); `features.below` gives the features below
+   each one; `--feature F` is looked up here (`features.feature_number`), so every refusal of a
+   command's start comes before the lock.
 3. **Lock** `etc/ISABELLE_ID` (`engine.locked`, decision 5): shared for reads, exclusive for
    writes; 60 s, then `Busy`.
 4. **Work directory**: the staging directory `<realpath(tree)>.staging` for the exclusive run,
@@ -22,13 +24,17 @@ Every command runs the same sequence; `status` and `--dry-run` stop before the l
 5. **Read every patch's target** with `git apply --numstat --summary` (`Replayer.read_target`):
    one path per patch file, and whether it creates or deletes the file and with which mode.
    Refuse symbolic links among the targets.
-6. **Levels** (`Replayer.levels`, decision 6): for each touched file, for each candidate level L,
-   reverse the patches `≤ L` top-down on one copy and forward-apply the patches `> L` bottom-up on
-   another, each step a real `git apply` on the copy. Every successful candidate yields a table
-   *level → content bytes*; exactly one successful candidate is the file's level, otherwise
-   CONFLICT. The table is kept: it is what gets installed.
-7. **Plan the moves** (`model.plan`, decision 7): each file's own target level, the cap below the
-   lowest feature owning a CONFLICT file for `apply`.
+6. **Levels** (`Replayer.levels`, decision 6; stage 2 design, section 4): a level is the set of the
+   features whose changes a file carries (`engine.candidate_levels`). For each touched file, for each
+   candidate level S, reverse the patches of S from the last to the first, then compute every other
+   level from it without one of its tops, each step a real `git apply` on a copy; a level with
+   several tops is computed from each of them, and a failure or two different contents means two
+   features that cannot be installed together, which `api._session` refuses. Every successful
+   candidate yields a table *level → content bytes*; exactly one successful candidate is the file's
+   level, otherwise CONFLICT. The table is kept: it is what gets installed.
+7. **Plan the moves** (`model.plan`, decision 7): `apply` adds the features asked for that change
+   the file, except the owners of CONFLICT files and the features above them; `unapply` takes the
+   features asked for away.
 8. **Install** (`Replayer.install`, decision 5): write the table's bytes for the target level into
    the work directory, set the permission bits (the tree file's own, or the patch header's for a
    file that does not exist), one `os.replace` into the tree; or one `os.unlink` and the removal of
@@ -53,7 +59,7 @@ isabelle_patch_control/
   names.py       feature name <-> conda package name (tools/common.py imports it)
   errors.py      Error, NotFound (2), Refused (3), ChainBroken, Busy, WriteFailed
   engine.py      Git.run, the lock, staging/temp directories, PatchFile, Levels, Replayer
-  features.py    Tree, FeatureDir (provenance), read_feature_dirs, link_chain
+  features.py    Tree, FeatureDir (provenance), read_feature_dirs, link, ordered, below
   model.py       feature states, Move, plan()
   api.py         status, apply, unapply, apply_to, unapply_from; Status, Moves  (never exits)
   texts.py       the plan's texts (§4, decision 9) and every frame a conda hook writes
@@ -88,7 +94,7 @@ tests/           pytest (the tool; also plan_builds, check-roundtrip, the render
 .claude/skills/isabelle-patch-feature/SKILL.md  how to develop, release and upgrade a feature
 ```
 
-`make-patches` runs gate 5 (round trip) through `api.apply_to` / `api.unapply_from` on `git archive <base tag>`,
+`make-patches` runs gate 5 (round trip) through `api.apply_to` / `api.unapply_from` on `git archive <base commit>`,
 writes the package only after every gate passed, and then commits by name, checks the commit to tag,
 tags the feature repository and last the private tree (decision 16 point 8; each step can be
 rerun after a failure, and the toy test makes each write fail by holding git's own lock file for it).
@@ -130,7 +136,8 @@ builds (0 with the old `ISABELLE_ID`, 1 and 2 pristine) whose `isa/bin/isabelle`
 postinstall does), whose two pre-unlinks are the real ones and
 whose post-link only re-runs the direct dependents' post-links (plan §0 items 26, 33, 34); toy features cut from a toy source
 repository and rendered by the real renderer, a chain of three and on Isabelle2025-2 a fourth on the
-lowest (each creates a file, t_two ships a component and has a license); a component package of the
+lowest and a fifth on the second and the fourth (each creates a file, t_two ships a component and has a
+license); a component package of the
 Isabelle_RPC kind; a package that depends on `isabelle`
 only indirectly; a broken tool in a channel of its own; and a channel without the re-release for
 build 2. Every package is noarch, so `tools/accept` runs on the same channel on all five platforms.
@@ -139,7 +146,8 @@ and reads conda's own output; the tree's bytes are checked by `tools/check-bytes
 `s_rule`) wait for the tool's 60-second lock timeout three times each; the eleven scenarios take
 about half an hour, most of it conda's solving.
 
-`tests/conftest.py` builds a toy Isabelle tree and a toy chain of three features the way
+`tests/conftest.py` builds a toy Isabelle tree and toy features (a chain of three, and features on
+several bases, `tests/test_graph.py`) the way
 `make-patches` builds real ones: commits in a toy git repository, `git diff-tree -r -p --no-renames`
 cut into one patch file per path with flat names by the same `common.patch_blocks`, a
 `provenance.txt` per feature; trees are `git archive` extractions (with `tar.umask=022`, so files
@@ -147,7 +155,7 @@ are 0644/0755 like the conda package's). No Isabelle is needed and nothing runs 
 `isabelle build`.
 
 What is covered (plan decision 15, tool layer): the linking rules and every refusal, with
-directory names that sort out of chain order; the derivation of the tree and `features.d`, the
+directory names that sort out of the environment's order; the derivation of the tree and `features.d`, the
 default invocation, relative paths through the API; the four states, holes (any feature below that
 is not applied), stacked features that change the same file (a lower feature's lines inside an upper
 feature's hunk context; an upper feature moving a line a lower one added or renaming its file); the
@@ -165,12 +173,14 @@ environments giving the clean result, git looked up at the prefix first and refu
 lock (read-only tree and parent, busy within a shortened `engine.LOCK_TIMEOUT`, shared, two
 exclusive runs, no run without the exclusive lock touching the staging directory); the retry of
 `os.replace` on a target held open on Windows (with `engine.WINDOWS` patched); the directory
-interface; the hooks against a fake `$PREFIX` (post-link idempotence and single report, the
-CONFLICT diagnostic from the top package only and naming the lowest stopped feature, lock busy, the
+interface; features on several bases (their order, two on one base in either install order, the
+refusal of two features that cannot be installed together, `unapply --feature` and the cap leaving
+an unrelated feature applied, the hooks, the byte check of a level with two tops); the hooks against a fake `$PREFIX` (post-link idempotence and
+single report, the CONFLICT diagnostic from one package only and naming the lowest stopped feature, lock busy, the
 old build, refusals framed with the command to run, a write failure saying what was applied, the
 ASCII `.messages.txt`, pre-unlink's success texts, residue blocks for the three reasons and for
 created files, the
-chain's message when the packages do not link, a non-zero exit with nothing written when the
+message when the packages do not link, a non-zero exit with nothing written when the
 residue cannot be computed); `check-roundtrip` on the toy chain, a CRLF and a Latin-1 file included, and a wrapped tool
 with one fault each for the mode listing, the created-file check and the check after unapply (the
 exit-code checks and the "A equals the pristine tree" guard have no fault test); `plan_builds`.

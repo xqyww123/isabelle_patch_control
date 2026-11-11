@@ -89,7 +89,7 @@ def test_recipe_pins_files_and_readme(tmp_path):
     for line in ('name: "isabelle-light-locale"', 'version: "2025.2.2"', "number: 3", 'string: "Isabelle2025_2_3"', "noarch: generic"):
         assert line in recipe
     deps = run_deps(recipe)
-    assert deps == ["isabelle-patch-control >=1.0,<2", "isabelle ==2025.2 1",            # one pin per direct dependency
+    assert deps == ["isabelle-patch-control >=1.1,<2", "isabelle ==2025.2 1",            # one pin per direct dependency
                     "isabelle-future-assign-interrupt ==2025.2.1"]
     # the recipe's pin is the one plan_builds looks for: a package built from it is what this batch wants
     wanted = Wanted("isabelle-light-locale", "2025.2.2", "Isabelle2025_2", isabelle_pin("Isabelle2025_2", "1"))
@@ -107,6 +107,14 @@ def test_recipe_pins_files_and_readme(tmp_path):
     assert {rel: mode for rel, (_, mode) in files.items()} == {
         rel: 0o755 if rel.endswith(".sh") else 0o644 for rel in files}
     assert "license" not in recipe and "homepage" not in recipe and not (out / "LICENSE").exists()
+
+
+def test_one_pin_per_base(tmp_path):
+    pkg = package(tmp_path / "repo", base_tag=f"{R}/future_assign_interrupt/1 {R}/expose_foreign/2")
+    out = tmp_path / "out"
+    assert render(pkg, out).returncode == 0
+    assert run_deps((out / "recipe.yaml").read_text())[2:] == ["isabelle-future-assign-interrupt ==2025.2.1",
+                                                              "isabelle-expose-foreign ==2025.2.2"]
 
 
 def test_readme_names_the_package_and_keeps_version_for_the_user(tmp_path):
@@ -169,7 +177,7 @@ def test_pristine_base_has_no_base_dependency(tmp_path):
     pkg = package(tmp_path / "repo", feature="expose_foreign", m="1", base_tag=f"{R}/pristine/89701cf1768e")
     out = tmp_path / "out"
     assert render(pkg, out, isabelle_build="h1a2b_4", n=0).returncode == 0
-    assert run_deps((out / "recipe.yaml").read_text()) == ["isabelle-patch-control >=1.0,<2", "isabelle ==2025.2 h1a2b_4"]
+    assert run_deps((out / "recipe.yaml").read_text()) == ["isabelle-patch-control >=1.1,<2", "isabelle ==2025.2 h1a2b_4"]
 
 
 def test_component_payload_and_registration(tmp_path):

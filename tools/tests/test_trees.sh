@@ -146,6 +146,51 @@ cp "$work/gitmodules" .gitmodules
 expect refused "a directory that is not a feature repository's top"  -- nt "$H/worktrees"
 expect refused "--base without --home"                               -- nt --base R/base "$H"
 
+echo "--- a feature on two bases, one of them on the other (stage 2 design, section 7)"
+cd "$work/seed"; git switch -q R/other; git tag -a -m 1 R/other/1; git push -q "$work/hub.git" R/other/1; other1=$(git rev-parse R/other)
+H4=$work/contrib/H4; git init -q -b main "$H4"; echo readme > "$H4/README.md"; git -C "$H4" add -A; git -C "$H4" commit -q -m init
+two=$H4/worktrees/R-two; two_s=$H4/worktrees/R-two-stock
+parents() { git -C "$two" rev-list --parents -n1 "$1" | cut -d' ' -f2- | tr ' ' '\n' | sort | tr '\n' ' '; }
+expect ok      "--home registers R/two on R/base and R/other"        -- nt --home "$H4" --base R/base --base R/other R/two
+check ".gitmodules: base lists both" '[[ $(git -C "$H4" config -f .gitmodules submodule.worktrees/R-two.base) == "R/base R/other" ]]'
+saw "the ready line names both bases" "R/base at ${base3:0:12}, release tag R/base/3; R/other at ${other1:0:12}, release tag R/other/1"
+m0=$(head_of "$two")
+check "the new branch starts at a commit whose parents are the two bases' tips" '[[ $(parents "$m0") == "$(printf "%s\n" "$base3" "$other1" | sort | tr "\n" " ")" ]]'
+check "the stock tree stands at it" '[[ $(head_of "$two_s") == "$m0" ]]'
+git -C "$two" push -q -u origin R/two
+cd "$work/seed"; git switch -q R/base; commit src/base4.ML; git tag -a -m 4 R/base/4; base4=$(git rev-parse R/base)
+git switch -q R/other; git merge -q --no-edit R/base; commit src/other2.ML; git tag -a -m 2 R/other/2; other2=$(git rev-parse R/other)
+git push -q "$work/hub.git" R/base R/base/4 R/other R/other/2
+expect refused "--merge of a branch that is not a base"              -- nt --home "$H4" --merge R/feat R/two
+expect refused "--merge together with --base"                        -- nt --home "$H4" --merge R/other --base R/base R/two
+expect ok      "--merge R/other, which has taken R/base/4"            -- nt --home "$H4" --merge R/other R/two
+saw "R/base: R/base/4, which comes with R/other" "R/base: ${base4:0:12} (comes with the bases named), release tag R/base/4"
+saw "R/other: its tip" "R/other: ${other2:0:12}, release tag R/other/2"
+m1=$(sed -n "s/^the merge of R\/two's bases: //p" "$work/out")
+check "the commit's parents are those two; its tree is R/other's, which R/base is below" '[[ $(parents "$m1") == "$(printf "%s\n" "$base4" "$other2" | sort | tr "\n" " ")" && $(git -C "$two" rev-parse "$m1^{tree}") == $(git -C "$two" rev-parse "$other2^{tree}") ]]'
+check "--merge changed no branch" '[[ $(head_of "$two") == "$m0" ]]'
+git -C "$two" merge -q --no-edit "$m1"
+expect ok      "new-tree after the developer's merge"                -- nt "$H4"
+check "the stock tree moved to the merge commit" '[[ $(head_of "$two_s") == "$m1" ]]'
+expect ok      "--merge R/other again, with nothing new (another date: a new commit would get another hash)" -- env GIT_COMMITTER_DATE=2001-01-01T00:00:00Z isabelle-patch-control new-tree --home "$H4" --merge R/other R/two
+check "it names the same commit" '[[ $(sed -n "s/^the merge of R\/two'"'"'s bases: //p" "$work/out") == "$m1" ]]'
+cd "$work/seed"; git switch -q R/base; commit src/base5.ML; git push -q "$work/hub.git" R/base
+git -C "$two" fetch -q; git -C "$two" merge -q --no-edit origin/R/base
+expect refused "new-tree after a base merged without --merge"        -- nt "$H4"
+saw "says how to merge the bases" "merge the bases with new-tree --merge"
+
+echo "--- three bases, two of them on one lower feature; two bases at one commit"
+cd "$work/seed"; git switch -q -c R/c R/base; commit src/c.ML; git switch -q -c R/d R/pristine; mkdir -p src; commit src/d.ML
+git branch R/s1 "$base1"; git branch R/s2 "$base1"; git push -q "$work/hub.git" R/c R/d R/s1 R/s2
+expect ok      "--home registers R/four on R/other, R/c and R/d (R/other and R/c are both on R/base)" -- nt --home "$H4" --base R/other --base R/c --base R/d R/four
+four=$H4/worktrees/R-four
+check "R/four starts at a commit that merges the three tips, the stock tree there" '[[ $(git -C "$four" rev-list --parents -n1 HEAD | wc -w) == 4 && $(head_of "$H4/worktrees/R-four-stock") == $(head_of "$four") ]]'
+check "its tree holds each base's own file once" '[[ $(git -C "$four" ls-tree -r --name-only HEAD -- src | /usr/bin/grep -c -E "src/(other2|c|d|base5)\.ML$") == 4 ]]'
+expect ok      "--home registers R/same on two bases at one commit" -- nt --home "$H4" --base R/s1 --base R/s2 R/same
+check "R/same and its stock tree at that commit, no merge" '[[ $(head_of "$H4/worktrees/R-same") == "$base1" && $(head_of "$H4/worktrees/R-same-stock") == "$base1" ]]'
+for f in p q; do nt --home "$H4" --base R/c --base R/d R/$f >/dev/null; git -C "$H4/worktrees/R-$f" push -q -u origin R/$f; done
+expect ok      "--home registers R/g on R/p and R/q, both opened on R/c and R/d with nothing of their own" -- nt --home "$H4" --base R/p --base R/q R/g
+
 echo "--- two merge bases"
 cd "$work/seed"; git switch -q -c x R/other; commit src/x.ML; git switch -q R/base; commit src/b4.ML; b4=$(git rev-parse HEAD)
 git merge -q --no-edit x; git push -q "$work/hub.git" R/base; git switch -q R/other; git merge -q --no-edit "$b4"; git push -q "$work/hub.git" R/other

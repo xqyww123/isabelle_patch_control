@@ -15,7 +15,8 @@ Not for hand use:
 
 For the developers of feature packages (`<command> --help` says more):
   new-tree      <feature repo>         put the trees that the feature repository registers in place
-  new-tree      --home <feature repo> --base <R>/<base> <R>/<feature>     register a feature's two trees
+  new-tree      --home <feature repo> --base <R>/<base> [--base ...] <R>/<feature>     register a feature's two trees
+  new-tree      --home <feature repo> --merge <R>/<base> [--merge ...] <R>/<feature>   the commit that merges bases into it
   make-patches  --package <dir> [<R>/]<feature> <m>                       release a feature, in its private tree
   check-signatures  <base rev> <rev> <additions file>                     the signature gate of make-patches, on its own
 
@@ -39,6 +40,7 @@ from pathlib import Path
 
 from . import api, check_signatures, conda_hook, make_patches, model, names, new_tree, texts
 from .dev import listed
+from .engine import tops
 from .errors import Error, Refused, WriteFailed
 from .features import locate
 
@@ -117,39 +119,39 @@ def invocation(args, tree: Path, root: Path) -> str:
 def report_status(st: api.Status, root: Path, verbose: bool, *, conda: bool, tool: str):
     """One sentence per feature (§4).  `conda`: the tree is a conda environment's, so a reinstall of
     isabelle restores its files.  `tool`: what the commands in the last lines start with."""
-    if not st.chain:
+    if not st.installed:
         print(texts.NO_FEATURES)
         return
-    print(texts.checked(st.tree, len(st.chain)))
+    print(texts.checked(st.tree, len(st.installed)))
     if verbose:
         print(texts.read_from(root))
     print()
-    for fd, s in zip(st.chain, st.features):
+    for fd, s in zip(st.installed, st.features):
         print(feature_sentence(st, s))
         if verbose:
             print(f"    package {names.package_name(fd.name)}, release {fd.release_tag}; its files:")
             for t in s.files:
                 print(f"      {t}  {describe_level(st, st.levels[t])}" + (f"  {texts.CREATED}" if st.levels[t].created else ""))
-                complaints(st.levels[t], "        ", first_only=True)
+                complaints(st, st.levels[t], "        ", first_only=True)
     print()
-    asked = st.features[:st.selected]                        # --feature F: F and the features below it
-    unrecognised = {t for s in asked if s.state == model.CONFLICT for t in s.conflicts}
+    selected = st.installed[st.selected - 1].name if st.selected else None
+    unrecognised = {t for s in st.asked() if s.state == model.CONFLICT for t in s.conflicts}
     if unrecognised:
         print(texts.conflict_fix(st.tree, [(t, st.levels[t].created) for t in sorted(unrecognised)], conda=conda, tool=tool))
     elif st.exit_code == 0:
-        print(texts.in_order(st.chain[st.selected - 1].name if st.selected else None))
+        print(texts.in_order(selected))
     else:
-        print(texts.missing(st.chain[st.selected - 1].name if st.selected else None, tool))
+        print(texts.missing(selected, tool))
 
 
 def feature_sentence(st: api.Status, s: model.FeatureState) -> str:
-    name = st.chain[s.number - 1].name
+    name = st.installed[s.number - 1].name
     if s.state == model.APPLIED:
-        return texts.applied(name, [st.chain[k - 1].name for k in s.not_below])
+        return texts.applied(name, [st.installed[k - 1].name for k in s.not_below])
     if s.state == model.NOT_APPLIED:
         return texts.not_applied(name)
     if s.state == model.HALF:
-        return texts.half_applied(name, s.below, len(s.files))
+        return texts.half_applied(name, s.lacking, len(s.files))
     return texts.conflict(name, s.conflicts)
 
 
@@ -164,25 +166,31 @@ def read_status(out: str) -> list[tuple[str, str]]:
             for state, phrase in PHRASES.items() if rest.startswith(phrase)]
 
 
-def level_name(st: api.Status, level: int) -> str:
-    """`level 3 (f3)`: the number with the feature it stands for."""
-    return f"level {level} ({st.chain[level - 1].name if level else 'original'})"
+def level_label(st: api.Status, level) -> str:
+    """`3`, `3+5`; `0` for the original sources."""
+    return "+".join(map(str, tops(level, st.below))) or "0"
+
+
+def level_name(st: api.Status, level) -> str:
+    """`level 3 (f3)`, `level 3+5 (f3, f5)`: a level by its tops; `level 0 (original)`."""
+    names = ", ".join(st.installed[k - 1].name for k in tops(level, st.below)) or "original"
+    return f"level {level_label(st, level)} ({names})"
 
 
 def describe_level(st: api.Status, lv) -> str:
     if lv.level is not None:
         return level_name(st, lv.level)
-    return f"levels {', '.join(map(str, lv.tables))}" if lv.tables else "no level"
+    return f"levels {', '.join(level_label(st, s) for s in lv.tables)}" if lv.tables else "no level"
 
 
-def complaints(lv, indent: str, *, first_only: bool):
+def complaints(st: api.Status, lv, indent: str, *, first_only: bool):
     """git's complaint per rejected level of a CONFLICT file, without its warnings (the copy git
     works on has no permission bits, so a mode warning would come first)."""
     if lv.level is None:
         for level, complaint in sorted(lv.failures.items()):
             lines = [line for line in complaint.splitlines() if not line.startswith("warning: ")] or ["does not apply"]
             for line in (lines[:1] if first_only else lines):
-                print(f"{indent}level {level}: {line}")
+                print(f"{indent}level {level_label(st, level)}: {line}")
 
 
 def report_moves(res: api.Moves, root: Path | None, *, verbose: bool, quiet: bool, tool: str = texts.TOOL):
@@ -191,7 +199,7 @@ def report_moves(res: api.Moves, root: Path | None, *, verbose: bool, quiet: boo
     st = res.before
     tree = st.tree
     if verbose and root is not None:
-        print(texts.checked(tree, len(st.chain)))
+        print(texts.checked(tree, len(st.installed)))
         print(texts.read_from(root))
     if quiet:
         return
@@ -203,25 +211,24 @@ def report_moves(res: api.Moves, root: Path | None, *, verbose: bool, quiet: boo
         for m in res.moves:
             print(f"  {m.levels.target}  {level_name(st, m.source)} -> {level_name(st, m.target)}")
     # the features the command was asked about; their CONFLICT files are exactly res.conflicts
-    asked = st.features[:st.selected] if res.up else st.features[(st.selected or 1) - 1:]
-    stuck = [s for s in asked if s.state == model.CONFLICT]
+    stuck = [s for s in st.asked(res.up) if s.state == model.CONFLICT]
     if res.moves and not res.dry_run and root is not None:
         if res.applied:                                      # never a CONFLICT feature: apply stops below it
             print(texts.changed(tree, applied=res.applied))
             if res.src_changed:
                 print(texts.HEAP_PARAGRAPH)
-        if undone := [n for n in res.reversed if n not in {st.chain[s.number - 1].name for s in stuck}]:
+        if undone := [n for n in res.reversed if n not in {st.installed[s.number - 1].name for s in stuck}]:
             print(texts.changed(tree, undone=undone))
             if res.at_bottom:
                 print(texts.BACK_AT_BOTTOM)
     phrase = texts.IS_CONFLICT if res.up else texts.CANNOT_UNDO
     for s in stuck:                                          # last: what the user acts on
-        name = st.chain[s.number - 1].name
+        name = st.installed[s.number - 1].name
         print(texts.conflict(name, s.conflicts, phrase) if root is None else texts.conflict_line(name, s.conflicts, phrase, tool))
         if verbose:
             for t in s.conflicts:
                 print(f"    {t}  {describe_level(st, st.levels[t])}")
-                complaints(st.levels[t], "      ", first_only=False)
+                complaints(st, st.levels[t], "      ", first_only=False)
 
 
 def parser() -> argparse.ArgumentParser:
@@ -261,8 +268,9 @@ def developer(subs):
         s.set_defaults(usage=s)
         return s
     s = add("new-tree")
-    s.add_argument("--home", metavar="<feature repo>", help="register <R>/<feature> in this feature repository")
-    s.add_argument("--base", metavar="<R>/<base>", help="the base of the feature --home registers")
+    s.add_argument("--home", metavar="<feature repo>", help="the feature repository of <R>/<feature>")
+    s.add_argument("--base", metavar="<R>/<base>", action="append", help="a base of the feature --home registers (repeatable)")
+    s.add_argument("--merge", metavar="<R>/<base>", action="append", help="a base to take at its branch tip (repeatable)")
     s.add_argument("target", metavar="<feature repo> | <R>/<feature>")
     s = add("make-patches")
     s.add_argument("-C", metavar="dir", default=".", help="the private tree")
@@ -278,9 +286,11 @@ def developer(subs):
 
 def developer_run(args) -> int:
     if args.command == "new-tree":
-        if (args.home is None) != (args.base is None):
-            args.usage.error("--home and --base go together")
-        if args.home:
+        if (args.home is None) != (args.base is None and args.merge is None) or (args.base and args.merge):
+            args.usage.error("--home goes with either --base or --merge")
+        if args.merge:
+            new_tree.merge(new_tree.feature_home(Path(args.home)), args.target, args.merge)
+        elif args.home:
             new_tree.register(new_tree.feature_home(Path(args.home)), args.target, args.base)
         else:
             new_tree.set_up_all(new_tree.feature_home(Path(args.target)))

@@ -44,14 +44,6 @@ def test_wrong_version_installed_is_named(fresh):
     assert "isabelle-f3 2025.2.1 needs isabelle-f2 2025.2.1, but isabelle-f2 2025.2.2 is installed. Install matching versions" in r.err
 
 
-def test_fork_is_refused(fresh):
-    toy, t = fresh
-    shutil.copytree(toy.features_d / "f2", toy.features_d / "f2b")
-    r = tool(t, toy.features_d, "status")
-    assert r.code == 3
-    assert "features.d/f2 and features.d/f2b" in r.err and f"{RELEASE}/f1/1" in r.err
-
-
 def test_tree_of_another_release_is_refused(fresh):
     """The release line is compared too, not only the build: both come from the bottom directory's
     base_tag."""
@@ -240,7 +232,7 @@ def test_python_api_takes_relative_paths_and_a_missing_root(fresh, monkeypatch, 
     feature package, and a relative directory is read from where the caller is, not from the work
     directory git runs in."""
     toy, t = fresh
-    assert api.status(t, tmp_path / "no-such-features.d").chain == []
+    assert api.status(t, tmp_path / "no-such-features.d").installed == []
     (toy.features_d / "f2" / "provenance.txt").chmod(0)                  # an unreadable file is exit 1, never a traceback
     try:
         with pytest.raises(api.WriteFailed):

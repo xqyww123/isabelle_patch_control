@@ -2,13 +2,13 @@
 # toy-channel.sh <dir> [<release line>]: the toy channels of the hook-layer test and of the GitHub
 # test workflow (patch tool plan decision 15), built under <dir>.  For Isabelle2025-2 (the default):
 #   channel/            the tool; isabelle builds 0 (another ISABELLE_ID), 1 and 2; the features t_one,
-#                       t_two on t_one, t_three on t_two and t_four on t_one, for builds 1 and 2, through
-#                       the real renderer (t_two with a license); toy-component; toy-indirect and toy-slow
-#                       (the hook-layer test's)
+#                       t_two on t_one, t_three on t_two, t_four on t_one and t_five on t_two and t_four,
+#                       for builds 1 and 2, through the real renderer (t_two with a license); toy-component;
+#                       toy-indirect and toy-slow (the hook-layer test's)
 #   channel-broken/     a tool that raises on import
 #   channel-norelease/  isabelle build 2 with the features of build 1 only
 #   summary.json        the environments of the build-2 batch of every feature, as the release's build job
-#                       lists them (release-plan, check-packages): t_three's and t_four's
+#                       lists them (release-plan, check-packages): t_three's and t_five's
 # For Isabelle2026, a new release line whose first pristine build is build 0: channel/ holds the
 # tool, isabelle 2026 build 0 (pristine), t_one, t_two and t_three for it and toy-component;
 # summary.json is of the build-0 batch.  The GitHub test workflow serves both lines' channel/ as one
@@ -23,7 +23,7 @@ export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_AUTHOR_NAME=t GIT_A
   GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
 CH="$W/channel"; BAD="$W/channel-broken"; NORE="$W/channel-norelease"; R=${2:-Isabelle2025-2}
 case $R in       # the isabelle version, its pristine builds (each with the features), the features, toy-component's isabelle range and build number
-  Isabelle2025-2) V=2025.2 BUILDS="1 2" FEATS="t_one t_two t_three t_four" RANGE=">=2025.2,<2025.3" COMPONENT_BUILD=0 ;;
+  Isabelle2025-2) V=2025.2 BUILDS="1 2" FEATS="t_one t_two t_three t_four t_five" RANGE=">=2025.2,<2025.3" COMPONENT_BUILD=0 ;;
   Isabelle2026)   V=2026   BUILDS=0     FEATS="t_one t_two t_three"        RANGE=">=2026,<2026.1"   COMPONENT_BUILD=1 ;;
   *) echo "toy-channel.sh: no toy release line $R (Isabelle2025-2, Isabelle2026)" >&2; exit 2 ;;
 esac
@@ -44,7 +44,7 @@ TREE = {
     "etc/ISABELLE_IDENTIFIER": R,
     "etc/options": "option ML_system_64 : bool = true\n",
     "src/Pure/a.ML": "".join(f"a{i}\n" for i in range(1, 9)),
-    "src/Pure/b.ML": "".join(f"b{i}\n" for i in range(1, 9)),
+    "src/Pure/b.ML": "".join(f"b{i}\n" for i in range(1, 21)),
     "src/Pure/c.ML": "".join(f"c{i}\n" for i in range(1, 9)),
 }
 
@@ -66,20 +66,27 @@ git(src, "add", "-A"); git(src, "commit", "-qm", "pristine"); git(src, "tag", f"
 def edit(rel, old, new):
     p = src / rel; s = p.read_text(); assert old in s, (rel, old); p.write_text(s.replace(old, new, 1))
 
-# name, base, changes; t_two's a.ML hunk has t_one's line as context (stacked), t_two ships a component
+# name, bases, changes; t_two's a.ML hunk has t_one's line as context (stacked), t_two ships a component
 # and has a license.  Every feature creates a file: the hook-layer test's interrupted install abandons
-# t_two.  t_four, on t_one beside t_two, changes a file t_one does not touch and creates one.
+# t_two.  t_four, on t_one beside t_two, changes b.ML far from t_two's change and creates a file; t_five,
+# on t_two and t_four (their release commits merged first, as new-tree --merge and the developer do),
+# changes b.ML between them, so its patch records b.ML with both of them applied.
 FEATURES = [
-    ("t_one", "pristine", lambda: (edit("src/Pure/a.ML", "a3\n", "a3\nT1\n"), write(src, "src/Pure/t_one.ML", "t_one\n"))),
-    ("t_two", "t_one", lambda: (edit("src/Pure/a.ML", "T1\na4\n", "T1\nT2\na4\n"), edit("src/Pure/b.ML", "b5\n", "B5\n"),
+    ("t_one", (), lambda: (edit("src/Pure/a.ML", "a3\n", "a3\nT1\n"), write(src, "src/Pure/t_one.ML", "t_one\n"))),
+    ("t_two", ("t_one",), lambda: (edit("src/Pure/a.ML", "T1\na4\n", "T1\nT2\na4\n"), edit("src/Pure/b.ML", "b5\n", "B5\n"),
                                 write(src, "src/Pure/t_two.ML", "t_two\n"))),
-    ("t_three", "t_two", lambda: (edit("src/Pure/c.ML", "c2\n", "C2\n"), write(src, "src/Tools/t_three.ML", "t_three\n"))),
+    ("t_three", ("t_two",), lambda: (edit("src/Pure/c.ML", "c2\n", "C2\n"), write(src, "src/Tools/t_three.ML", "t_three\n"))),
 ]
 if R == "Isabelle2025-2":
-    FEATURES.append(("t_four", "t_one", lambda: (edit("src/Pure/b.ML", "b2\n", "B2\n"), write(src, "src/Tools/t_four.ML", "t_four\n"))))
-for name, below, change in FEATURES:
-    base = f"{R}/pristine/{PRISTINE}" if below == "pristine" else f"{R}/{below}/1"
-    git(src, "checkout", "-q", "--detach", base)
+    FEATURES.append(("t_four", ("t_one",), lambda: (edit("src/Pure/b.ML", "b16\n", "B16\n"), write(src, "src/Tools/t_four.ML", "t_four\n"))))
+    FEATURES.append(("t_five", ("t_two", "t_four"), lambda: (edit("src/Pure/b.ML", "b10\n", "B10\n"),
+                                                           write(src, "src/Tools/t_five.ML", "t_five\n"))))
+for name, bases, change in FEATURES:
+    base_tags = [f"{R}/{b}/1" for b in bases] or [f"{R}/pristine/{PRISTINE}"]
+    git(src, "checkout", "-q", "--detach", base_tags[0])
+    if base_tags[1:]:
+        git(src, "merge", "-q", "--no-edit", *base_tags[1:])
+    base = git(src, "rev-parse", "HEAD")
     change()
     git(src, "add", "-A"); git(src, "commit", "-qm", name)
     tag = f"{R}/{name}/1"; git(src, "tag", tag)
@@ -89,8 +96,8 @@ for name, below, change in FEATURES:
     for file, block in patch_blocks(diff).items():
         (d / file).write_bytes(block)
     (d / "provenance.txt").write_text("\n".join([
-        f"feature: {R}/{name}", f"release_tag: {tag}", f"commit: {git(src, 'rev-parse', tag)}", f"base_tag: {base}",
-        f"base_commit: {git(src, 'rev-parse', base)}", f"build_string_prefix: {PREFIX}"]) + "\n")
+        f"feature: {R}/{name}", f"release_tag: {tag}", f"commit: {git(src, 'rev-parse', tag)}", f"base_tag: {' '.join(base_tags)}",
+        f"base_commit: {base}", f"build_string_prefix: {PREFIX}"]) + "\n")
     write(pkg, "README.md", f"# {name}\n\nA toy feature of the hook-layer tests.\n")
     if name == "t_two":
         write(pkg, "tools/component_files.txt", "ROOT\nT_Two.thy\n")

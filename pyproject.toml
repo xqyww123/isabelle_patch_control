@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "isabelle-patch-control"
-version = "1.0.1"
+version = "1.1.0"
 description = "Applies the Isabelle feature packages of a conda environment to its Isabelle, reverses them, and reports their state"
 readme = "README.md"
 requires-python = ">=3.12"

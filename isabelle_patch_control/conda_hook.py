@@ -4,8 +4,9 @@ with the isabelle-patch-control prefix on its first line, and exit 0 whenever th
 message.  When they cannot finish (a crash, or pre-unlink cannot tell which files still carry the
 feature's changes) they write nothing and exit non-zero, and the hook text's `||` line speaks.
 
-post-link applies the whole chain and reports what it changed; the complete diagnostic of a
-CONFLICT is written only by the chain top's hook (PKG_NAME), the others write one line.
+post-link applies every installed feature and reports what it changed; the complete diagnostic of a
+CONFLICT is written only by the hook (PKG_NAME) of the last feature, in the environment's order, among
+the stopped feature and those above it; the others write one line.
 pre-unlink reverses the feature and everything above it, never applies, and when files of the
 feature still carry its changes writes the residue block with the reason and the recovery steps.
 """
@@ -43,7 +44,7 @@ def post_link(prefix: Path, pkg_name: str | None) -> list[str]:
             st = api.status(tree, root, lock=False)
         except api.Error:                                     # the same failure again: say what failed, not what is applied
             return [texts.post_link_write_failed(str(e))]
-        applied = [fd.name for fd, s in zip(st.chain, st.features) if s.state == model.APPLIED and not s.hole]
+        applied = [fd.name for fd, s in zip(st.installed, st.features) if s.state == model.APPLIED and not s.hole]
         return [texts.post_link_write_failed(str(e), applied)]
     except api.Error as e:
         return [texts.post_link_failed(str(e))]
@@ -52,8 +53,8 @@ def post_link(prefix: Path, pkg_name: str | None) -> list[str]:
         out.append(texts.changed(tree, applied=res.applied) + (f"\n{texts.HEAP_PARAGRAPH}" if res.src_changed else ""))
     if res.conflicts:
         s = next(s for s in res.before.features if s.state == model.CONFLICT)   # the lowest feature stopped by a CONFLICT
-        feature = res.before.chain[s.number - 1].name
-        if _is_top(pkg_name, res.before.chain):
+        feature = res.before.installed[s.number - 1].name
+        if _writes_diagnostic(pkg_name, res.before, s.number):
             files = [(t, res.before.levels[t].created) for t in s.conflicts]
             out.append(texts.conflict_full(feature, files, tree))
         else:
@@ -61,11 +62,12 @@ def post_link(prefix: Path, pkg_name: str | None) -> list[str]:
     return out
 
 
-def _is_top(pkg_name: str | None, chain) -> bool:
-    """The hook of the chain top writes the complete diagnostic; an unset or unknown PKG_NAME counts
-    as the top."""
+def _writes_diagnostic(pkg_name: str | None, st: api.Status, k: int) -> bool:
+    """The hook of the last feature, in the environment's order, among CONFLICT feature k and the
+    features above it writes the complete diagnostic; an unset or unknown PKG_NAME counts as it."""
     feature = names.feature_name(pkg_name) if pkg_name else None
-    return feature not in {fd.name for fd in chain} or feature == chain[-1].name
+    last = max({k} | st.above(k))
+    return feature not in {fd.name for fd in st.installed} or feature == st.installed[last - 1].name
 
 
 def pre_unlink(prefix: Path, feature: str) -> str:
@@ -74,8 +76,13 @@ def pre_unlink(prefix: Path, feature: str) -> str:
     try:
         res = api.unapply(tree, root, feature=feature)
     except api.Busy:
-        st = api.status(tree, root, feature=feature, lock=False)
-        return _residue(tree, st, texts.REASON_LOCK, lock_package=(st.chain[-1].package, st.chain[-1].version))
+        try:
+            st = api.status(tree, root, feature=feature, lock=False)
+        except api.ChainBroken as e:                          # two features that cannot be installed together: found by the replay
+            return texts.chain_broken_removal(feature, package, str(e), tree)
+        k = st.selected
+        tops = [st.installed[j - 1] for j in sorted({k} | st.above(k)) if not st.above(j)]
+        return _residue(tree, st, texts.REASON_LOCK, lock_packages=[(fd.package, fd.version) for fd in tops])
     except api.WriteFailed:
         st = api.status(tree, root, feature=feature, lock=False)
         return _residue(tree, st, texts.REASON_WRITE)
@@ -91,13 +98,13 @@ def pre_unlink(prefix: Path, feature: str) -> str:
     return ""
 
 
-def _residue(tree: Path, st: api.Status, reason: str, *, level: Callable[[str], int | None] | None = None,
-             lock_package: tuple[str, str] | None = None) -> str:
+def _residue(tree: Path, st: api.Status, reason: str, *, level: Callable[[str], frozenset[int] | None] | None = None,
+             lock_packages: list[tuple[str, str]] | None = None) -> str:
     """The residue block for the selected feature, or "" when none of its files still carries its
     changes.  `level` reads a file's level (the one after the run, or the status's own)."""
     k = st.selected
     level = level or (lambda t: st.levels[t].level)
-    left = [(t, st.levels[t].created) for t in st.features[k - 1].files if (lv := level(t)) is None or lv >= k]
+    left = [(t, st.levels[t].created) for t in st.features[k - 1].files if (lv := level(t)) is None or k in lv]
     if not left:
         return ""
-    return texts.residue(st.chain[k - 1].name, reason, left, tree, lock_package=lock_package)
+    return texts.residue(st.installed[k - 1].name, reason, left, tree, lock_packages=lock_packages)

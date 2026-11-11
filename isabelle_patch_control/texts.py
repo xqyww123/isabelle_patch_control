@@ -95,8 +95,8 @@ def not_applied(name: str) -> str:
     return sentence(name, IS_NOT_APPLIED)
 
 
-def half_applied(name: str, below: int, files: int) -> str:
-    return sentence(name, IS_HALF, f": {below} of its {files} files {'does' if below == 1 else 'do'} not have the feature's changes yet")
+def half_applied(name: str, lacking: int, files: int) -> str:
+    return sentence(name, IS_HALF, f": {lacking} of its {files} files {'does' if lacking == 1 else 'do'} not have the feature's changes yet")
 
 
 def conflict(name: str, files, phrase: str = IS_CONFLICT) -> str:
@@ -169,12 +169,18 @@ def undone(feature: str, tree: Path, features) -> str:
             f"{UPDATE_LINE}")
 
 
-# --- chain problems (§4)
+# --- the installed packages do not fit together (§4)
 
 def chain_broken(package: str, version: str, needs_package: str, needs_version: str, installed: str | None) -> str:
     """`installed`: the versions of `needs_package` that are installed, or None."""
     have = f"but {installed} is installed" if installed else "which is not installed"
     return f"{package} {version} needs {needs_package} {needs_version}, {have}. Install matching versions of these packages."
+
+
+def cannot_combine(a: str, b: str, path: str) -> str:
+    """Two features, neither below the other, whose changes to one file do not apply in every order
+    with the same result (stage 2 design, section 4); `a`, `b`: `<package> <version>`."""
+    return f"{a} and {b} cannot be installed together: their changes to {path} cannot be applied in every order."
 
 
 def not_pristine(tree: Path, tree_id: str, directory: str, release: str, pristine_id: str) -> str:
@@ -199,7 +205,7 @@ def chain_broken_removal(feature: str, package: str, error: str, tree: Path) -> 
 
 def post_link_failed(detail: str) -> str:
     """Most of these refusals are fixed by a conda command that applies the features by itself
-    (another build, a broken chain, a symbolic link), so the frame sends the user to `status`."""
+    (another build, packages that do not fit together, a symbolic link), so the frame sends the user to `status`."""
     return (f"the installed Isabelle feature packages were not applied: {detail}\n"
             f"When this is fixed, run: {TOOL} status")
 
@@ -236,7 +242,7 @@ def stopped(feature: str) -> str:
 
 
 def conflict_full(feature: str, files, tree: Path) -> str:
-    """The complete diagnostic, written by the chain top's post-link.  `files` are (path, created) pairs."""
+    """The complete diagnostic, written by one post-link (conda_hook.post_link).  `files` are (path, created) pairs."""
     files = list(files)
     return "\n".join([conflict(feature, [p for p, _ in files]), stopped(feature), conflict_fix(tree, files, conda=True)])
 
@@ -252,20 +258,20 @@ REASON_LOCK = "another isabelle-patch-control was running"
 REASON_WRITE = "a file could not be written"
 
 
-def residue(feature: str, reason: str, files, tree: Path, *, lock_package: tuple[str, str] | None = None) -> str:
+def residue(feature: str, reason: str, files, tree: Path, *, lock_packages: list[tuple[str, str]] | None = None) -> str:
     """`files` are (path, created) pairs of this feature's files that still carry its changes.
-    `lock_package` = (package, version) of the highest feature package replaces the reinstall after a
-    lock timeout."""
+    `lock_packages`, (package, version) pairs, replace the reinstall after a lock timeout: the features
+    among this one and those above it that no installed feature is built on."""
     files = list(files)
     lines = [f"{feature} could not be fully undone (reason: {reason}).",
              f"These files under {tree} still carry its changes:"]
     lines += [f"  {path}" + (f"   {CREATED}" if created else "") for path, created in files]
     removing = f"If you are removing {feature}, clean up now (nothing will remind you later)"
-    if lock_package:
-        package, version = lock_package
+    if lock_packages:
         prefix = quoted(tree.parent)
-        lines += [UPDATE_LINE, f"{removing}, run:", f"  conda install -p {prefix} {CHANNELS} {package}={version}",
-                  f"  conda remove -p {prefix} {package}"]
+        lines += [UPDATE_LINE, f"{removing}, run:",
+                  f"  conda install -p {prefix} {CHANNELS} {' '.join(f'{p}={v}' for p, v in lock_packages)}",
+                  f"  conda remove -p {prefix} {' '.join(p for p, _ in lock_packages)}"]
         return "\n".join(lines)
     steps = ["fix what stopped the write (for example, free disk space)"] if reason == REASON_WRITE else []
     steps += [f"delete every file marked \"{CREATED}\" in these messages"] if any(c for _, c in files) else []

@@ -8,11 +8,16 @@ from isabelle_patch_control import api, cli, texts
 
 def states(toy, t) -> dict[str, str]:
     st = api.status(t, toy.features_d)
-    return {fd.name: s.state for fd, s in zip(st.chain, st.features)}
+    return {fd.name: s.state for fd, s in zip(st.installed, st.features)}
+
+
+def top(level) -> int:
+    """A level of a line of features by its highest feature, as the levels were numbered before stage 2."""
+    return max(level, default=0)
 
 
 def levels(toy, t) -> dict[str, int | None]:
-    return {k: lv.level for k, lv in api.status(t, toy.features_d).levels.items()}
+    return {k: None if lv.level is None else top(lv.level) for k, lv in api.status(t, toy.features_d).levels.items()}
 
 
 # --- the fresh stacked tree (scenario 1) and the fully applied tree
@@ -100,7 +105,7 @@ def test_half_applied(applied):
     (t / "src" / "Pure" / "a.ML").write_bytes(toy.expected("f1")["src/Pure/a.ML"][0])      # a.ML back to level 1
     st = api.status(t, toy.features_d)
     assert states(toy, t) == {"f1": "applied", "f2": "applied", "f3": "half-applied"}
-    assert st.features[2].below == 1
+    assert st.features[2].lacking == 1
     r = tool(t, toy.features_d, "status")
     assert r.code == 1 and ("half-applied", "f3") in cli.read_status(r.out) and "1 of its 2 files does not" in r.out
     assert tool(t, toy.features_d, "apply", "--dry-run").out == "These files would change:\n  src/Pure/a.ML  level 1 (f1) -> level 3 (f3)\n"
@@ -301,7 +306,7 @@ def test_created_then_deleted_file_matches_two_levels(toy):
     toy.feature("g2", lambda: toy.delete("src/Pure/n.ML"))
     t = toy.tree()
     st = api.status(t, toy.features_d)
-    assert sorted(st.levels["src/Pure/n.ML"].tables) == [0, 2]
+    assert sorted(map(top, st.levels["src/Pure/n.ML"].tables)) == [0, 2]
     assert states(toy, t) == {"g1": "CONFLICT", "g2": "CONFLICT"}
     r = tool(t, toy.features_d, "status", "-v")
     assert "src/Pure/n.ML  levels 0, 2" in r.out
@@ -317,7 +322,7 @@ def test_repeated_context_matches_two_levels(toy):
     toy.git("tag", "-f", toy.tags[0])                                     # make it part of pristine
     toy.feature("g1", lambda: toy.edit("src/Pure/r.ML", lambda s: s.replace("x3\nA\n", "x3\nC\n", 1)))
     t = toy.tree("g1")
-    assert sorted(api.status(t, toy.features_d).levels["src/Pure/r.ML"].tables) == [0, 1]
+    assert sorted(map(top, api.status(t, toy.features_d).levels["src/Pure/r.ML"].tables)) == [0, 1]
     assert states(toy, t) == {"g1": "CONFLICT"}
 
 

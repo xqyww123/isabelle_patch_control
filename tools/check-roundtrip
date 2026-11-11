@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """check-roundtrip <pristine tree> <top feature> --features-dir FD [-C <Isabelle repository>] [--fetch <remote>] [--tool <command>] [--keep]
 
-The round-trip check (patch tool plan decision 17): the chain of feature directories in
-FD, applied by the patch tool, gives the same tree as GNU patch applying the Isabelle repository's
+The round-trip check (patch tool plan decision 17): the feature directories in
+FD, applied by the patch tool, give the same tree as GNU patch applying the Isabelle repository's
 diff from the pristine tag to the top feature's release tag; and the tool takes it back.
 
   copy A of the tree:  <tool> --isabelle-home A --features-dir FD apply; then `status -v` must exit
-                       0 and show every file the chain creates under its real path;
+                       0 and show every file they create under its real path;
   copy B of the tree:  patch -p1 -F0 with `git diff-tree -r -p --no-renames <bottom tag> <top tag>`
                        (GNU patch never skips a patch silently);
   A == B, by `diff -r` and by a sorted `find -printf '%M %P'` listing (modes included); A differs
@@ -49,7 +49,7 @@ def same(a: Path, b: Path, what: str):
 def cli():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("tree", type=Path, help="the pristine tree (not modified)")
-    p.add_argument("top", help="the chain's top feature (a directory name under FD)")
+    p.add_argument("top", help="the top feature, which every other is below (a directory name under FD)")
     p.add_argument("--features-dir", required=True, type=Path, metavar="FD")
     p.add_argument("-C", metavar="dir", default=os.getcwd(), help="a directory inside the Isabelle repository")
     p.add_argument("--fetch", metavar="remote", help="fetch the two tags from this remote of the repository first (depth 1)")
@@ -95,7 +95,7 @@ def cli():
         print(f"B: GNU patch applied {bottom} -> {top_tag}")
         same(A, B, "A (the tool) against B (GNU patch)")
         if listing(A) == listing(pristine) and run(["diff", "-r", "--no-dereference", "-q", A, pristine], check=False).returncode == 0:
-            raise Refused("A equals the pristine tree: the chain applied nothing")
+            raise Refused("A equals the pristine tree: the features applied nothing")
         print("A == B, and A differs from the pristine tree")
 
         r = run([*tool, "--isabelle-home", A, "--features-dir", fd, "unapply"], env=env, check=False)

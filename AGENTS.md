@@ -17,14 +17,16 @@ patches itself: each feature package (below, `<package>` stands for the name of 
 and conda runs the tool from the package's install and removal hooks. So in normal use nobody runs
 `apply` or `unapply` by hand: installing, updating or removing packages does it.
 
-Each feature is built on one *base*: Isabelle itself or one other feature. conda installs a feature
-package together with its base's package. Two feature packages built on the same base do not work
-together: conda installs both, but the tool then refuses (exit 3) until one of them is removed. A
-feature's base, its base's base and so on are *below* it; the features built on it, the ones built on
-those, and so on are *above* it.
-The installed features are numbered 1, 2, … from the bottom.
-`status -v` shows each file's *level*: the number of the highest feature whose change the file
-carries (0: the original sources).
+Each feature is built on one or more *bases*: Isabelle itself or other features. conda installs a
+feature package together with its bases' packages. A feature's bases, their bases and so on are
+*below* it; the features built on it, the ones built on those, and so on are *above* it. Two feature
+packages, neither below the other, that change the same part of a file do not work together: conda
+installs both, but the tool then refuses (exit 3) until one of them is removed.
+The installed features are numbered 1, 2, … in the order conda installs them: each after the
+features below it.
+`status -v` shows each file's *level*: the features whose changes the file carries, by the highest
+of them (`level 3 (f3)`; `level 3+5 (f3, f5)` when neither of f3 and f5 is below the other;
+`level 0 (original)`: the original sources).
 
 ## Read the state first
 
@@ -34,7 +36,7 @@ isabelle-patch-control status -v     # ... plus every file each feature changes,
 ```
 
 The first sentence names the Isabelle sources the tool checked. Then one sentence per feature,
-bottom first, ``Feature `<name>` <state>…``; the last lines say what to do.
+in that order, ``Feature `<name>` <state>…``; the last lines say what to do.
 
 | The sentence says | Meaning |
 |---|---|

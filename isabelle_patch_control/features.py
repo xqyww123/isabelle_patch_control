@@ -1,4 +1,4 @@
-"""The tree, the feature directories and the chain (plan decisions 2 and 3)."""
+"""The tree, the feature directories and how they link (plan decisions 2 and 3)."""
 from __future__ import annotations
 
 import re
@@ -54,7 +54,7 @@ class FeatureDir:
     dir: Path
     name: str           # the <name> of release_tag
     release_tag: str    # <R>/<name>/<m>
-    base_tag: str       # the tag of the feature below, or <R>/pristine/<id>
+    base_tags: tuple[str, ...]    # the tags of the features it is built on, or (<R>/pristine/<id>,)
 
     @classmethod
     def read(cls, d: Path) -> FeatureDir | None:
@@ -66,7 +66,7 @@ class FeatureDir:
             release_tag, base_tag = fields["release_tag"], fields["base_tag"]
         except KeyError as e:
             raise Refused(f"{provenance} lacks the field {e.args[0]}")
-        return cls(d, release_tag.split("/")[1], release_tag, base_tag)
+        return cls(d, release_tag.split("/")[1], release_tag, tuple(base_tag.split()))
 
     @property
     def version(self) -> str:
@@ -92,43 +92,57 @@ def read_feature_dirs(root: Path) -> list[FeatureDir]:
     return [fd for d in sorted(root.iterdir()) if d.is_dir() and (fd := FeatureDir.read(d))]
 
 
-def link_chain(tree: Tree, dirs: list[FeatureDir]) -> list[FeatureDir]:
-    """Decision 3: from the tree's pristine tag, exactly one directory's base_tag equals the
-    current tag at each step and its release_tag becomes the next; every directory must be used.
-    A directory made for another pristine build is refused first; otherwise the refusal names a
-    leftover directory whose base_tag no directory releases."""
+def link(tree: Tree, dirs: list[FeatureDir]) -> list[FeatureDir]:
+    """Decision 3: every base tag of every directory is the tree's pristine tag or the release_tag of
+    a directory; the directories in the environment's order (`ordered`).  A directory made for
+    another pristine build is refused first; otherwise the refusal names, by directory, the first
+    base no directory releases."""
     for fd in dirs:
-        m = re.fullmatch(r"([^/]+)/pristine/(.+)", fd.base_tag)
-        if m and (m[1], m[2]) != (tree.release, tree.id):
-            raise ChainBroken(texts.not_pristine(tree.path, tree.id, fd.dir.name, m[1], m[2]))
-    by_base: dict[str, list[FeatureDir]] = {}
-    for fd in dirs:
-        by_base.setdefault(fd.base_tag, []).append(fd)
-    chain, tag = [], tree.pristine_tag
-    while tag in by_base:
-        nexts = by_base.pop(tag)
-        if len(nexts) > 1:
-            raise ChainBroken(f"features.d/{nexts[0].dir.name} and features.d/{nexts[1].dir.name} are both made "
-                              f"for {tag}: {' and '.join(fd.package + ' ' + fd.version for fd in nexts)} cannot be "
-                              "installed together")
-        chain.append(nexts[0])
-        tag = nexts[0].release_tag
-    if left := [fd for fds in by_base.values() for fd in fds]:
-        released = {fd.release_tag for fd in dirs}
-        fd = min(left, key=lambda d: d.base_tag in released)        # one whose base no directory releases
-        needs_name = fd.base_tag.split("/")[1]       # a release tag: a pristine base was refused or used above
-        installed = [d for d in dirs if d.name == needs_name]
-        raise ChainBroken(texts.chain_broken(
-            fd.package, fd.version, names.package_name(needs_name), package_version(fd.base_tag),
-            " and ".join(d.package + " " + d.version for d in installed) or None))
-    return chain
+        for base in fd.base_tags:
+            m = re.fullmatch(r"([^/]+)/pristine/(.+)", base)
+            if m and (m[1], m[2]) != (tree.release, tree.id):
+                raise ChainBroken(texts.not_pristine(tree.path, tree.id, fd.dir.name, m[1], m[2]))
+    released = {fd.release_tag for fd in dirs}
+    for fd in sorted(dirs, key=lambda d: d.dir.name):
+        for base in fd.base_tags:
+            if base != tree.pristine_tag and base not in released:
+                needs_name = base.split("/")[1]
+                installed = [d for d in dirs if d.name == needs_name]
+                raise ChainBroken(texts.chain_broken(
+                    fd.package, fd.version, names.package_name(needs_name), package_version(base),
+                    " and ".join(d.package + " " + d.version for d in installed) or None))
+    return ordered(dirs)
 
 
-def feature_number(chain: list[FeatureDir], feature: str) -> int:
+def ordered(dirs: list[FeatureDir]) -> list[FeatureDir]:
+    """The environment's order: by depth (1 on Isabelle itself, else one more than the deepest base),
+    then by package name; the order in which conda links feature packages."""
+    by_tag = {fd.release_tag: fd for fd in dirs}
+    depth: dict[str, int] = {}
+
+    def depth_of(fd: FeatureDir) -> int:
+        if fd.release_tag not in depth:
+            depth[fd.release_tag] = 1 + max((depth_of(by_tag[b]) for b in fd.base_tags if b in by_tag), default=0)
+        return depth[fd.release_tag]
+
+    return sorted(dirs, key=lambda fd: (depth_of(fd), fd.package))
+
+
+def below(features: list[FeatureDir]) -> dict[int, frozenset[int]]:
+    """For each feature number (1-based, in the environment's order), the numbers of the features
+    below it: its bases, their bases, and so on."""
+    number = {fd.release_tag: k for k, fd in enumerate(features, 1)}
+    out: dict[int, frozenset[int]] = {}
+    for k, fd in enumerate(features, 1):
+        out[k] = frozenset().union(*({number[b]} | out[number[b]] for b in fd.base_tags if b in number))
+    return out
+
+
+def feature_number(installed: list[FeatureDir], feature: str) -> int:
     """The 1-based position of a feature, named by its feature name or its package name."""
     wanted = {feature, names.feature_name(feature)}
-    for k, fd in enumerate(chain, 1):
+    for k, fd in enumerate(installed, 1):
         if fd.name in wanted:
             return k
     raise Refused(f"no feature package named {feature!r} is installed "
-                  f"(installed: {', '.join(fd.name for fd in chain) or 'none'})")
+                  f"(installed: {', '.join(fd.name for fd in installed) or 'none'})")

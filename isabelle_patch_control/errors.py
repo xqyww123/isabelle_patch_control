@@ -11,13 +11,14 @@ class NotFound(Error):
 
 
 class Refused(Error):
-    """A precondition does not hold: the chain does not link, the tree has a .git, a patch target is
-    a symlink, a patch file cannot be read, a name is unknown ..."""
+    """A precondition does not hold: the installed features do not fit together, the tree has a .git,
+    a patch target is a symlink, a patch file cannot be read, a name is unknown ..."""
     exit_code = 3
 
 
 class ChainBroken(Refused):
-    """The feature directories do not link into one chain on this tree (decision 3)."""
+    """The feature directories do not fit together on this tree: a base not installed, another build
+    (decision 3), or two features that cannot be installed together (stage 2 design, section 4)."""
 
 
 class Busy(Error):

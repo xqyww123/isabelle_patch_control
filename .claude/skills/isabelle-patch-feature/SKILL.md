@@ -1,6 +1,6 @@
 ---
 name: isabelle-patch-feature
-description: How to work on a patch-based Isabelle feature, one that changes Isabelle's own sources and ships as an isabelle-patch-control package (light_locale, local_datatype, dot_syntax, fast_abbrev_printing, ...). Read it before you edit, build or commit in such a feature's Isabelle trees, merge its base, release it, put its trees on a machine, move daily, open a feature, change its base, or upgrade it to a new Isabelle release.
+description: How to work on a patch-based Isabelle feature, one that changes Isabelle's own sources and ships as an isabelle-patch-control package (light_locale, local_datatype, dot_syntax, fast_abbrev_printing, ...). Read it before you edit, build or commit in such a feature's Isabelle trees, merge its bases, release it, put its trees on a machine, move daily, open a feature, change its bases, or upgrade it to a new Isabelle release.
 ---
 
 # Working on a patch-based Isabelle feature
@@ -20,9 +20,9 @@ isabelle-patched:
   only by `make-patches`.
 - `<R>/daily`: the branch the shared tree follows; it follows `<R>/dev_patches` (3.5).
 
-**Base.** Every feature has exactly one *base* on each line: `pristine` or another feature. It is
-recorded as `base =` in the feature repository's `.gitmodules`. The owner decides which features a
-line carries and their bases.
+**Bases.** Every feature has one or more *bases* on each line: `pristine`, or other features (one
+base may also be below another). They are recorded as `base =` in the feature repository's
+`.gitmodules`, separated by spaces. The owner decides which features a line carries and their bases.
 
 **Feature repository.** Each feature has a git repository under MLML's `contrib/` (for example
 `contrib/light_locale`; `contrib/isabelle-base-features` holds several features). It holds the
@@ -33,17 +33,22 @@ submodules:
 |---|---|---|---|
 | shared tree | `contrib/<R>` | `<R>/daily` | the line's build products, which the other trees use; MLML's own tools run the one on `PATH` |
 | private tree | `<feature repository>/worktrees/<R>-<F>` | `<R>/<F>` | the only place you edit, build and commit |
-| stock tree | `<feature repository>/worktrees/<R>-<F>-stock` | detached at the merge base of `<R>/<F>` and its base | the sources without your feature: comparison runs, golden files |
+| stock tree | `<feature repository>/worktrees/<R>-<F>-stock` | detached at the base commit (below) | the sources without your feature: comparison runs, golden files |
 
 A tree's `contrib` is a link to the shared tree's `contrib`: never write through it. `lib/classes` and
 `src/Tools/Demo/lib` are copies. A module jar that a release adds is compiled by Isabelle on the tree's
 first Scala tool run (for example `scalajs_demo.jar`, new in Isabelle2026); nothing fails. Each tree's user
 directory is `~/.isabelle/<directory name>`; heaps live there.
 
-**Base tag.** The base's release tag on the merge base of your branch and the base, that is, on the
-last base commit your branch has merged; there is none when that commit is not a release. Each
-`init.sh` run names it in the `ready:` line of your tree (`release tag <tag>`, or `not a release of
-the base`); by hand, after `git -C <private tree> fetch`:
+**Base tags and the base commit.** For each base, its *base tag* is its release tag on the merge base of
+your branch and that base, that is, on the last commit of that base your branch has merged; there is
+none when that commit is not a release. The *base commit* is that merge base when there is one base;
+with several, it is the commit of your branch whose parents are exactly those merge bases
+(`new-tree --merge` makes it, 3.3), or that commit itself when they are all one commit. Your release's patches are cut against the base commit, and the
+stock tree stands there. Each `init.sh` run names them in the `ready:` line of your tree (the base
+commit's full hash, then for each base `release tag <tag>` or `not a release of the base`);
+`<base commit>` below is that hash, or `git -C <feature repository>/worktrees/<R>-<F>-stock rev-parse
+HEAD`. A base tag by hand, after `git -C <private tree> fetch`:
 
     git -C <private tree> tag --points-at $(git -C <private tree> merge-base origin/<R>/<base> HEAD) --list '<R>/<base>/*'
 
@@ -66,7 +71,7 @@ CLAUDE.md's bans on `git stash`, `git checkout`, `git reset --hard` and `git cle
 - Stage only your own changes, by explicit path. Commit and push only when the owner says so; the
   tools never push. Never amend, squash or rewrite a commit; never rebase, force-push, cherry-pick,
   or `git revert -m` a merge.
-- Take in other work only by: merging your base (3.3); `git pull --ff-only` of your own branch (3.2);
+- Take in other work only by: merging your bases (3.3); `git pull --ff-only` of your own branch (3.2);
   on a newer line, merging the same feature's branch of the older line (3.9). Never merge a newer
   line into an older one.
 - Exception: a shared tree unpacked from a release tarball and not yet a clone holds nobody's work.
@@ -130,24 +135,31 @@ Before you start:
 
 If a pull says it cannot fast-forward, the branch moved on two machines and only a merge commit can
 join them: ask the owner. While a merge of yours in the private tree (3.3, 3.9) waits for its commit,
-pull the private tree after that commit. `init.sh` moves the stock tree when a merge of the base came
+pull the private tree after that commit. `init.sh` moves the stock tree when a merge of a base came
 in. Then edit in the private tree, build on order, commit on order, push on order.
 
-### 3.3 Merging the base
+### 3.3 Merging a base
 
-From an empty `git -C <private tree> status`:
+From an empty `git -C <private tree> status`, for the bases you are told to merge (one `--merge` each):
 
-    git -C <private tree> fetch
-    git -C <private tree> merge --no-commit origin/<R>/<base>
+    isabelle-patch-control new-tree --home <feature repository> --merge <R>/<base> <R>/<F>
+    git -C <private tree> merge --no-commit <the commit it prints>
 
-(A plain `git merge` would commit at once.) Resolve conflicts by editing; build and test on order;
-commit on order; `bash <feature repository>/init.sh`, which moves the stock tree to the new merge
-base; push on order. Until that commit and that `init.sh`, the stock tree stays at the old
-merge base, so comparison runs and golden recordings against the new one come after them; if a test
-cannot pass without them, tell the owner.
+new-tree fetches, takes each base you name at its branch tip and every other base at what your branch
+and those tips already contain, and prints the commit to merge: with one base, the base's tip; with
+several, a commit that merges exactly them, which it makes in the private tree and refuses to make when
+their changes cannot be applied in every order. (A plain `git merge` would commit at once.) Resolve
+conflicts by editing; build and test on order; commit on order; `bash <feature repository>/init.sh`,
+which moves the stock tree to the new base commit; push on order. Until that commit and that
+`init.sh`, the stock tree stays at the old base commit, so comparison runs and golden recordings
+against the new one come after them; if a test cannot pass without them, tell the owner.
 
-You may merge base commits that no release contains yet, but you can release only once there is a
-base tag (section 1).
+You may merge base commits that no release contains yet, but you can release only once each base's
+last merged commit is a release of that base (section 1). With several bases, take a newer release of
+a feature below them, directly or through one base, only once each of your bases built on that feature
+has released on it (check as in 3.4 step 1), and then merge those bases together, in one `new-tree
+--merge <R>/<A> --merge <R>/<C>`: merged one at a time, a base and your branch have two merge bases,
+and new-tree, init.sh and make-patches refuse.
 
 ### 3.4 Releasing a feature (on the owner's order)
 
@@ -157,50 +169,54 @@ empty commit in the private tree, on order:
 
     git -C <private tree> commit --allow-empty -m "<R>/<F>: release <m>"
 
-1. **The base tag** (section 1) must be exactly one tag; it is `<base tag>` in the commands below. If
-   there is none, the last base commit you merged is not a release of the base: tell the owner.
+1. **The base tags** (section 1): each base must have exactly one. If one has none, the last commit of
+   that base you merged is not a release of it: tell the owner. With several bases, run
+   `git -C <private tree> tag --merged <base tag> --list '<R>/*/*'` for each base tag. A feature whose
+   tags appear in two of these lists (a base's own tags included) must have the same highest number in
+   each, because each package pins its bases at one exact version and conda installs one version of a
+   package; otherwise tell the owner.
 2. **The checklist** (RELEASE.md, "Before releasing a feature: why each checklist point matters").
    Each command must print nothing.
    - No file goes back to the bytes of a lower feature's release or of the pristine release
      (deleting a file a lower feature created counts):
 
          for t in $(git -C <private tree> tag --merged HEAD --list '<R>/*/*' | grep -v '^<R>/<F>/'); do
-           for p in $(git -C <private tree> diff-tree -r --no-renames --name-only <base tag> HEAD); do
+           for p in $(git -C <private tree> diff-tree -r --no-renames --name-only <base commit> HEAD); do
              [ "$(git -C <private tree> rev-parse -q --verify "$t:$p")" = "$(git -C <private tree> rev-parse -q --verify "HEAD:$p")" ] && echo "$p equals $t"
            done
          done
 
    - Every hunk's context occurs only once in its file:
 
-         d=$(mktemp -d); git -C <private tree> diff-tree -r -p --no-renames <base tag> HEAD > $d/f.diff
+         d=$(mktemp -d); git -C <private tree> diff-tree -r -p --no-renames <base commit> HEAD > $d/f.diff
          mkdir $d/tree; git -C <private tree> archive HEAD | tar -x -C $d/tree
-         for p in $(git -C <private tree> diff-tree -r --no-renames --name-only <base tag> HEAD); do
+         for p in $(git -C <private tree> diff-tree -r --no-renames --name-only <base commit> HEAD); do
            (cd $d/tree && git apply --check --include="$p" ../f.diff 2>/dev/null) && echo "$p: a hunk applies twice"
          done
          rm -rf $d
 
    - Only regular files, mode 100644 or 100755, and no change of mode:
 
-         git -C <private tree> diff-tree -r --no-renames <base tag> HEAD | awk '$1 !~ /^:(100644|100755|000000)$/ || $2 !~ /^(100644|100755|000000)$/ || ($5 == "M" && $1 != ":" $2)'
+         git -C <private tree> diff-tree -r --no-renames <base commit> HEAD | awk '$1 !~ /^:(100644|100755|000000)$/ || $2 !~ /^(100644|100755|000000)$/ || ($5 == "M" && $1 != ":" $2)'
 
    - `etc/ISABELLE_ID` is unchanged:
 
-         git -C <private tree> diff-tree -r --name-only <base tag> HEAD | grep -x etc/ISABELLE_ID
+         git -C <private tree> diff-tree -r --name-only <base commit> HEAD | grep -x etc/ISABELLE_ID
 
    - Every patch file's path stays within 198 characters on Windows (`<package name>`: `isabelle-`
      plus `<F>` with `_` as `-`, but `qiyuan-dev-patches` for dev_patches; `<prefix>`: `<R>` with
      `-` as `_`; `<Y>.<k>`: the first two numbers of the package version, `2026.0` for Isabelle2026,
      `2025.2` for Isabelle2025-2):
 
-         git -C <private tree> diff-tree -r --no-renames --name-only <base tag> HEAD | sed 's,/,-,g' |
+         git -C <private tree> diff-tree -r --no-renames --name-only <base commit> HEAD | sed 's,/,-,g' |
            awk -v pre='<package name>-<Y>.<k>.99-<prefix>_99/share/isabelle_patch_control/features.d/<F>/' 'length(pre $0 ".patch") > 198'
 
 3. **The package directory.** A release first adds the files of 3.6 step 4 that `<package dir>`
    lacks (new files: on order). Then bring the two lists up to date and commit them in the feature
    repository on order:
 
-       git -C <private tree> diff-tree -r --no-renames --name-only <base tag> HEAD > <package dir>/tools/patched_files.txt
-       isabelle-patch-control check-signatures -C <private tree> <base tag> HEAD <package dir>/tools/signature_additions.txt
+       git -C <private tree> diff-tree -r --no-renames --name-only <base commit> HEAD > <package dir>/tools/patched_files.txt
+       isabelle-patch-control check-signatures -C <private tree> <base commit> HEAD <package dir>/tools/signature_additions.txt
 
    Correct `signature_additions.txt` until `check-signatures` exits 0. Formats: RELEASE.md,
    "First-time setup of a feature repository".
@@ -229,8 +245,9 @@ empty commit in the private tree, on order:
    Rerun it after a failure.
 6. **Push**, on order: `git -C <private tree> push origin <R>/<F> <R>/<F>/<m>` and
    `git -C <feature repository> push origin main <R>/<F>/<m>`.
-7. **The features on this one:** `grep -l 'base = <R>/<F>$' contrib/*/.gitmodules`. Tell the owner;
-   each of them merges this release (3.3) and is released in turn, in its own private tree.
+7. **The features on this one:** `grep -lE 'base = (.* )?<R>/<F>( |$)' contrib/*/.gitmodules`. Tell the owner;
+   each of them merges this release (3.3) and is released in turn, in its own private tree, in the
+   order 3.3 states.
 8. **Publishing to the conda channel**, on order. Before the first dispatch, run the check of the
    SKILL conda-release, "4. Before: check where the workflows download from", on the patch tool's
    checkout, `contrib/my_better_isabelle_prover` (it holds `release-features.yml`; a feature
@@ -256,7 +273,8 @@ empty commit in the private tree, on order:
 
 1. The owner creates the GitHub repository; clone it as `<feature repository>`, directly in `contrib/`
    next to `contrib/<R>` (new-tree looks for the shared tree there).
-2. `isabelle-patch-control new-tree --home <feature repository> --base <R>/<base> <R>/<F>`
+2. `isabelle-patch-control new-tree --home <feature repository> --base <R>/<base> <R>/<F>`, with one
+   `--base` for each base; with several, the new branch starts at a commit that merges their tips.
 3. Push the new branch on order: `git -C <private tree> push -u origin <R>/<F>`. Ask for that order
    at once: features opened on this one, and other machines, need the branch on GitHub.
 4. Add the files the first release needs: `init.sh` (the two lines `#!/usr/bin/env bash` and
@@ -275,22 +293,23 @@ empty commit in the private tree, on order:
    (new-tree has staged `.gitmodules` and the two trees), then push the feature repository on order.
 6. Registering in MLML, on order: `git submodule add -f <url> <feature repository>`.
 
-### 3.7 Changing a feature's base (on the owner's order)
+### 3.7 Changing a feature's bases (on the owner's order)
 
 Example: a new feature N goes between A and the feature F that is built on A. N is opened on A (3.6);
 then F's base changes from A to N.
-1. Check that the new base contains everything of the old base that F has merged: in F's private
-   tree, `git fetch`, then `git merge-base --is-ancestor $(git merge-base origin/<R>/<old base> HEAD)
-   origin/<R>/<new base>` must exit 0. Otherwise F's branch keeps commits of the old base that the new
-   base lacks, F's release patches would carry them, and `make-patches` does not notice: ask the
+1. Check that the new bases contain everything of each old base that F has merged: in F's private
+   tree, `git fetch`, then, for each old base that is not a new base,
+   `git merge-base --is-ancestor $(git merge-base origin/<R>/<old base> HEAD) origin/<R>/<new base>`
+   must exit 0 for one of the new bases. Otherwise F's branch keeps commits of the old base that the new
+   bases lack, F's release patches would carry them, and `make-patches` does not notice: ask the
    owner.
-2. In F's feature repository: `git config -f .gitmodules submodule.worktrees/<R>-<F>.base <R>/<new
-   base>`; commit `.gitmodules` on order; push on order.
-3. Merge the new base into F's private tree as in 3.3. F can be released only once the last merged
-   commit of N is a release of N.
-4. Rerun `<feature repository>/init.sh`: the stock tree moves to the new merge base.
+2. In F's feature repository: `git config -f .gitmodules submodule.worktrees/<R>-<F>.base "<R>/<base>
+   ..."` (the new bases, separated by spaces); commit `.gitmodules` on order; push on order.
+3. Merge the new bases into F's private tree as in 3.3. F can be released only once the last merged
+   commit of each base is a release of it.
+4. Rerun `<feature repository>/init.sh`: the stock tree moves to the new base commit.
 
-F's next release depends on N's package, through the base tag that `make-patches` records.
+F's next release depends on N's package, through the base tags that `make-patches` records.
 
 ### 3.8 A new Isabelle release: the foundation (on the owner's order, once per release)
 
@@ -325,27 +344,29 @@ is new branches in isabelle-patched. Other machines get `contrib/<R2>` by 3.1.
 ### 3.9 Upgrading a feature to a new Isabelle release
 
 Each feature's agent does this for its feature, a base before the features on it. Before you start,
-the foundation (3.8) exists, and your base on the new line has its `<R2>` branch on GitHub.
-1. `isabelle-patch-control new-tree --home <feature repository> --base <R2>/<base> <R2>/<F>`
+the foundation (3.8) exists, and each of your bases on the new line has its `<R2>` branch on GitHub.
+1. `isabelle-patch-control new-tree --home <feature repository> --base <R2>/<base> <R2>/<F>`, with one
+   `--base` for each base.
 2. Push the new branch on order, and ask for that order at once:
    `git -C <feature repository>/worktrees/<R2>-<F> push -u origin <R2>/<F>`.
 3. The registration commit, on order: `git -C <feature repository> commit -- .gitmodules
    worktrees/<R2>-<F> worktrees/<R2>-<F>-stock`; push the feature repository on order.
 4. Bring your work over; decide with the owner:
-   - **Merge the old line's branch.** Wait until, after `git fetch`, `git merge-base --is-ancestor
-     origin/<R>/<base> origin/<R2>/<base>` exits 0 (your base's `<R2>` branch has merged its old
-     line's branch and been pushed; true at once for `pristine`), or `git tag --list '<R2>/<base>/*'`
-     prints a tag (your base was implemented afresh and has released on the new line). Then, in your
-     private tree on the new line: merge `origin/<R2>/<base>` as in 3.3 (a fast-forward, with nothing
-     to commit, while `<R2>/<F>` has no commit of its own; run `bash <feature repository>/init.sh`
-     right after it); then
+   - **Merge the old line's branch.** Wait until, for each base, after `git fetch`, `git merge-base
+     --is-ancestor origin/<R>/<base> origin/<R2>/<base>` exits 0 (the base's `<R2>` branch has merged
+     its old line's branch and been pushed; true at once for `pristine`), or `git tag --list
+     '<R2>/<base>/*'` prints a tag (the base was implemented afresh and has released on the new line). Then, in your
+     private tree on the new line: merge your bases as in 3.3 (with one base a fast-forward, with
+     nothing to commit, while `<R2>/<F>` has no commit of its own; with several, the new branch starts
+     at a merge of the bases, so merging a base that moved since is a real merge, committed on order;
+     run `bash <feature repository>/init.sh` right after it); then
      `git merge --no-commit origin/<R>/<F>`. In the other order there are two merge bases, and new-tree
      and make-patches refuse. The merge brings your old-line work, plus any old-line work below it that
-     your base's `<R2>` branch does not contain. Remove by editing what the new line does not carry;
+     your bases' `<R2>` branches do not contain. Remove by editing what the new line does not carry;
      `make-patches` does not notice what is left. `git diff --cached --stat` shows what came in.
    - **Or implement the feature afresh** on the new line.
 5. Build and test on order; commit on order; push on order.
-6. Release by 3.4 once your base has released on the new line.
+6. Release by 3.4 once your bases have released on the new line.
 
 Later fixes of the old line come over by the same merge.
 

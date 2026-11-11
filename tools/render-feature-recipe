@@ -36,7 +36,7 @@ from isabelle_patch_control.features import provenance_fields
 
 HOOKS = TOOLS_DIR.parent / "isabelle_patch_control" / "hooks"
 COMMON_README = TOOLS_DIR.parent / "common-readme.md"
-TOOL_PIN = "isabelle-patch-control >=1.0,<2"
+TOOL_PIN = "isabelle-patch-control >=1.1,<2"            # 1.1: several base tags
 NAME = re.compile(r"^[A-Za-z0-9._-]+$")
 BAT_META = re.compile(r"[<>|&^%]")
 

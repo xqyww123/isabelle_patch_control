@@ -73,9 +73,9 @@ def ships_component(index: dict, files) -> bool:
 
 
 def direct_dependencies(provenance: dict[str, str]) -> list[str]:
-    """The release tags a release tag is directly built on, from its provenance fields: its base_tag,
-    unless that is a pristine tag."""
-    return [] if provenance["base_tag"].split("/")[1] == "pristine" else [provenance["base_tag"]]
+    """The release tags a release tag is directly built on, from its provenance fields: its base tags,
+    without a pristine tag."""
+    return [t for t in provenance["base_tag"].split() if t.split("/")[1] != "pristine"]
 
 
 def entries(bases: dict[str, list[str]]) -> dict[str, list[str]]:
