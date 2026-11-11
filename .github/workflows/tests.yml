@@ -4,7 +4,7 @@
 # toy-channel, tools/tests/toy-channel.sh with the release's own rattler-build, two release lines in
 # one channel (Isabelle2025-2, whose batch has two environments, and Isabelle2026, whose only isabelle
 # build, 0, is pristine); hooks, the hook-layer test with real conda; accept and accept-2026,
-# tools/accept on that channel in each environment of each line's batch on the five legs, through
+# tools/accept on that channel in each environment of each line's batch on the three legs, through
 # accept.yml, the release's own accept job; smoke, the README's install command of each environment
 # of the Isabelle2025-2 batch through smoke.yml, the release's own smoke job: t_three's command installs
 # the newer Isabelle2026 line, as users get it, so both lines are smoke-tested.

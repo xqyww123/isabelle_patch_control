@@ -221,9 +221,9 @@ empty commit in the private tree, on order:
    - The feature packages of that environment are installed there, so Isabelle already knows every
      session they ship as an Isabelle component; give a `-d` for such a session only when Isabelle does
      not know it yet: `dirs=; "$ISABELLE" sessions <session> >/dev/null 2>&1 || dirs="-d ."`.
-   - macOS has Apple's bash 3.2 and BSD tools, Windows Git Bash (`$ISABELLE` is `isabelle.bat`), and
-     the machines are slow (HOL takes about an hour on GitHub's macOS runners): give session `timeout`s
-     and ML `Timeout.apply` room, for example with `-o timeout_scale=<n>`.
+   - It runs on Linux (x86_64 and arm64) and Windows, not on macOS. Windows has Git Bash (`$ISABELLE`
+     is `isabelle.bat`), and the machines are slow: give session `timeout`s and ML `Timeout.apply`
+     room, for example with `-o timeout_scale=<n>`.
 5. **Release:** `isabelle-patch-control make-patches -C <private tree> --package <package dir> <F> <m>`
    (`<m>` = 1 for the first release on the line, then 2, 3, …).
    Rerun it after a failure.

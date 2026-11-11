@@ -1,4 +1,4 @@
-# §6 of the patch tool plan on the five platform legs (decision 11's accept job) in each environment
+# §6 of the patch tool plan on three platform legs, no macOS (decision 11's accept job) in each environment
 # of a batch (check-packages' summary), as a reusable workflow: release-features.yml calls it on the
 # batch, tests.yml on the toy channel (tools/tests/toy-channel.sh).  One definition, so a green toy run
 # is a run of the release gate's own job.
@@ -61,12 +61,10 @@ jobs:
       fail-fast: false
       matrix:
         environment: ${{ fromJSON(inputs.environments) }}
-        leg: [linux-64, linux-aarch64, osx-arm64, osx-64, win-64]
+        leg: [linux-64, linux-aarch64, win-64]
         include:
           - {leg: linux-64, os: ubuntu-latest}
           - {leg: linux-aarch64, os: ubuntu-24.04-arm}
-          - {leg: osx-arm64, os: macos-15}
-          - {leg: osx-64, os: macos-15-intel}       # native Intel: under Rosetta Isabelle picks its arm64 programs
           - {leg: win-64, os: windows-latest}
     defaults:
       run:

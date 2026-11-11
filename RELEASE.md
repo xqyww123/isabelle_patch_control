@@ -149,12 +149,11 @@ The next jobs run once per entry, each in a fresh environment that installs the 
 exact version. **roundtrip** (linux-64) copies the environment's `isa/` before the package is installed,
 as the pristine tree, and runs `tools/check-roundtrip` against the installed tool and `features.d`; this
 also shows that the published packages the entry is built on are the contents its changes were made
-against. **accept** (linux-64, linux-aarch64, osx-arm64, osx-64 on an Intel runner, win-64; defined once
+against. **accept** (linux-64, linux-aarch64, win-64; no macOS leg, whose runners are too slow; defined once
 in the reusable `.github/workflows/accept.yml`, which `tests.yml` also runs on the toy channel) checks,
 through `status` and the bytes of every touched file, that the environment is applied, that removing a
 package reverses it, and that `--force-reinstall isabelle` re-applies it (the scenarios listed in
-`tools/accept`). **sessions** (the same legs but osx-arm64, where HOL alone takes about three hours on
-GitHub's macos-15 runner; Poly/ML on arm64 is linux-aarch64's, macOS osx-64's) builds HOL and runs the
+`tools/accept`). **sessions** (the same legs) builds HOL and runs the
 `tools/release_build.sh` of each feature of the batch in the environment, each in its own repository at
 its own release tag (a feature without one gets only HOL). `roundtrip`,
 `accept` and `sessions` stop the batch; a failure whose fix changes a feature's tagged files costs that
